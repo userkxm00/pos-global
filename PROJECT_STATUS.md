@@ -1,10 +1,16 @@
 # POS Global — Project Status
 
-> Internal working name: POS Global. Brand name remains unconfirmed pending trademark/domain screening.
+> Internal working name: POS Global. Proposed product brand: **Zylo**, pending trademark/domain screening and final commercial approval.
 
 ## Current state
 
-The repository is in **Foundation Gate**. The goal is to build a commercial, offline-first, multi-industry POS platform rather than repeat the architectural mistakes of Mellah-POS-V2.
+The repository is in **Foundation Verification**. The agent-executable blueprint is designed, and the remaining work before merge is evidence-based verification of the foundation itself.
+
+### Readiness state
+
+`FOUNDATION_DESIGNED` → **verification in progress** → `FOUNDATION_VERIFIED` → `AGENT_IMPLEMENTATION_READY`.
+
+The project must not be treated as `AGENT_IMPLEMENTATION_READY` until the exact head commit has green evidence in `FOUNDATION_EVIDENCE.md`.
 
 ### Architecture decisions
 - Desktop: Tauri 2 + Rust.
@@ -18,8 +24,16 @@ The repository is in **Foundation Gate**. The goal is to build a commercial, off
 - Updates: signed Tauri updates distributed through GitHub Releases/Actions.
 - License signing and update signing use separate private keys.
 
+## Foundation verification history
+
+A prior CI run proved the frontend build but the Rust job failed during Tauri context generation because the expected application icon was absent. The foundation now includes a deterministic SVG icon source and CI generates the required Tauri icon set before Rust verification. This is a foundation-build repair, not an excuse to mark the previous failure as passed.
+
+The current commit must receive a new green CI result before the Foundation Gate can be closed.
+
 ## Not yet production-ready
+
 Core business modules, full RLS policies, cloud sync implementation, license server, billing website, hardware adapters, complete reporting, E2E testing, code signing and production deployment still require implementation and evidence.
 
 ## Evidence rule
-A feature is not considered Done because code exists. It is Done only when implementation, tests, migration checks, failure-path checks, and acceptance evidence exist for its scope.
+
+A feature is not considered Done because code exists. It is Done only when implementation, tests, migration checks, failure-path checks, security checks, and acceptance evidence exist for its scope.
