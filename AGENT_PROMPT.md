@@ -12,6 +12,8 @@ Before touching code, read:
 - `SCHEMA.md`
 - `DATABASE_RULES.md`
 - `DOMAIN_CONTRACTS.md`
+- `PHASE_0_5_DOMAIN_FINALIZATION.md`
+- `PHASE_0_6_COMMERCIAL_REGULATORY_FINALIZATION.md`
 - `SECURITY_MODEL.md`
 - `SYNC_SPEC.md`
 - `PRODUCT_SPEC.md`
@@ -23,6 +25,18 @@ Before touching code, read:
 - `PROJECT_STATUS.md`
 
 Then inspect the actual repository. Never assume the files describe code that does not exist.
+
+## Mandatory pre-implementation gates
+
+Do not begin a Phase 1+ implementation task until the corresponding Phase 0/0.5/0.6/0.7 gates are recorded as passed.
+
+For a task involving money, tax, costing, pricing, payments, refunds, exchanges, cash, debt, loyalty, inventory, sync, licensing, hardware, provider integrations, or regulation:
+
+1. Read the relevant contract/spec.
+2. Check whether the exact rule is already decided.
+3. If decided, implement it exactly.
+4. If provider/jurisdiction dependent, use the approved adapter contract and the approved research package.
+5. If a critical decision is missing, STOP and mark the task BLOCKED/DECISION REQUIRED. Do not guess.
 
 ## Operating mode
 
@@ -51,6 +65,24 @@ Then inspect the actual repository. Never assume the files describe code that do
 - Applied migrations are immutable.
 - History is corrected by compensating transactions.
 - Tests are evidence, not decoration.
+- Tax rates/rules are jurisdiction data with effective dates, not global constants.
+- Costing is determined by the approved costing policy and historical cost state, never by the product's current cost field alone.
+- Provider-specific code stays behind an adapter boundary.
+- Financial/stock sync conflicts are never resolved with naive last-write-wins.
+- Regulatory claims require authoritative evidence.
+
+## Decision hierarchy
+
+Use this order of authority:
+
+1. explicit repository contracts/specifications;
+2. approved ADRs;
+3. approved jurisdiction/provider research packages;
+4. task acceptance criteria;
+5. established architecture conventions;
+6. implementation judgment only for non-critical details.
+
+Never use general web knowledge to override an explicit project decision.
 
 ## When requirements are unclear
 
@@ -59,8 +91,9 @@ Do not invent a major behavior. Classify the uncertainty:
 - implementation detail → choose the simplest architecture-compatible solution;
 - business rule → create an ADR/task clarification;
 - security/financial rule → STOP and require an explicit decision;
+- regulatory rule → STOP and require an authoritative source/research package;
 - schema change → STOP, review migration impact, then add an append-only migration;
-- external provider decision → record a provider-neutral interface and defer selection if permitted.
+- external provider decision → implement/use the provider-neutral interface and defer provider selection if the commercial gate has not approved one.
 
 ## When tests fail
 
@@ -82,10 +115,11 @@ FILES: <files>
 MIGRATIONS: <none/list>
 TESTS: <commands + result>
 SECURITY: <impact>
+EVIDENCE: <links/commands/artifacts>
 KNOWN_LIMITATIONS: <none/list>
 NEXT_TASK: <ID>
 ```
 
 ## Final instruction
 
-Build carefully, verify honestly, preserve architectural consistency, and leave the repository in a better state than you found it. Never trade correctness for speed.
+Build carefully, verify honestly, preserve architectural consistency, and leave the repository in a better state than you found it. Never trade correctness for speed. If a critical domain, commercial, provider, jurisdiction, security or regulatory decision is not approved, stop instead of inventing it.
