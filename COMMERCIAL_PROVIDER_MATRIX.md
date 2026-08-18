@@ -5,12 +5,12 @@ Last reviewed: 2026-08-17
 
 ## 1. SaaS subscription billing
 
-| Provider | Role | Strength | Important constraint | Decision |
+| Provider | Role | Strength | Current evidence/constraint | Decision |
 |---|---|---|---|---|
-| Paddle | Merchant of Record / SaaS billing | Global digital-product tax, billing, checkout, subscriptions | Seller eligibility, product eligibility, fees and exact availability must be verified for our company/entity | **Primary candidate** |
-| Stripe | Payment/billing infrastructure | Mature APIs, broad payment methods, strong ecosystem | Current supported-business-country list does not include Algeria; merchant entity eligibility matters | **Secondary candidate / provider adapter** |
+| Paddle | Merchant of Record / SaaS billing | Digital-product billing, subscriptions, checkout and tax/compliance handling | Paddle's current supported-country documentation does not list Algeria among unsupported supplier countries, and its documentation explicitly includes Algeria in supported country data. Seller/entity onboarding and product eligibility still require final confirmation. | **Primary candidate** |
+| Stripe | Payment/billing infrastructure | Mature APIs, broad payment methods, strong ecosystem | Stripe's current supported-business-country list does not include Algeria, while France and many EU countries are supported. Eligibility depends on the actual merchant entity. | **Secondary adapter candidate** |
 
-Paddle publicly describes itself as Merchant of Record for digital products and says it handles tax collection/remittance across supported jurisdictions. Stripe's public global availability list currently includes France and many other countries but not Algeria as a directly supported business country.
+Paddle publicly describes itself as Merchant of Record for digital products and states that it calculates, collects and remits taxes for supported transactions. Stripe publicly lists its supported business countries/regions and currently does not list Algeria as a directly supported business country.
 
 ## 2. Architectural rule
 
@@ -66,6 +66,6 @@ These must remain separate abstractions and separate provider decisions.
 
 Build the architecture provider-neutral now.
 
-For Zylo's own website subscription billing, investigate Paddle first because its Merchant-of-Record model can reduce the global digital-tax/compliance surface. Confirm eligibility and legal terms before production.
+For Zylo's own website subscription billing, investigate Paddle first because its Merchant-of-Record model can reduce the global digital-tax/compliance surface. Confirm seller eligibility, fees, payout/banking and legal terms before production.
 
 For POS customer payments, implement cash and manual/credit flows first, then add card-terminal/payment-provider adapters per launch market. Do not assume Stripe availability for an Algerian merchant entity.
