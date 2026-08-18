@@ -3,10 +3,22 @@ use std::path::Path;
 
 const MIGRATIONS: &[(&str, &str)] = &[
     ("001_initial", include_str!("migrations/001_initial.sql")),
-    ("002_sync_and_suppliers", include_str!("migrations/002_sync_and_suppliers.sql")),
-    ("003_global_commerce_foundation", include_str!("migrations/003_global_commerce_foundation.sql")),
-    ("004_exact_money_and_identity", include_str!("migrations/004_exact_money_and_identity.sql")),
-    ("005_tenancy_and_financial_hardening", include_str!("migrations/005_tenancy_and_financial_hardening.sql")),
+    (
+        "002_sync_and_suppliers",
+        include_str!("migrations/002_sync_and_suppliers.sql"),
+    ),
+    (
+        "003_global_commerce_foundation",
+        include_str!("migrations/003_global_commerce_foundation.sql"),
+    ),
+    (
+        "004_exact_money_and_identity",
+        include_str!("migrations/004_exact_money_and_identity.sql"),
+    ),
+    (
+        "005_tenancy_and_financial_hardening",
+        include_str!("migrations/005_tenancy_and_financial_hardening.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {
