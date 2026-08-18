@@ -216,6 +216,7 @@ Tasks are intentionally granular. An agent must not skip a gate to reach a later
 - F12.06 staged releases
 - F12.07 rollback/recovery
 - F12.08 release notes
+- F12.09 commit production package lockfiles and enforce locked CI installs
 
 ## Phase 13 — Hardening
 
