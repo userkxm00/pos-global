@@ -56,7 +56,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -nE 'BEGIN (RSA|EC|OPENSSH|DSA|PRIVATE) KEY|sk_live_[A-Za-z0-9]+|service_role[[:space:]]*[:=]|SUPABASE_SERVICE_ROLE_KEY[[:space:]]*=' -- ':!node_modules' ':!target'; then
+          if git grep -nE 'BEGIN (RSA|EC|OPENSSH|DSA|PRIVATE) KEY|sk_live_[A-Za-z0-9]+|SUPABASE_(SERVICE_ROLE_KEY|SECRET_KEY|DATABASE_PASSWORD)[[:space:]]*=[[:space:]]*[^#[:space:]]+' -- ':!.env.example' ':!node_modules' ':!target'; then
             echo 'Potential secret detected. Remove it or move it to protected secret storage.'
             exit 1
           fi
