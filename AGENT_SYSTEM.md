@@ -3,7 +3,13 @@
 > Status: **mandatory execution contract**
 > Audience: autonomous coding agents, coding assistants, reviewers, and future maintainers.
 >
-> This file governs *how* an agent works. `ARCHITECTURE.md` governs *what architecture is allowed*. `EXECUTION_PLAN.md` governs *what gets built and in what order*.
+> This file governs *how* an agent works. `ARCHITECTURE.md` governs *what architecture is allowed*. `EXECUTION_PLAN.md` governs *what gets built and in what order*. `FOUNDATION_READINESS_STATES.md` defines what “ready” means.
+
+## 0. Readiness preflight
+
+Before implementation begins, verify the repository is at least `AGENT_IMPLEMENTATION_READY` according to `FOUNDATION_READINESS_STATES.md` and the Foundation Evidence Contract.
+
+If the repository is only `FOUNDATION_DESIGNED`, or evidence is stale/queued/failed, the agent must not start product implementation. It may only perform foundation repair/verification tasks explicitly authorized by the current backlog.
 
 ## 1. Mission
 
@@ -31,14 +37,15 @@ Before every task:
 1. Read `AGENT_SYSTEM.md`.
 2. Read `PROJECT_STATUS.md`.
 3. Read `ARCHITECTURE.md`.
-4. Read the relevant phase in `EXECUTION_PLAN.md`.
-5. Read `DOMAIN_CONTRACTS.md` for the affected domain.
-6. Read `DATABASE_RULES.md` if storage is affected.
-7. Read `SECURITY_MODEL.md` if authentication, authorization, secrets, licensing, sync, or privileged APIs are affected.
-8. Inspect git status, current branch, recent commits, and the existing implementation.
-9. Identify the exact task ID and acceptance criteria.
-10. Confirm dependencies and files allowed to change.
-11. Only then implement.
+4. Read `FOUNDATION_READINESS_STATES.md` when checking a gate.
+5. Read the relevant phase in `EXECUTION_PLAN.md`.
+6. Read `DOMAIN_CONTRACTS.md` for the affected domain.
+7. Read `DATABASE_RULES.md` if storage is affected.
+8. Read `SECURITY_MODEL.md` if authentication, authorization, secrets, licensing, sync, or privileged APIs are affected.
+9. Inspect git status, current branch, recent commits, and the existing implementation.
+10. Identify the exact task ID and acceptance criteria.
+11. Confirm dependencies and files allowed to change.
+12. Only then implement.
 
 ## 4. Task boundaries
 
