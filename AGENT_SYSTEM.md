@@ -2,8 +2,9 @@
 
 > Status: **mandatory execution contract**
 > Audience: autonomous coding agents, coding assistants, reviewers, and future maintainers.
+> This document is the **agent operating system** for POS Global.
 >
-> This file governs *how* an agent works. `ARCHITECTURE.md` governs *what architecture is allowed*. `EXECUTION_PLAN.md` governs *what gets built and in what order*. `FOUNDATION_READINESS_STATES.md` defines what “ready” means.
+> This file governs *how* an agent works. `ARCHITECTURE.md` governs *what architecture is allowed*. `EXECUTION_PLAN.md` governs *what gets built and in what order*. `FOUNDATION_READINESS_STATES.md` defines what “ready” means, and `DEFINITION_OF_READY.md` defines the Definition of Ready for tasks.
 
 ## 0. Readiness preflight
 
