@@ -15,6 +15,53 @@ Tasks are intentionally granular. An agent must not skip a gate to reach a later
 - F0.09 Foundation Gate review
 - F0.10 merge Foundation/v2 to main
 
+## Phase 0.5 — Domain Finalization
+
+- F0.5.01 freeze money, currency and rounding rules
+- F0.5.02 freeze quantity, unit and conversion rules
+- F0.5.03 freeze inventory costing strategy and costing interface
+- F0.5.04 freeze tax engine contract and jurisdiction model
+- F0.5.05 freeze pricing, discounts and promotion semantics
+- F0.5.06 freeze payment abstraction and reconciliation semantics
+- F0.5.07 freeze refund and exchange semantics
+- F0.5.08 freeze cash ledger and shift semantics
+- F0.5.09 freeze customer debt ledger semantics
+- F0.5.10 freeze loyalty ledger semantics
+- F0.5.11 freeze sync conflict matrix by aggregate
+- F0.5.12 freeze hardware abstraction contracts
+- F0.5.13 freeze industry capability taxonomy
+- F0.5.14 freeze license/entitlement boundary
+- F0.5.15 write ADRs for unresolved critical decisions
+- F0.5.16 Domain Finalization Gate review
+
+## Phase 0.6 — Commercial & Regulatory Finalization
+
+- F0.6.01 freeze license/business model
+- F0.6.02 define entitlement and plan model
+- F0.6.03 evaluate SaaS billing providers and seller eligibility
+- F0.6.04 freeze billing-provider abstraction
+- F0.6.05 evaluate POS payment-provider strategy by launch market
+- F0.6.06 define Algeria regulatory adapter research package
+- F0.6.07 define France/EU regulatory adapter scope
+- F0.6.08 define jurisdiction metadata/source/effective-date model
+- F0.6.09 define regulated-industry launch policy
+- F0.6.10 freeze website commercial lifecycle
+- F0.6.11 document regulatory evidence and review policy
+- F0.6.12 Commercial & Regulatory Gate review
+
+## Phase 0.7 — Agent Readiness
+
+- F0.7.01 verify AGENT_SYSTEM
+- F0.7.02 verify master/planner/implementer/reviewer prompts
+- F0.7.03 verify granular backlog and task IDs
+- F0.7.04 verify Definition of Ready/Done
+- F0.7.05 verify ADR protocol
+- F0.7.06 verify evidence protocol
+- F0.7.07 verify golden E2E flows
+- F0.7.08 verify acceptance matrix
+- F0.7.09 verify persistent agent state
+- F0.7.10 Agent Readiness Gate review
+
 ## Phase 1 — Identity & tenancy
 
 - F1.01 organization model
