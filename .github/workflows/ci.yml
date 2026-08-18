@@ -72,3 +72,44 @@ jobs:
           python-version: '3.x'
       - name: Validate foundation specifications
         run: python .github/scripts/validate_foundation.py
+
+  foundation-gate-evidence:
+    name: Foundation gate evidence
+    needs: [frontend, rust, secret-scan, foundation-validation]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify required gate jobs succeeded
+        env:
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          SECRET_RESULT: ${{ needs.secret-scan.result }}
+          SPEC_RESULT: ${{ needs.foundation-validation.result }}
+        run: |
+          set -euo pipefail
+          printf 'frontend=%s\nrust=%s\nsecret-scan=%s\nfoundation-validation=%s\n' \
+            "$FRONTEND_RESULT" "$RUST_RESULT" "$SECRET_RESULT" "$SPEC_RESULT"
+          test "$FRONTEND_RESULT" = success
+          test "$RUST_RESULT" = success
+          test "$SECRET_RESULT" = success
+          test "$SPEC_RESULT" = success
+      - name: Emit exact-head evidence
+        run: python .github/scripts/emit_foundation_evidence.py
+      - name: Upload exact-head evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-gate-evidence-${{ github.sha }}
+          path: foundation-evidence.json
+          if-no-files-found: error
+      - name: Publish verification summary
+        run: |
+          {
+            echo '## Foundation Gate Evidence'
+            echo
+            echo "Exact commit: \`${GITHUB_SHA}\`"
+            echo "Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo 'All mandatory automated foundation jobs completed successfully.'
+            echo 'The uploaded artifact is the authoritative exact-head machine evidence for this run.'
+          } >> "$GITHUB_STEP_SUMMARY"
