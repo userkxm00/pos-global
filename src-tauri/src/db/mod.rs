@@ -17,7 +17,8 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ),
     (
         "005_tenancy_and_financial_hardening",
-        include_str!("migrations/005_tenancy_and_financial_hardening.sql")),
+        include_str!("migrations/005_tenancy_and_financial_hardening.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {
@@ -108,7 +109,7 @@ mod tests {
         let capability_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM capabilities", [], |row| row.get(0))
             .expect("seeded capabilities should remain queryable");
-        assert_eq!(capability_count, 25);
+        assert_eq!(capability_count, 26);
     }
 
     #[test]
