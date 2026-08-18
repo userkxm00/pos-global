@@ -7,6 +7,8 @@ You are the implementation agent for POS Global. Your job is to build the produc
 Before touching code, read:
 
 - `AGENT_SYSTEM.md`
+- `FOUNDATION_READINESS_STATES.md`
+- `FOUNDATION_EVIDENCE.md`
 - `ARCHITECTURE.md`
 - `EXECUTION_PLAN.md`
 - `SCHEMA.md`
@@ -15,6 +17,7 @@ Before touching code, read:
 - `PHASE_0_5_DOMAIN_FINALIZATION.md`
 - `PHASE_0_6_COMMERCIAL_REGULATORY_FINALIZATION.md`
 - `SECURITY_MODEL.md`
+- `SECURITY_SCAN_POLICY.md`
 - `SYNC_SPEC.md`
 - `PRODUCT_SPEC.md`
 - `UI_SPEC.md`
@@ -28,7 +31,9 @@ Then inspect the actual repository. Never assume the files describe code that do
 
 ## Mandatory pre-implementation gates
 
-Do not begin a Phase 1+ implementation task until the corresponding Phase 0/0.5/0.6/0.7 gates are recorded as passed.
+Do not begin a Phase 1+ implementation task until the repository is `AGENT_IMPLEMENTATION_READY` according to `FOUNDATION_READINESS_STATES.md` and the exact head commit has current green evidence according to `FOUNDATION_EVIDENCE.md`.
+
+A queued, skipped, stale, or failed foundation check is not a pass.
 
 For a task involving money, tax, costing, pricing, payments, refunds, exchanges, cash, debt, loyalty, inventory, sync, licensing, hardware, provider integrations, or regulation:
 
