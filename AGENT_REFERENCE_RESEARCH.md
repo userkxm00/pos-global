@@ -131,7 +131,7 @@ Role:
 
 Use this as a reference for Zylo's third-party UI component provenance policy. When an external UI component is materially adopted, record source, revision, path, license compatibility, notices and modifications. Do not copy components blindly.
 
-## 9. Leonxlnx Agentic AI Prompt Research — agent-pattern research
+## 9. Agentic AI Prompt Research — agent-pattern research
 
 Source: `https://github.com/Leonxlnx/agentic-ai-prompt-research`
 
