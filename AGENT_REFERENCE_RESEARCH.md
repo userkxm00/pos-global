@@ -87,6 +87,62 @@ Role:
 
 Use as an operational tooling reference only; do not copy service-specific implementations.
 
+## 6. Kimi Code Desktop — desktop coding-agent product reference
+
+Source: `https://github.com/Leonxlnx/kimi-code-desktop`
+
+Role:
+- resumable project/chat UX;
+- Git-centric project workflows;
+- terminal + local preview integration;
+- skills and subagent UX;
+- secure local orchestration boundaries;
+- configurable density/theme/accessibility behavior;
+- signed in-app update UX;
+- deterministic local verification commands;
+- release/update evidence patterns.
+
+Use when reviewing the agent-development environment, not as a POS runtime dependency. Do not copy Kimi-specific product logic or credentials handling into Zylo without an explicit task/ADR.
+
+## 7. Stitch Agent Skills — UI/design workflow reference
+
+Source: `https://github.com/Leonxlnx/stitch-skills`
+
+Role:
+- design-to-implementation workflows;
+- prompt enhancement for UI generation;
+- `DESIGN.md` design-system synthesis;
+- React component conversion patterns;
+- design-token consistency validation;
+- shadcn/ui integration guidance.
+
+Use for UI/design tasks when a Stitch-based workflow is explicitly selected. It must remain subordinate to `UI_SPEC.md`, `AGENT_EXTERNAL_SKILLS.md`, accessibility, RTL/i18n and POS keyboard-first requirements.
+
+## 8. Taste Blocks — UI component provenance and licensing reference
+
+Source: `https://github.com/Leonxlnx/taste-blocks`
+
+Role:
+- component registry/provenance patterns;
+- exact source/revision/path tracking;
+- license and third-party-notice tracking;
+- modification records;
+- registry/build verification discipline.
+
+Use this as a reference for Zylo's third-party UI component provenance policy. When an external UI component is materially adopted, record source, revision, path, license compatibility, notices and modifications. Do not copy components blindly.
+
+## 9. Leonxlnx Agentic AI Prompt Research — agent-pattern research
+
+Source: `https://github.com/Leonxlnx/agentic-ai-prompt-research`
+
+Role:
+- planner/implementer/reviewer coordination patterns;
+- task decomposition and verification loops;
+- permission/risk classification;
+- context/state management ideas.
+
+Reference-only. The repository describes reconstructed/public-observation material; do not treat it as official vendor prompts or authoritative product architecture.
+
 ## Authority and safety rules
 
 1. Repository contracts remain the highest authority.
@@ -94,4 +150,4 @@ Use as an operational tooling reference only; do not copy service-specific imple
 3. External projects may inspire patterns but cannot redefine financial truth, authorization, schema semantics, regulatory scope, provider selection, licensing, or release gates.
 4. Never copy code from a research repository into Zylo without checking the source license and obtaining the required approval.
 5. Never claim that a pattern is production-proven for Zylo merely because it exists in an external project.
-6. When external research materially affects an implementation task, record the source, date/reviewed revision where available, the adopted idea, and any rejected alternatives in task evidence or an ADR.
+6. When external research materially affects an implementation task, record the source, reviewed revision where available, the adopted idea, and rejected alternatives in task evidence or an ADR.
