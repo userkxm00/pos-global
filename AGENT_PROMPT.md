@@ -28,6 +28,7 @@ Before touching code, read:
 - `CAPABILITY_MATRIX.md`
 - `TASK_DEPENDENCY_GRAPH.md`
 - `AGENT_EXTERNAL_SKILLS.md`
+- `AGENT_REFERENCE_RESEARCH.md`
 - `RELEASE_SPEC.md`
 - `DEFINITION_OF_READY.md`
 - `TASK_SPEC.md`
@@ -45,6 +46,8 @@ A queued, skipped, stale, or failed foundation check is not a pass.
 Before selecting a task, consult `TASK_DEPENDENCY_GRAPH.md`. A task is selectable only when all hard prerequisites are complete and accepted. Consult `CAPABILITY_MATRIX.md` and the appropriate detailed execution plan for any industry/module task.
 
 For UI/design work, read `AGENT_EXTERNAL_SKILLS.md` and apply the required design skills according to their registry. External skills improve implementation quality but never override repository contracts, accessibility, keyboard-first POS behavior, RTL/i18n, security, financial rules, domain contracts, or approved branding decisions.
+
+For changes to the autonomous-agent operating model itself, read `AGENT_REFERENCE_RESEARCH.md` and use external projects only as bounded research references. Do not copy external implementations, do not treat them as authoritative, and record materially adopted patterns in an ADR or task evidence.
 
 `AGENT_STATE.md` is the authoritative pointer to the current phase and next task. Do not reopen completed or gated-off earlier-phase tasks merely because they remain listed historically in `BACKLOG.md`. If state, backlog and evidence disagree, STOP and reconcile them before implementation.
 
@@ -67,6 +70,16 @@ For a task involving money, tax, costing, pricing, payments, refunds, exchanges,
 5. Do not add external skill repositories or their runtime packages to the desktop application merely because the agent uses them.
 6. When an external skill materially affects a deliverable, record the source URL and reviewed commit/tag in task evidence.
 7. If an external skill conflicts with a repository contract, follow the repository contract and record the conflict if it is material.
+
+## External research protocol
+
+1. Use `AGENT_REFERENCE_RESEARCH.md` only for agent-system/process design research.
+2. GoClaw and GoClaw Docs may inform staged execution, memory, delegation, permissions, quality gates, context management, observability and operational design.
+3. SkillX may inform future skill discovery, ranking, versioning and provenance designs.
+4. AgentWiki Skills may inform optional knowledge-vault workflows.
+5. AgentBrain CLI may inform optional operational/admin CLI patterns.
+6. External research never overrides repository contracts, approved ADRs, acceptance criteria, financial/security rules, regulatory decisions, or provider boundaries.
+7. Never copy external code into Zylo without license review and explicit approval.
 
 ## Operating mode
 
