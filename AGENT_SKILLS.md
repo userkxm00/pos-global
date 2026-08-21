@@ -110,11 +110,40 @@ The implementation agent must behave as a senior product engineer with these com
 - Industry workflow modeling without hardcoding the whole product per industry.
 - Explainable pricing/tax/promotion results and auditable user actions.
 
+## External Design Skills
+
+External skills are agent/developer tooling, not application runtime dependencies. Repository contracts remain authoritative.
+
+### UI UX Pro Max — REQUIRED for UI tasks
+
+Source: `nextlevelbuilder/ui-ux-pro-max-skill`
+Reviewed commit: `bc826e2267a36d98a2dcf5231e16c30ff546770f`
+
+Use it for design-system generation, industry-aware UI recommendations, accessibility/resilient-layout guidance, responsive design and dashboard/report visualization. Apply it to React/Tauri UI and Phase 9 web/portal work.
+
+Rule: it may improve visual/design decisions but may not override `UI_SPEC.md`, accessibility requirements, POS keyboard-first flows, product requirements, financial/domain behavior, security rules or approved branding decisions.
+
+### Taste Skill — REQUIRED visual-review skill
+
+Source: `Leonxlnx/taste-skill`
+Reviewed commit: `843c8dd4d18ccff0d5a9cd4b0b71d7dbf7278293`
+
+Use it for visual hierarchy, typography, spacing, density, composition, motion restraint and anti-generic UI review. Apply it after functional UI exists, especially for POS screens, dashboards and Phase 9 customer-facing surfaces.
+
+Rule: taste guidance never overrides accessibility, RTL/i18n, keyboard-first operation, semantic status colors, functional clarity or repository product requirements.
+
+### Agentic AI Prompt Research — REFERENCE ONLY
+
+Source: `Leonxlnx/agentic-ai-prompt-research`
+
+Use only as a research reference for planner/implementer/reviewer coordination, task decomposition, verification loops, context/state management and risk classification. Do not treat it as authoritative, do not add it as a runtime dependency, and do not assume reconstructed patterns are official vendor prompts.
+
 ## Agent behavior skills
 
 - Repository reconnaissance before editing.
 - Read the authoritative specs and current agent state before selecting work.
 - Use the task dependency graph and capability matrix instead of inventing sequencing.
+- Use the external UI/UX skills according to `AGENT_EXTERNAL_SKILLS.md` without allowing them to override product contracts.
 - Small, reversible changes with focused commits.
 - Evidence-based completion and exact-head verification.
 - Root-cause debugging rather than disabling checks.

@@ -62,9 +62,13 @@ This gate answers one question:
 - [x] Definition of Ready/Done
 - [x] ADR protocol
 - [x] evidence protocol
-- [x] persistent state
+- [x] persistent agent state
 - [x] golden E2E flows
 - [x] acceptance matrix
+- [x] external agent skill registry
+- [x] UI UX Pro Max integration contract
+- [x] Taste Skill integration contract
+- [x] reference-only agent research policy
 
 ## Explicit unresolved decisions
 
@@ -97,6 +101,7 @@ The gate requires links to:
 - security/dependency audit
 - acceptance checklist
 - capability/dependency validation
+- external skills registry/reviewed commits when skills materially affect implementation
 - current commit SHA
 - exact-head Foundation Evidence artifact
 
