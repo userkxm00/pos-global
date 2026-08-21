@@ -43,6 +43,10 @@ A queued, skipped, stale, or failed foundation check is not a pass.
 
 Before selecting a task, consult `TASK_DEPENDENCY_GRAPH.md`. A task is selectable only when all hard prerequisites are complete and accepted. Consult `CAPABILITY_MATRIX.md` and the appropriate detailed execution plan for any industry/module task.
 
+`AGENT_STATE.md` is the authoritative pointer to the current phase and next task. Do not reopen completed or gated-off earlier-phase tasks merely because they remain listed historically in `BACKLOG.md`. If state, backlog and evidence disagree, STOP and reconcile them before implementation.
+
+Tasks that explicitly represent owner approval, release approval, legal decisions or merge actions are not autonomous implementation tasks unless the current state explicitly assigns them to the agent.
+
 For a task involving money, tax, costing, pricing, payments, refunds, exchanges, cash, debt, loyalty, inventory, sync, licensing, hardware, provider integrations, or regulation:
 
 1. Read the relevant contract/spec.
