@@ -11,13 +11,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 REQUIRED_FILES = [
     "ARCHITECTURE.md", "EXECUTION_PLAN.md", "EXECUTION_PLAN_DETAILED.md",
-    "AGENT_SYSTEM.md", "AGENT_PROMPT.md", "TASK_SPEC.md",
+    "AGENT_SYSTEM.md", "AGENT_PROMPT.md", "AGENT_SKILLS.md", "TASK_SPEC.md",
     "DEFINITION_OF_READY.md", "BACKLOG.md", "ACCEPTANCE_MATRIX.md",
     "FOUNDATION_EVIDENCE.md", "FOUNDATION_READINESS_STATES.md",
     "PHASE_0_AGENT_READINESS_GATE.md", "PHASE_0_5_DOMAIN_FINALIZATION.md",
     "PHASE_0_6_COMMERCIAL_REGULATORY_FINALIZATION.md", "DATABASE_RULES.md",
-    "DOMAIN_CONTRACTS.md", "SECURITY_MODEL.md", "SYNC_SPEC.md",
-    "RELEASE_SPEC.md", "PRODUCT_SPEC.md", "UI_SPEC.md",
+    "DOMAIN_CONTRACTS.md", "SECURITY_MODEL.md", "SECURITY_SCAN_POLICY.md",
+    "DEPENDENCY_POLICY.md", "SYNC_SPEC.md", "RELEASE_SPEC.md",
+    "PRODUCT_SPEC.md", "UI_SPEC.md", "ADR_SYSTEM.md", "COMMERCIAL_PROVIDER_MATRIX.md",
     "UI_CLOUD_EXECUTION_PLAN.md", "INDUSTRY_EXECUTION_PLAN.md",
     "CAPABILITY_MATRIX.md", "TASK_DEPENDENCY_GRAPH.md",
     ".github/workflows/ci.yml", ".github/workflows/foundation-evidence.yml",
@@ -36,6 +37,7 @@ REQUIRED_MARKERS = {
         "readiness", "phase", "evidence", "TASK_DEPENDENCY_GRAPH.md",
         "CAPABILITY_MATRIX.md", "INDUSTRY_EXECUTION_PLAN.md", "UI_CLOUD_EXECUTION_PLAN.md",
     ],
+    "AGENT_SKILLS.md": ["Core engineering", "Security", "Financial correctness", "Agent behavior skills"],
     "FOUNDATION_EVIDENCE.md": ["commit", "CI", "evidence"],
     "FOUNDATION_READINESS_STATES.md": [
         "FOUNDATION_DESIGNED", "FOUNDATION_VERIFIED", "AGENT_IMPLEMENTATION_READY",
