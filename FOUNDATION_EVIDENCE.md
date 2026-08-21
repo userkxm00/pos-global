@@ -4,7 +4,9 @@ The Foundation Gate is evaluated against one exact Git commit. Evidence from ano
 
 ## Authoritative evidence
 
-For automated verification, the authoritative record is the successful `foundation-gate-evidence` GitHub Actions job and its uploaded `foundation-gate-evidence-<commit-sha>` artifact for the exact repository head being evaluated.
+The normal `CI` workflow validates the exact pull-request head SHA, not GitHub's synthetic pull-request merge ref. It runs only for `pull_request` events and checks out `github.event.pull_request.head.sha` explicitly.
+
+After a successful `CI` run for `foundation/v2`, the separate `Foundation Gate Evidence` workflow is triggered by `workflow_run`. It verifies that `refs/heads/foundation/v2` still points to the exact CI-tested SHA, then uploads `foundation-gate-evidence-<commit-sha>` as the authoritative machine-readable evidence.
 
 `FOUNDATION_EVIDENCE.md` is the human-readable contract. It must not be edited to copy an older run onto a newer commit.
 
@@ -20,7 +22,7 @@ For automated verification, the authoritative record is the successful `foundati
 | Dependency security | audit report + disposition of every high/critical finding |
 | Secrets | secret scan result + disposition of any finding |
 | Spec consistency | automated/manual consistency check recorded |
-| Exact-head evidence | successful `foundation-gate-evidence` job + artifact naming the same commit SHA |
+| Exact-head evidence | successful `Foundation Gate Evidence` workflow + artifact naming the same commit SHA |
 
 ## Evidence record format
 
@@ -48,5 +50,6 @@ notes: <short evidence summary>
 3. `mergeable` is not `pass`.
 4. A skipped critical test is not a pass.
 5. A security finding must have an explicit disposition; it must not be hidden by `continue-on-error`.
-6. A merge creates a new commit; that exact post-merge head must receive its own CI/evidence run.
-7. Evidence is part of the deliverable, but exact-head automated evidence is recorded by CI artifacts to avoid circular self-referential commits.
+6. A pull-request merge ref is not the authoritative Foundation head evidence target.
+7. A successful CI run qualifies as exact-head evidence only when the CI explicitly tested the pull-request head SHA and the branch still points to that same SHA at evidence-generation time.
+8. Evidence is part of the deliverable, but exact-head automated evidence is recorded by CI artifacts to avoid circular self-referential commits.
