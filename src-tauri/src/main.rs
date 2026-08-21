@@ -6,6 +6,8 @@
 mod commands;
 mod db;
 mod licence;
+#[cfg(test)]
+mod tests;
 
 use tauri::Manager;
 
