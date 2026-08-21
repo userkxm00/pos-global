@@ -18,6 +18,8 @@ REQUIRED_FILES = [
     "PHASE_0_6_COMMERCIAL_REGULATORY_FINALIZATION.md", "DATABASE_RULES.md",
     "DOMAIN_CONTRACTS.md", "SECURITY_MODEL.md", "SYNC_SPEC.md",
     "RELEASE_SPEC.md", "PRODUCT_SPEC.md", "UI_SPEC.md",
+    "UI_CLOUD_EXECUTION_PLAN.md", "INDUSTRY_EXECUTION_PLAN.md",
+    "CAPABILITY_MATRIX.md", "TASK_DEPENDENCY_GRAPH.md",
     ".github/workflows/ci.yml", ".github/workflows/foundation-evidence.yml",
 ]
 
@@ -30,12 +32,19 @@ REQUIRED_MARKERS = {
     "AGENT_SYSTEM.md": [
         "agent operating system", "before every task", "evidence", "gate",
     ],
-    "AGENT_PROMPT.md": ["readiness", "phase", "evidence"],
+    "AGENT_PROMPT.md": [
+        "readiness", "phase", "evidence", "TASK_DEPENDENCY_GRAPH.md",
+        "CAPABILITY_MATRIX.md", "INDUSTRY_EXECUTION_PLAN.md", "UI_CLOUD_EXECUTION_PLAN.md",
+    ],
     "FOUNDATION_EVIDENCE.md": ["commit", "CI", "evidence"],
     "FOUNDATION_READINESS_STATES.md": [
         "FOUNDATION_DESIGNED", "FOUNDATION_VERIFIED", "AGENT_IMPLEMENTATION_READY",
         "PRODUCTION_READY", "LAUNCH_READY",
     ],
+    "CAPABILITY_MATRIX.md": ["Industry", "Capability", "Preset rules"],
+    "TASK_DEPENDENCY_GRAPH.md": ["hard dependency", "phase gate", "next task"],
+    "UI_CLOUD_EXECUTION_PLAN.md": ["UI rules", "Supabase", "Webhooks"],
+    "INDUSTRY_EXECUTION_PLAN.md": ["Universal industry sequence", "acceptance/evidence", "shared financial"],
 }
 
 TASK_RE = re.compile(r"\bF\d+(?:\.\d+)?\.\d{2}\b")
@@ -142,7 +151,11 @@ def validate_agent_contracts(errors: list[str]) -> None:
                 fail(errors, f"AGENT_SYSTEM.md missing operational rule: {marker}")
     if prompt.is_file():
         text = read(prompt).lower()
-        for marker in ("agent_system.md", "task_spec.md", "definition_of_ready.md", "backlog.md"):
+        for marker in (
+            "agent_system.md", "task_spec.md", "definition_of_ready.md", "backlog.md",
+            "task_dependency_graph.md", "capability_matrix.md", "industry_execution_plan.md",
+            "ui_cloud_execution_plan.md",
+        ):
             if marker not in text:
                 fail(errors, f"AGENT_PROMPT.md does not reference required control document: {marker}")
 
@@ -170,11 +183,9 @@ def validate_workflows(errors: list[str]) -> None:
     else:
         text = read(evidence)
         for marker in [
-            "workflow_run", "workflows: [\"CI\"]", "head_branch == 'foundation/v2'",
-            "github.event.workflow_run.head_sha", "refs/heads/foundation/v2",
-            "git ls-remote origin refs/heads/foundation/v2",
-            ".github/scripts/emit_foundation_evidence.py",
-            "actions/upload-artifact@v4",
+            "push:", "branches: [foundation/v2]", "gh run list", "--commit",
+            "event pull_request", "github.sha", "git ls-remote origin refs/heads/foundation/v2",
+            ".github/scripts/emit_foundation_evidence.py", "actions/upload-artifact@v4",
         ]:
             if marker not in text:
                 fail(errors, f"Foundation evidence workflow missing required marker: {marker}")
