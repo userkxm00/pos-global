@@ -12,6 +12,10 @@ This gate answers one question:
 - [x] Offline-first principle documented
 - [x] capability/module architecture documented
 - [x] licensing and updater trust boundaries documented
+- [x] UI/cloud execution boundaries documented
+- [x] industry execution model documented
+- [x] capability matrix documented
+- [x] task dependency graph documented
 
 ### Domain
 - [x] exact money policy
@@ -50,6 +54,10 @@ This gate answers one question:
 - [x] master agent prompt
 - [x] planner/implementer/reviewer roles
 - [x] granular backlog
+- [x] UI/cloud task tree
+- [x] industry task tree
+- [x] capability matrix
+- [x] task dependency graph
 - [x] task specification
 - [x] Definition of Ready/Done
 - [x] ADR protocol
@@ -77,7 +85,9 @@ Phase 1 may start only when:
 - the Foundation Gate is accepted;
 - the product owner approves the launch-market sequence;
 - the unresolved decisions above are either intentionally deferred behind adapters or explicitly decided;
-- `AGENT_STATE.md` points to the next unblocked task.
+- `AGENT_STATE.md` points to the next unblocked task;
+- the exact head has a successful `foundation-gate-evidence` artifact;
+- no stale/queued/skipped mandatory gate is being treated as verification.
 
 ## Exit evidence
 
@@ -86,6 +96,8 @@ The gate requires links to:
 - migration test result
 - security/dependency audit
 - acceptance checklist
+- capability/dependency validation
 - current commit SHA
+- exact-head Foundation Evidence artifact
 
 Never mark this gate green merely because documentation exists.
