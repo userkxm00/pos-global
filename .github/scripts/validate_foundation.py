@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 REQUIRED_FILES = [
     "ARCHITECTURE.md", "EXECUTION_PLAN.md", "EXECUTION_PLAN_DETAILED.md",
-    "AGENT_SYSTEM.md", "AGENT_PROMPT.md", "AGENT_SKILLS.md", "TASK_SPEC.md",
+    "AGENT_SYSTEM.md", "AGENT_PROMPT.md", "AGENT_SKILLS.md", "AGENT_EXTERNAL_SKILLS.md", "TASK_SPEC.md",
     "DEFINITION_OF_READY.md", "BACKLOG.md", "ACCEPTANCE_MATRIX.md",
     "FOUNDATION_EVIDENCE.md", "FOUNDATION_READINESS_STATES.md",
     "PHASE_0_AGENT_READINESS_GATE.md", "PHASE_0_5_DOMAIN_FINALIZATION.md",
@@ -36,8 +36,10 @@ REQUIRED_MARKERS = {
     "AGENT_PROMPT.md": [
         "readiness", "phase", "evidence", "TASK_DEPENDENCY_GRAPH.md",
         "CAPABILITY_MATRIX.md", "INDUSTRY_EXECUTION_PLAN.md", "UI_CLOUD_EXECUTION_PLAN.md",
+        "AGENT_EXTERNAL_SKILLS.md",
     ],
-    "AGENT_SKILLS.md": ["Core engineering", "Security", "Financial correctness", "Agent behavior skills"],
+    "AGENT_SKILLS.md": ["Core engineering", "Security", "Financial correctness", "Agent behavior skills", "UI UX Pro Max", "Taste Skill"],
+    "AGENT_EXTERNAL_SKILLS.md": ["UI UX Pro Max", "Taste Skill", "Reference-only", "Installation policy", "reviewed commit"],
     "FOUNDATION_EVIDENCE.md": ["commit", "CI", "evidence"],
     "FOUNDATION_READINESS_STATES.md": [
         "FOUNDATION_DESIGNED", "FOUNDATION_VERIFIED", "AGENT_IMPLEMENTATION_READY",
@@ -156,7 +158,7 @@ def validate_agent_contracts(errors: list[str]) -> None:
         for marker in (
             "agent_system.md", "task_spec.md", "definition_of_ready.md", "backlog.md",
             "task_dependency_graph.md", "capability_matrix.md", "industry_execution_plan.md",
-            "ui_cloud_execution_plan.md",
+            "ui_cloud_execution_plan.md", "agent_external_skills.md",
         ):
             if marker not in text:
                 fail(errors, f"AGENT_PROMPT.md does not reference required control document: {marker}")
