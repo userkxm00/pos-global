@@ -5,7 +5,6 @@ on:
     branches: [foundation/v2]
 
 permissions:
-  actions: read
   contents: read
 
 concurrency:
@@ -14,6 +13,7 @@ concurrency:
 
 jobs:
   evidence:
+    name: Exact-head foundation verification
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact branch head
@@ -22,7 +22,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
 
-      - name: Verify branch head
+      - name: Verify exact branch head
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: |
@@ -32,29 +32,64 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           echo "Exact foundation/v2 head verified: $EXPECTED_SHA"
 
-      - name: Locate successful PR validation for this exact SHA
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_SHA: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        run: npm install --ignore-scripts
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Generate deterministic Tauri icons
+        run: npx --no-install tauri icon src-tauri/app-icon.svg
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Check Rust
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Run Rust and migration tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Validate foundation specifications
+        run: python .github/scripts/validate_foundation.py
+
+      - name: Scan repository for high-risk credential patterns
+        shell: bash
         run: |
           set -euo pipefail
-          runs="$(gh run list --workflow CI --commit "$EXPECTED_SHA" --event pull_request --status completed --limit 20 --json databaseId,conclusion,headSha,url 2>/dev/null || true)"
-          test -n "$runs"
-          echo "$runs"
-          success_run="$(echo "$runs" | jq -r --arg sha "$EXPECTED_SHA" '.[] | select(.conclusion == "success" and .headSha == $sha) | .databaseId' | head -n1)"
-          if [ -z "$success_run" ]; then
-            echo 'No successful PR CI run for this exact SHA yet.'
+          if git grep -nE 'BEGIN (RSA|EC|OPENSSH|DSA|PRIVATE) KEY|sk_live_[A-Za-z0-9]+|SUPABASE_(SERVICE_ROLE_KEY|SECRET_KEY|DATABASE_PASSWORD)[[:space:]]*=[[:space:]]*[^#[:space:]]+' -- ':!.env.example' ':!node_modules' ':!target'; then
+            echo 'Potential secret detected. Remove it or move it to protected secret storage.'
             exit 1
           fi
-          echo "VALIDATION_RUN_ID=$success_run" >> "$GITHUB_ENV"
+          echo 'No high-risk credential patterns detected.'
 
-      - name: Emit exact-head evidence
+      - name: Emit authoritative exact-head evidence
         env:
           FOUNDATION_EVIDENCE_SHA: ${{ github.sha }}
-          FOUNDATION_EVIDENCE_RUN_ID: ${{ env.VALIDATION_RUN_ID }}
-          FOUNDATION_EVIDENCE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ env.VALIDATION_RUN_ID }}
-          FOUNDATION_EVIDENCE_EVENT: push
-          FOUNDATION_EVIDENCE_REF: refs/heads/foundation/v2
+          FOUNDATION_EVIDENCE_RUN_ID: ${{ github.run_id }}
+          FOUNDATION_EVIDENCE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FOUNDATION_EVIDENCE_EVENT: ${{ github.event_name }}
+          FOUNDATION_EVIDENCE_REF: ${{ github.ref }}
         run: python .github/scripts/emit_foundation_evidence.py
 
       - name: Upload authoritative exact-head evidence
@@ -65,17 +100,14 @@ jobs:
           if-no-files-found: error
 
       - name: Publish verification summary
-        env:
-          TESTED_SHA: ${{ github.sha }}
-          TEST_RUN_ID: ${{ env.VALIDATION_RUN_ID }}
         run: |
           {
             echo '## Foundation Gate Evidence'
             echo
             echo "Exact branch: \`refs/heads/foundation/v2\`"
-            echo "Exact commit: \`${TESTED_SHA}\`"
-            echo "Validation PR CI run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${TEST_RUN_ID}"
+            echo "Exact commit: \`${GITHUB_SHA}\`"
+            echo "Verification workflow: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo
-            echo 'A successful PR validation exists for this exact commit, and foundation/v2 still points to that commit.'
-            echo 'The uploaded artifact is the authoritative exact-head machine evidence.'
+            echo 'All mandatory foundation validation steps completed successfully on the exact post-merge branch head.'
+            echo 'The uploaded artifact is authoritative exact-head machine evidence.'
           } >> "$GITHUB_STEP_SUMMARY"
