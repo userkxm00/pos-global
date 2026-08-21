@@ -29,7 +29,7 @@ Do not use it to override:
 - financial/domain behavior;
 - approved branding decisions.
 
-The upstream project documents support for multiple AI coding environments and multiple frameworks, including React and Tailwind-related workflows. Treat its recommendations as design guidance, not as an architectural dependency. cite-source-needed-in-upstream-review
+The upstream project documents support for multiple AI coding environments and multiple frameworks, including React and Tailwind-related workflows. Treat its recommendations as design guidance, not as an architectural dependency.
 
 ## 2. Required visual-quality skill — Taste Skill
 
