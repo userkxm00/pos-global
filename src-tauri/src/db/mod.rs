@@ -1,5 +1,8 @@
 use rusqlite::{Connection, Result};
 use std::path::Path;
+use std::sync::Mutex;
+
+pub struct DbState(pub Mutex<Connection>);
 
 const MIGRATIONS: &[(&str, &str)] = &[
     ("001_initial", include_str!("migrations/001_initial.sql")),
@@ -60,7 +63,6 @@ mod tests {
     #[test]
     fn all_foundation_migrations_apply_to_empty_database() {
         let conn = Connection::open_in_memory().expect("open in-memory database");
-
         init_database(&conn).expect("all migrations should apply cleanly");
 
         let applied: i64 = conn
@@ -97,7 +99,6 @@ mod tests {
     #[test]
     fn migration_initialization_is_repeatable() {
         let conn = Connection::open_in_memory().expect("open in-memory database");
-
         init_database(&conn).expect("first initialization should succeed");
         init_database(&conn).expect("second initialization should be a no-op");
 
@@ -163,7 +164,6 @@ mod tests {
                 [],
             );
             assert!(duplicate.is_err(), "duplicate insert must fail");
-            // Dropping an uncommitted rusqlite transaction rolls it back.
         }
 
         let count: i64 = conn
