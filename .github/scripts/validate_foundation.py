@@ -38,9 +38,13 @@ REQUIRED_MARKERS = {
         "CAPABILITY_MATRIX.md", "INDUSTRY_EXECUTION_PLAN.md", "UI_CLOUD_EXECUTION_PLAN.md",
         "AGENT_EXTERNAL_SKILLS.md", "AGENT_REFERENCE_RESEARCH.md",
     ],
-    "AGENT_SKILLS.md": ["Core engineering", "Security", "Financial correctness", "Agent behavior skills", "UI UX Pro Max", "Taste Skill", "GoClaw", "SkillX"],
-    "AGENT_EXTERNAL_SKILLS.md": ["UI UX Pro Max", "Taste Skill", "Reference-only", "Installation and provenance policy", "GoClaw", "GoClaw Docs", "SkillX"],
-    "AGENT_REFERENCE_RESEARCH.md": ["GoClaw", "GoClaw Docs", "SkillX", "AgentWiki Skills", "AgentBrain CLI", "Authority and safety rules"],
+    "AGENT_SKILLS.md": ["Core engineering", "Security", "Financial correctness", "Agent behavior skills", "UI UX Pro Max", "Taste Skill"],
+    "AGENT_EXTERNAL_SKILLS.md": ["UI UX Pro Max", "Taste Skill", "Reference-only", "Installation policy", "GoClaw", "GoClaw Docs", "SkillX"],
+    "AGENT_REFERENCE_RESEARCH.md": [
+        "GoClaw", "GoClaw Docs", "SkillX", "AgentWiki Skills", "AgentBrain CLI",
+        "Kimi Code Desktop", "Stitch Agent Skills", "Taste Blocks", "Agentic AI Prompt Research",
+        "Authority and safety rules",
+    ],
     "FOUNDATION_EVIDENCE.md": ["commit", "CI", "evidence"],
     "FOUNDATION_READINESS_STATES.md": [
         "FOUNDATION_DESIGNED", "FOUNDATION_VERIFIED", "AGENT_IMPLEMENTATION_READY",
