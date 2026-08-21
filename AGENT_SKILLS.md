@@ -138,12 +138,70 @@ Source: `Leonxlnx/agentic-ai-prompt-research`
 
 Use only as a research reference for planner/implementer/reviewer coordination, task decomposition, verification loops, context/state management and risk classification. Do not treat it as authoritative, do not add it as a runtime dependency, and do not assume reconstructed patterns are official vendor prompts.
 
+## External Agent Architecture References
+
+These are research references rather than installed/runtime skills. Use them when improving the autonomous-agent operating model, not as product dependencies.
+
+### GoClaw — HIGH-VALUE REFERENCE
+
+Source: `nextlevelbuilder/goclaw`
+
+Study for:
+- staged agent execution pipelines;
+- prompt/context modes;
+- layered memory;
+- teams, delegation and handoff;
+- permission/risk controls;
+- event-driven workers, deduplication and retry;
+- provider adapters;
+- observability/tracing;
+- local/desktop agent packaging and update patterns.
+
+Do not copy code. Do not treat its product architecture as authoritative. Its upstream licensing also requires legal caution for a commercial product.
+
+### GoClaw Docs — REFERENCE
+
+Source: `nextlevelbuilder/goclaw-docs`
+
+Study for:
+- system-prompt and context-file organization;
+- team/delegation patterns;
+- permissions/RBAC;
+- skills/MCP integration;
+- hooks and quality gates;
+- context pruning;
+- usage/quota/cost tracking;
+- deployment/security/observability.
+
+### SkillX — FUTURE REFERENCE
+
+Source: `nextlevelbuilder/skillx`
+
+Study for a possible future Zylo skill registry:
+- skill discovery;
+- search/ranking;
+- usage/evaluation signals;
+- versioning/provenance;
+- CLI/plugin marketplace concepts.
+
+### AgentWiki Skills — OPTIONAL REFERENCE
+
+Source: `nextlevelbuilder/agentwiki-skills`
+
+Study only if a knowledge-vault workflow is adopted: hybrid retrieval, knowledge graphs, CLI/MCP selection, and CI-safe credential handling.
+
+### AgentBrain CLI — OPTIONAL REFERENCE
+
+Source: `nextlevelbuilder/agentbrain-cli`
+
+Study for tenant-aware operational tooling, auth token refresh, organization/permission commands, audit/usage/cost tooling, and structured CLI diagnostics.
+
 ## Agent behavior skills
 
 - Repository reconnaissance before editing.
 - Read the authoritative specs and current agent state before selecting work.
 - Use the task dependency graph and capability matrix instead of inventing sequencing.
-- Use the external UI/UX skills according to `AGENT_EXTERNAL_SKILLS.md` without allowing them to override product contracts.
+- Use external design/research references according to `AGENT_EXTERNAL_SKILLS.md` without allowing them to override product contracts.
 - Small, reversible changes with focused commits.
 - Evidence-based completion and exact-head verification.
 - Root-cause debugging rather than disabling checks.
