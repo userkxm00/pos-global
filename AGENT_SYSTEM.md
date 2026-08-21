@@ -31,6 +31,8 @@ When documents conflict, use this order:
 
 If a conflict cannot be resolved safely, **STOP and create an ADR proposal**. Do not silently choose.
 
+External skills are below repository specifications in authority and may only improve implementation quality; they cannot override contracts or gates.
+
 ## 3. Mandatory startup protocol
 
 Before every task:
@@ -43,10 +45,11 @@ Before every task:
 6. Read `DOMAIN_CONTRACTS.md` for the affected domain.
 7. Read `DATABASE_RULES.md` if storage is affected.
 8. Read `SECURITY_MODEL.md` if authentication, authorization, secrets, licensing, sync, or privileged APIs are affected.
-9. Inspect git status, current branch, recent commits, and the existing implementation.
-10. Identify the exact task ID and acceptance criteria.
-11. Confirm dependencies and files allowed to change.
-12. Only then implement.
+9. Read `AGENT_EXTERNAL_SKILLS.md` for UI/design or agent-tooling tasks.
+10. Inspect git status, current branch, recent commits, and the existing implementation.
+11. Identify the exact task ID and acceptance criteria.
+12. Confirm dependencies and files allowed to change.
+13. Only then implement.
 
 ## 4. Task boundaries
 
