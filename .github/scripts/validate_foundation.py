@@ -185,9 +185,11 @@ def validate_workflows(errors: list[str]) -> None:
     else:
         text = read(evidence)
         for marker in [
-            "push:", "branches: [foundation/v2]", "gh run list", "--commit",
-            "event pull_request", "github.sha", "git ls-remote origin refs/heads/foundation/v2",
-            ".github/scripts/emit_foundation_evidence.py", "actions/upload-artifact@v4",
+            "push:", "branches: [foundation/v2]", "github.sha",
+            "git ls-remote origin refs/heads/foundation/v2",
+            "npm run build", "cargo check", "cargo test", "npm audit --omit=dev",
+            ".github/scripts/validate_foundation.py", "actions/upload-artifact@v4",
+            ".github/scripts/emit_foundation_evidence.py",
         ]:
             if marker not in text:
                 fail(errors, f"Foundation evidence workflow missing required marker: {marker}")
