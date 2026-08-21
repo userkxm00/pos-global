@@ -41,7 +41,7 @@ jobs:
           runs="$(gh run list --workflow CI --commit "$EXPECTED_SHA" --event pull_request --status completed --limit 20 --json databaseId,conclusion,headSha,url 2>/dev/null || true)"
           test -n "$runs"
           echo "$runs"
-          success_run="$(echo "$runs" | python -c 'import json,sys; rows=json.load(sys.stdin); ok=[r for r in rows if r.get("conclusion")=="success" and r.get("headSha")=="$EXPECTED_SHA"]; print(ok[0]["databaseId"] if ok else "")')"
+          success_run="$(echo "$runs" | jq -r --arg sha "$EXPECTED_SHA" '.[] | select(.conclusion == "success" and .headSha == $sha) | .databaseId' | head -n1)"
           if [ -z "$success_run" ]; then
             echo 'No successful PR CI run for this exact SHA yet.'
             exit 1
