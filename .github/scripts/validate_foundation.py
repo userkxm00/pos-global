@@ -18,6 +18,7 @@ REQUIRED_FILES = [
     "PHASE_0_6_COMMERCIAL_REGULATORY_FINALIZATION.md", "DATABASE_RULES.md",
     "DOMAIN_CONTRACTS.md", "SECURITY_MODEL.md", "SYNC_SPEC.md",
     "RELEASE_SPEC.md", "PRODUCT_SPEC.md", "UI_SPEC.md",
+    ".github/workflows/ci.yml", ".github/workflows/foundation-evidence.yml",
 ]
 
 REQUIRED_MARKERS = {
@@ -37,8 +38,6 @@ REQUIRED_MARKERS = {
     ],
 }
 
-# Only full task IDs are considered references. This deliberately avoids
-# treating phase labels such as "F0.5" as task IDs.
 TASK_RE = re.compile(r"\bF\d+(?:\.\d+)?\.\d{2}\b")
 
 
@@ -148,18 +147,37 @@ def validate_agent_contracts(errors: list[str]) -> None:
                 fail(errors, f"AGENT_PROMPT.md does not reference required control document: {marker}")
 
 
-def validate_workflow(errors: list[str]) -> None:
-    path = ROOT / ".github/workflows/ci.yml"
-    if not path.is_file():
+def validate_workflows(errors: list[str]) -> None:
+    ci = ROOT / ".github/workflows/ci.yml"
+    evidence = ROOT / ".github/workflows/foundation-evidence.yml"
+
+    if not ci.is_file():
         fail(errors, "Missing .github/workflows/ci.yml")
-        return
-    text = read(path)
-    for marker in [
-        "foundation-validation", ".github/scripts/validate_foundation.py",
-        "cargo check", "cargo test", "npm run build", "secret-scan",
-    ]:
-        if marker not in text:
-            fail(errors, f"CI workflow missing required foundation gate marker: {marker}")
+    else:
+        text = read(ci)
+        for marker in [
+            "pull_request", "cancel-in-progress: true", "foundation-validation",
+            ".github/scripts/validate_foundation.py", "cargo check", "cargo test",
+            "npm run build", "secret-scan", "github.event.pull_request.head.sha",
+        ]:
+            if marker not in text:
+                fail(errors, f"CI workflow missing required foundation gate marker: {marker}")
+        if "push:\n    branches: [main, foundation/v2]" in text:
+            fail(errors, "CI workflow must not run duplicate push validation for foundation/v2")
+
+    if not evidence.is_file():
+        fail(errors, "Missing .github/workflows/foundation-evidence.yml")
+    else:
+        text = read(evidence)
+        for marker in [
+            "workflow_run", "workflows: [\"CI\"]", "head_branch == 'foundation/v2'",
+            "github.event.workflow_run.head_sha", "refs/heads/foundation/v2",
+            "git ls-remote origin refs/heads/foundation/v2",
+            ".github/scripts/emit_foundation_evidence.py",
+            "actions/upload-artifact@v4",
+        ]:
+            if marker not in text:
+                fail(errors, f"Foundation evidence workflow missing required marker: {marker}")
 
 
 def main() -> int:
@@ -170,7 +188,7 @@ def main() -> int:
     validate_task_references(errors, task_ids)
     validate_markdown_links(errors)
     validate_agent_contracts(errors)
-    validate_workflow(errors)
+    validate_workflows(errors)
 
     if errors:
         print("FOUNDATION VALIDATION: FAIL")
