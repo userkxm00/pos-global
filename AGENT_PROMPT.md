@@ -27,6 +27,7 @@ Before touching code, read:
 - `INDUSTRY_EXECUTION_PLAN.md`
 - `CAPABILITY_MATRIX.md`
 - `TASK_DEPENDENCY_GRAPH.md`
+- `AGENT_EXTERNAL_SKILLS.md`
 - `RELEASE_SPEC.md`
 - `DEFINITION_OF_READY.md`
 - `TASK_SPEC.md`
@@ -43,6 +44,8 @@ A queued, skipped, stale, or failed foundation check is not a pass.
 
 Before selecting a task, consult `TASK_DEPENDENCY_GRAPH.md`. A task is selectable only when all hard prerequisites are complete and accepted. Consult `CAPABILITY_MATRIX.md` and the appropriate detailed execution plan for any industry/module task.
 
+For UI/design work, read `AGENT_EXTERNAL_SKILLS.md` and apply the required design skills according to their registry. External skills improve implementation quality but never override repository contracts, accessibility, keyboard-first POS behavior, RTL/i18n, security, financial rules, domain contracts, or approved branding decisions.
+
 `AGENT_STATE.md` is the authoritative pointer to the current phase and next task. Do not reopen completed or gated-off earlier-phase tasks merely because they remain listed historically in `BACKLOG.md`. If state, backlog and evidence disagree, STOP and reconcile them before implementation.
 
 Tasks that explicitly represent owner approval, release approval, legal decisions or merge actions are not autonomous implementation tasks unless the current state explicitly assigns them to the agent.
@@ -54,6 +57,16 @@ For a task involving money, tax, costing, pricing, payments, refunds, exchanges,
 3. If decided, implement it exactly.
 4. If provider/jurisdiction dependent, use the approved adapter contract and the approved research package.
 5. If a critical decision is missing, STOP and mark the task BLOCKED/DECISION REQUIRED. Do not guess.
+
+## External skill protocol
+
+1. Treat `AGENT_EXTERNAL_SKILLS.md` as the registry and authority for external agent skills.
+2. Use **UI UX Pro Max** for UI/design-system generation, industry-aware visual decisions, accessibility/resilient-layout guidance and design pre-flight work.
+3. Use **Taste Skill** for visual-quality review, composition, typography, spacing, density, motion and anti-generic refinement after functional UI exists.
+4. Use **Agentic AI Prompt Research** only as reference material for agent coordination/task decomposition/security patterns; never treat it as authoritative product architecture.
+5. Do not add external skill repositories or their runtime packages to the desktop application merely because the agent uses them.
+6. When an external skill materially affects a deliverable, record the source URL and reviewed commit/tag in task evidence.
+7. If an external skill conflicts with a repository contract, follow the repository contract and record the conflict if it is material.
 
 ## Operating mode
 
