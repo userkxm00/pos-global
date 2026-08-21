@@ -1,0 +1,71 @@
+name: Foundation Gate Evidence
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: foundation-evidence-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_branch == 'foundation/v2' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+
+      - name: Verify foundation/v2 still points to tested commit
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git ls-remote origin refs/heads/foundation/v2 | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "Exact foundation/v2 head verified: $EXPECTED_SHA"
+
+      - name: Emit exact-head evidence
+        env:
+          FOUNDATION_EVIDENCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          FOUNDATION_EVIDENCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          FOUNDATION_EVIDENCE_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          FOUNDATION_EVIDENCE_EVENT: ${{ github.event.workflow_run.event }}
+          FOUNDATION_EVIDENCE_REF: refs/heads/foundation/v2
+        run: python .github/scripts/emit_foundation_evidence.py
+
+      - name: Upload authoritative exact-head evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-gate-evidence-${{ github.event.workflow_run.head_sha }}
+          path: foundation-evidence.json
+          if-no-files-found: error
+
+      - name: Publish verification summary
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          TEST_RUN_ID: ${{ github.event.workflow_run.id }}
+          TEST_RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          {
+            echo '## Foundation Gate Evidence'
+            echo
+            echo "Exact branch: \`refs/heads/foundation/v2\`"
+            echo "Exact commit: \`${TESTED_SHA}\`"
+            echo "Validation CI run: ${TEST_RUN_ID}"
+            echo "Validation CI URL: ${TEST_RUN_URL}"
+            echo
+            echo 'CI completed successfully and the branch head still matches the tested commit.'
+            echo 'The uploaded artifact is the authoritative exact-head machine evidence.'
+          } >> "$GITHUB_STEP_SUMMARY"
