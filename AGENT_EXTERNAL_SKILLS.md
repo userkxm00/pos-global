@@ -1,6 +1,6 @@
-# POS Global — External Agent Skills Registry
+# POS Global — External Agent Skills & Research Registry
 
-This registry documents external open-source skills/research that may be used by the implementation agent. They are **not application runtime dependencies**.
+This registry documents external open-source skills and research references that may be used by the implementation agent. They are **not application runtime dependencies**.
 
 ## 1. Required design skill — UI UX Pro Max
 
@@ -29,7 +29,7 @@ Do not use it to override:
 - financial/domain behavior;
 - approved branding decisions.
 
-The upstream project documents support for multiple AI coding environments and multiple frameworks, including React and Tailwind-related workflows. Treat its recommendations as design guidance, not as an architectural dependency.
+Treat its recommendations as design guidance, not as an architectural dependency.
 
 ## 2. Required visual-quality skill — Taste Skill
 
@@ -58,8 +58,6 @@ Do not allow Taste rules to override:
 - semantic/status colors required for validation and operational state;
 - product/task acceptance criteria.
 
-Important: upstream community discussions show framework-specific guidance and some hard visual defaults can require contextual adaptation. The agent must apply the concept, not blindly copy framework-specific snippets into the Tauri/React application.
-
 ## 3. Reference-only agent research — Agentic AI Prompt Research
 
 Source: `https://github.com/Leonxlnx/agentic-ai-prompt-research`
@@ -72,9 +70,72 @@ Role:
 - task decomposition and verification loops;
 - context/state management ideas.
 
-Do **not** treat this repository as authoritative implementation guidance. It is explicitly research/reconstructed material and is not a runtime dependency of POS Global.
+Do **not** treat this repository as authoritative implementation guidance. It is research/reconstructed material and is not a runtime dependency of POS Global.
 
-## 4. Skill classes
+## 4. Reference-only agent architecture — GoClaw
+
+Source: `https://github.com/nextlevelbuilder/goclaw`
+
+Use: high-value architecture research for the agent system.
+
+Relevant topics:
+- multi-stage agent execution pipelines;
+- prompt/context modes;
+- working/episodic/semantic memory patterns;
+- agent teams, delegation and handoff;
+- permission/risk controls;
+- event-driven workers, deduplication and retry;
+- provider adapter boundaries;
+- observability/tracing;
+- local/desktop agent packaging and update patterns.
+
+Important: GoClaw is a separate product and its README currently presents a non-commercial Creative Commons license. Use it as research only; do not copy code into Zylo without separate legal review.
+
+## 5. Reference-only operational research — GoClaw Docs
+
+Source: `https://github.com/nextlevelbuilder/goclaw-docs`
+
+Use for research into:
+- system-prompt/context-file organization;
+- team/delegation/handoff concepts;
+- permissions and RBAC;
+- skills/MCP integration;
+- hooks and quality gates;
+- context pruning;
+- usage/quota and cost tracking;
+- deployment/security/observability practices.
+
+The docs are reference material only and do not override Zylo/POS Global contracts.
+
+## 6. Future reference — SkillX
+
+Source: `https://github.com/nextlevelbuilder/skillx`
+
+Use for future design of a Zylo agent-skill registry/catalog:
+- skill discovery;
+- semantic + keyword search;
+- ranking/evaluation signals;
+- skill ratings and usage reporting;
+- CLI/plugin marketplace concepts;
+- versioning and provenance.
+
+Do not add SkillX itself as a runtime dependency to the POS application.
+
+## 7. Optional knowledge-vault reference — AgentWiki Skills
+
+Source: `https://github.com/nextlevelbuilder/agentwiki-skills`
+
+Use only if the project later adopts an external knowledge-vault workflow. Relevant patterns include CLI vs MCP selection, hybrid retrieval, knowledge graphs, CI-safe authentication, and credential-handling rules.
+
+## 8. Optional admin/operational reference — AgentBrain CLI
+
+Source: `https://github.com/nextlevelbuilder/agentbrain-cli`
+
+Use for operational-tooling ideas such as tenant-aware CLI workflows, auth token/refresh handling, organization/permission operations, audit/usage/cost tooling, and structured command output.
+
+It is not a POS application dependency.
+
+## Skill classes
 
 ### Required
 - UI UX Pro Max
@@ -85,25 +146,30 @@ Do **not** treat this repository as authoritative implementation guidance. It is
 - Existing-project redesign workflows when a UI review task explicitly calls for them.
 
 ### Reference-only
-- Agentic AI Prompt Research.
+- Agentic AI Prompt Research
+- GoClaw
+- GoClaw Docs
+- SkillX
+- AgentWiki Skills
+- AgentBrain CLI
 
-## 5. Installation policy
+## Installation and provenance policy
 
-External skills are developer/agent tooling, not desktop application dependencies.
+External skills and research projects are agent/developer tooling or references, not desktop application dependencies.
 
-Never add an external skill's npm package, Python package, runtime binary, or entire repository to the product solely because the skill is useful to the agent.
+Never add an external project's npm package, Python package, runtime binary, or entire repository to the product solely because the agent uses the project's ideas.
 
 Prefer one of:
 1. the skill being installed in the agent environment;
 2. a source reference/pinned commit in this registry;
 3. a small repository-owned adaptation written into `AGENT_SKILLS.md` when the project needs deterministic behavior.
 
-The agent must not silently fetch a moving `main` branch and treat it as reproducible evidence. When a skill meaningfully affects a deliverable, record the source URL and reviewed commit/tag in the task evidence.
+The agent must not silently fetch moving `main` branches and treat them as reproducible evidence. When an external skill or research project materially affects a deliverable, record the source URL, reviewed revision where available, adopted idea, and any rejected alternatives in task evidence or an ADR.
 
-## 6. Authority hierarchy
+## Authority hierarchy
 
 Repository contracts always win:
 
-`Zylo/POS Global specs → approved ADRs → task acceptance criteria → external skills`
+`Zylo/POS Global specs → approved ADRs → task acceptance criteria → external skills/research`
 
-External skills may improve implementation quality, but they never change business rules, financial truth, authorization, schema semantics, regulatory scope, or release/security gates.
+External references may improve implementation quality, but they never change business rules, financial truth, authorization, schema semantics, regulatory scope, provider selection, licensing, or release/security gates.
