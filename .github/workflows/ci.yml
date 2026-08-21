@@ -76,10 +76,20 @@ jobs:
   foundation-gate-evidence:
     name: Foundation gate evidence
     needs: [frontend, rust, secret-scan, foundation-validation]
-    if: ${{ always() }}
+    # Authoritative Foundation Gate evidence must be generated from the exact
+    # branch head, never from a pull_request merge ref.
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/foundation/v2' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify exact branch head
+        env:
+          EXPECTED_REF: refs/heads/foundation/v2
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "$EXPECTED_REF"
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          echo "Exact branch head verified: $GITHUB_SHA"
       - name: Verify required gate jobs succeeded
         env:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
@@ -107,9 +117,10 @@ jobs:
           {
             echo '## Foundation Gate Evidence'
             echo
+            echo "Exact branch: \`${GITHUB_REF}\`"
             echo "Exact commit: \`${GITHUB_SHA}\`"
             echo "Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo
             echo 'All mandatory automated foundation jobs completed successfully.'
-            echo 'The uploaded artifact is the authoritative exact-head machine evidence for this run.'
+            echo 'The uploaded artifact is authoritative exact-head machine evidence for foundation/v2.'
           } >> "$GITHUB_STEP_SUMMARY"
