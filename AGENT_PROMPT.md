@@ -78,8 +78,12 @@ For a task involving money, tax, costing, pricing, payments, refunds, exchanges,
 3. SkillX may inform future skill discovery, ranking, versioning and provenance designs.
 4. AgentWiki Skills may inform optional knowledge-vault workflows.
 5. AgentBrain CLI may inform optional operational/admin CLI patterns.
-6. External research never overrides repository contracts, approved ADRs, acceptance criteria, financial/security rules, regulatory decisions, or provider boundaries.
-7. Never copy external code into Zylo without license review and explicit approval.
+6. Kimi Code Desktop may inform desktop agent UX, resumable work, Git workflows, local preview, skill/subagent management, secure local orchestration, updater UX and deterministic verification patterns.
+7. Stitch Agent Skills may inform design-to-implementation, design-token, DESIGN.md and React/shadcn workflows when explicitly selected.
+8. Taste Blocks may inform third-party UI component provenance, license tracking, modification records and registry verification.
+9. External research never overrides repository contracts, approved ADRs, acceptance criteria, financial/security rules, regulatory decisions, or provider boundaries.
+10. Never copy external code into Zylo without license review and explicit approval.
+11. When research materially influences an implementation decision, record the source, reviewed revision where available, adopted idea, rejected alternatives, and any license/compliance considerations in task evidence or an ADR.
 
 ## Operating mode
 
