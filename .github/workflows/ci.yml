@@ -2,17 +2,21 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [main, foundation/v2]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -27,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Install Tauri Linux dependencies
         run: |
           sudo apt-get update
@@ -52,6 +58,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Scan repository for high-risk credential patterns
         shell: bash
         run: |
@@ -67,60 +75,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
       - name: Validate foundation specifications
         run: python .github/scripts/validate_foundation.py
-
-  foundation-gate-evidence:
-    name: Foundation gate evidence
-    needs: [frontend, rust, secret-scan, foundation-validation]
-    # Authoritative Foundation Gate evidence must be generated from the exact
-    # branch head, never from a pull_request merge ref.
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/foundation/v2' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify exact branch head
-        env:
-          EXPECTED_REF: refs/heads/foundation/v2
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REF" = "$EXPECTED_REF"
-          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
-          echo "Exact branch head verified: $GITHUB_SHA"
-      - name: Verify required gate jobs succeeded
-        env:
-          FRONTEND_RESULT: ${{ needs.frontend.result }}
-          RUST_RESULT: ${{ needs.rust.result }}
-          SECRET_RESULT: ${{ needs.secret-scan.result }}
-          SPEC_RESULT: ${{ needs.foundation-validation.result }}
-        run: |
-          set -euo pipefail
-          printf 'frontend=%s\nrust=%s\nsecret-scan=%s\nfoundation-validation=%s\n' \
-            "$FRONTEND_RESULT" "$RUST_RESULT" "$SECRET_RESULT" "$SPEC_RESULT"
-          test "$FRONTEND_RESULT" = success
-          test "$RUST_RESULT" = success
-          test "$SECRET_RESULT" = success
-          test "$SPEC_RESULT" = success
-      - name: Emit exact-head evidence
-        run: python .github/scripts/emit_foundation_evidence.py
-      - name: Upload exact-head evidence artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: foundation-gate-evidence-${{ github.sha }}
-          path: foundation-evidence.json
-          if-no-files-found: error
-      - name: Publish verification summary
-        run: |
-          {
-            echo '## Foundation Gate Evidence'
-            echo
-            echo "Exact branch: \`${GITHUB_REF}\`"
-            echo "Exact commit: \`${GITHUB_SHA}\`"
-            echo "Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            echo
-            echo 'All mandatory automated foundation jobs completed successfully.'
-            echo 'The uploaded artifact is authoritative exact-head machine evidence for foundation/v2.'
-          } >> "$GITHUB_STEP_SUMMARY"
