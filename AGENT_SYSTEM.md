@@ -4,13 +4,20 @@
 > Audience: autonomous coding agents, coding assistants, reviewers, and future maintainers.
 > This document is the **agent operating system** for POS Global.
 >
-> This file governs *how* an agent works. `ARCHITECTURE.md` governs *what architecture is allowed*. `EXECUTION_PLAN.md` governs *what gets built and in what order*. `FOUNDATION_READINESS_STATES.md` defines what “ready” means, and `DEFINITION_OF_READY.md` defines the Definition of Ready for tasks.
+> This file governs *how* an agent works. `ARCHITECTURE.md` governs *what architecture is allowed*. `EXECUTION_PLAN.md` governs *what gets built and in what order*. `FOUNDATION_READINESS_STATES.md` defines readiness and execution authority, and `DEFINITION_OF_READY.md` defines the Definition of Ready for tasks.
 
-## 0. Readiness preflight
+## 0. Readiness and execution control
 
-Before implementation begins, verify the repository is at least `AGENT_IMPLEMENTATION_READY` according to `FOUNDATION_READINESS_STATES.md` and the Foundation Evidence Contract.
+The Foundation Gate is a **governance and verification gate**, not a license for the agent to invent work. A failed or stale Foundation Gate does not automatically authorize product implementation, but neither does it justify an open-ended documentation loop.
 
-If the repository is only `FOUNDATION_DESIGNED`, or evidence is stale/queued/failed, the agent must not start product implementation. It may only perform foundation repair/verification tasks explicitly authorized by the current backlog.
+Product implementation may begin only when:
+
+- the orchestrator/user explicitly assigns **one specific task**;
+- the task's hard dependencies and critical decisions are satisfied;
+- the affected contracts are stable enough for that task;
+- no unresolved critical security, financial, regulatory, schema, sync, licensing, or provider decision blocks the task.
+
+`AGENT_IMPLEMENTATION_READY` is the preferred state for normal autonomous execution and is required for unattended multi-task execution. Before that state, a human/orchestrator may explicitly authorize **one bounded implementation task at a time** when its task-level prerequisites are satisfied.
 
 ## 1. Mission
 
@@ -40,26 +47,54 @@ Before every task:
 1. Read `AGENT_SYSTEM.md`.
 2. Read `PROJECT_STATUS.md`.
 3. Read `ARCHITECTURE.md`.
-4. Read `FOUNDATION_READINESS_STATES.md` when checking a gate.
+4. Read `FOUNDATION_READINESS_STATES.md` when checking a gate or readiness status.
 5. Read the relevant phase in `EXECUTION_PLAN.md`.
 6. Read `DOMAIN_CONTRACTS.md` for the affected domain.
 7. Read `DATABASE_RULES.md` if storage is affected.
 8. Read `SECURITY_MODEL.md` if authentication, authorization, secrets, licensing, sync, or privileged APIs are affected.
 9. Read `AGENT_EXTERNAL_SKILLS.md` for UI/design or agent-tooling tasks.
 10. Inspect git status, current branch, recent commits, and the existing implementation.
-11. Identify the exact task ID and acceptance criteria.
-12. Confirm dependencies and files allowed to change.
+11. Identify the **exact task ID explicitly assigned by the orchestrator/user**.
+12. Confirm dependencies, acceptance criteria, and files allowed to change.
 13. Only then implement.
 
-## 4. Task boundaries
+## 4. Task boundaries and human task selection
 
 Never implement an entire phase in one uncontrolled pass. Work at:
 
 `Phase → Epic → Feature → Task → Subtask → Test → Evidence → Gate`.
 
-A task must have explicit acceptance criteria. If none exists, create a task specification before coding.
+### One-task-at-a-time rule
 
-## 5. Non-negotiable prohibitions
+For normal development, the orchestrator/user selects exactly **one implementation task**. The agent must not autonomously choose the next implementation task unless the orchestrator explicitly grants that authority.
+
+The agent may consult `AGENT_STATE.md`, `BACKLOG.md`, and `TASK_DEPENDENCY_GRAPH.md` to validate the assigned task and report what would be next, but those files do **not** grant permission to start another task.
+
+The agent must not:
+
+- expand the assigned task into a phase;
+- pull forward later tasks because they look easy;
+- silently switch to documentation/research work;
+- begin another task after completion without explicit authorization.
+
+A task must have explicit acceptance criteria. If none exists, create/refine the task specification only when that is the assigned work or an explicit gate requires it.
+
+## 5. Documentation anti-drift rule
+
+Implementation has priority over documentation.
+
+Do not create or materially expand planning, architecture, research, strategy, or process documents unless:
+
+- the assigned task explicitly requires the document;
+- an approved ADR requires it;
+- a failing verification gate requires a targeted correction;
+- the orchestrator/user explicitly requests it.
+
+This restriction applies to **all documentation formats**, not only Markdown.
+
+If executable acceptance criteria for the assigned task remain incomplete, creating additional planning/specification/research content is **not progress** and the task remains `PARTIAL`.
+
+## 6. Non-negotiable prohibitions
 
 Never:
 
@@ -77,9 +112,10 @@ Never:
 - make network availability a prerequisite for local POS selling;
 - mark a task complete without evidence;
 - claim a test/build was run when it was not;
-- hide warnings, failures, or known limitations from the status record.
+- hide warnings, failures, or known limitations from the status record;
+- delete, replace, or downgrade a known working implementation merely to make the repository look cleaner.
 
-## 6. Implementation rules
+## 7. Implementation rules
 
 ### Rust
 - Domain and financial invariants belong in Rust.
@@ -107,7 +143,7 @@ Never:
 - RLS is mandatory for cloud tenant isolation.
 - Cloud is not the operational source of truth while the POS is offline.
 
-## 7. Verification loop
+## 8. Verification loop
 
 For every implementation task:
 
@@ -115,7 +151,9 @@ For every implementation task:
 
 If a check is unavailable in the current environment, record it as **UNVERIFIED**, not PASS.
 
-## 8. Safe failure behavior
+A task-level verification failure blocks completion of that task. A broader Foundation CI failure that is unrelated to the assigned task may be recorded and escalated without turning it into an excuse for unrelated implementation or documentation work.
+
+## 9. Safe failure behavior
 
 If a task fails:
 
@@ -128,11 +166,11 @@ If a task fails:
 
 Do not make unrelated refactors while repairing a failing gate.
 
-## 9. Change control
+## 10. Change control
 
 Architectural, security, financial, schema, sync, licensing, update-signing, or dependency changes require an ADR or explicit approval recorded in the task.
 
-## 10. Completion language
+## 11. Completion language
 
 Use exactly one status:
 
@@ -144,7 +182,7 @@ Use exactly one status:
 
 Never use “probably works”, “should work”, or “done” without evidence.
 
-## 11. Handoff
+## 12. Handoff
 
 At the end of every task update:
 
@@ -155,6 +193,6 @@ At the end of every task update:
 - security considerations;
 - known limitations;
 - unresolved decisions;
-- exact next task.
+- exact next task **as a recommendation only, not an authorization**.
 
 The repository must remain understandable if a different agent takes over tomorrow.

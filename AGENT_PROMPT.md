@@ -29,6 +29,7 @@ Before touching code, read:
 - `TASK_DEPENDENCY_GRAPH.md`
 - `AGENT_EXTERNAL_SKILLS.md`
 - `AGENT_REFERENCE_RESEARCH.md`
+- `AGENT_REFERENCE_RESEARCH_FRAPPE.md`
 - `RELEASE_SPEC.md`
 - `DEFINITION_OF_READY.md`
 - `TASK_SPEC.md`
@@ -37,29 +38,44 @@ Before touching code, read:
 
 Then inspect the actual repository. Never assume the files describe code that does not exist.
 
-## Mandatory pre-implementation gates
+## Mandatory execution gates
 
-Do not begin a Phase 1+ implementation task until the repository is `AGENT_IMPLEMENTATION_READY` according to `FOUNDATION_READINESS_STATES.md` and the exact head commit has current green evidence according to `FOUNDATION_EVIDENCE.md`.
+The Foundation Gate is a **verification/governance gate**, not an excuse to create more planning work.
 
-A queued, skipped, stale, or failed foundation check is not a pass.
+For each implementation task, you must have:
 
-Before selecting a task, consult `TASK_DEPENDENCY_GRAPH.md`. A task is selectable only when all hard prerequisites are complete and accepted. Consult `CAPABILITY_MATRIX.md` and the appropriate detailed execution plan for any industry/module task.
+- an explicit task assignment from the orchestrator/user;
+- satisfied hard prerequisites from `TASK_DEPENDENCY_GRAPH.md`;
+- required contracts/critical decisions available and stable;
+- no unresolved critical security, financial, regulatory, schema, sync, licensing, or provider decision blocking the task.
 
-For UI/design work, read `AGENT_EXTERNAL_SKILLS.md` and apply the required design skills according to their registry. External skills improve implementation quality but never override repository contracts, accessibility, keyboard-first POS behavior, RTL/i18n, security, financial rules, domain contracts, or approved branding decisions.
+`AGENT_IMPLEMENTATION_READY` is required before **unattended multi-task autonomous execution**. Before that state, the orchestrator/user may explicitly authorize **one bounded implementation task at a time** when its task-level prerequisites are satisfied.
 
-For changes to the autonomous-agent operating model itself, read `AGENT_REFERENCE_RESEARCH.md` and use external projects only as bounded research references. Do not copy external implementations, do not treat them as authoritative, and record materially adopted patterns in an ADR or task evidence.
+A queued, skipped, stale, or failed foundation check is not evidence of a green Foundation Gate. Record it honestly, but do not use an unrelated foundation failure as permission to start unrelated work.
 
-`AGENT_STATE.md` is the authoritative pointer to the current phase and next task. Do not reopen completed or gated-off earlier-phase tasks merely because they remain listed historically in `BACKLOG.md`. If state, backlog and evidence disagree, STOP and reconcile them before implementation.
+## Human/orchestrator task selection rule
 
-Tasks that explicitly represent owner approval, release approval, legal decisions or merge actions are not autonomous implementation tasks unless the current state explicitly assigns them to the agent.
+The orchestrator/user selects **exactly one implementation task at a time** unless explicit permission is given for controlled multi-task execution.
 
-For a task involving money, tax, costing, pricing, payments, refunds, exchanges, cash, debt, loyalty, inventory, sync, licensing, hardware, provider integrations, or regulation:
+You may consult `AGENT_STATE.md`, `BACKLOG.md`, and `TASK_DEPENDENCY_GRAPH.md` to validate the assigned task and report the recommended next task, but those files do **not** authorize you to start another task.
 
-1. Read the relevant contract/spec.
-2. Check whether the exact rule is already decided.
-3. If decided, implement it exactly.
-4. If provider/jurisdiction dependent, use the approved adapter contract and the approved research package.
-5. If a critical decision is missing, STOP and mark the task BLOCKED/DECISION REQUIRED. Do not guess.
+For an assigned task, you must not:
+
+- expand into the whole phase;
+- pull a later task forward because it looks easier;
+- substitute documentation/research for unfinished executable work;
+- start another implementation task after completion without authorization.
+
+## For the assigned task only
+
+Before coding:
+
+1. confirm the exact task ID;
+2. read its acceptance criteria and relevant specs;
+3. inspect affected existing code;
+4. identify dependencies and allowed file scope;
+5. identify required verification commands;
+6. stop if a critical decision is missing.
 
 ## External skill protocol
 
@@ -73,42 +89,34 @@ For a task involving money, tax, costing, pricing, payments, refunds, exchanges,
 
 ## External research protocol
 
-1. Use `AGENT_REFERENCE_RESEARCH.md` only for agent-system/process design research.
-2. GoClaw and GoClaw Docs may inform staged execution, memory, delegation, permissions, quality gates, context management, observability and operational design.
-3. SkillX may inform future skill discovery, ranking, versioning and provenance designs.
-4. AgentWiki Skills may inform optional knowledge-vault workflows.
-5. AgentBrain CLI may inform optional operational/admin CLI patterns.
-6. Kimi Code Desktop may inform desktop agent UX, resumable work, Git workflows, local preview, skill/subagent management, secure local orchestration, updater UX and deterministic verification patterns.
-7. Stitch Agent Skills may inform design-to-implementation, design-token, DESIGN.md and React/shadcn workflows when explicitly selected.
-8. Taste Blocks may inform third-party UI component provenance, license tracking, modification records and registry verification.
-9. External research never overrides repository contracts, approved ADRs, acceptance criteria, financial/security rules, regulatory decisions, or provider boundaries.
-10. Never copy external code into Zylo without license review and explicit approval.
-11. When research materially influences an implementation decision, record the source, reviewed revision where available, adopted idea, rejected alternatives, and any license/compliance considerations in task evidence or an ADR.
+1. Use `AGENT_REFERENCE_RESEARCH.md` and `AGENT_REFERENCE_RESEARCH_FRAPPE.md` only for bounded research, not as product authority.
+2. External research may inform agent execution, POS/hardware UX, commerce modules, forms, analytics, code review, accounting, MCP/Copilot, sync and other future capabilities.
+3. External research never overrides repository contracts, approved ADRs, acceptance criteria, financial/security rules, regulatory decisions, licensing decisions, or provider boundaries.
+4. Never copy external code into Zylo without license review and explicit approval.
+5. When research materially influences an implementation decision, record the source, reviewed revision where available, adopted idea, rejected alternatives, and any license/compliance considerations in task evidence or an ADR.
 
 ## Implementation-first anti-drift rules
 
-- After readiness is granted, implementation work has priority over documentation expansion.
-- Do not create a new Markdown planning/specification/research file unless the active task, an approved ADR, or a failing gate explicitly requires it.
-- Do not spend a task cycle reorganizing or rewriting already-approved documentation when the selected backlog task has executable code work remaining.
-- Do not start work from a later phase merely because its documentation is interesting, available, or easy to write. Follow `AGENT_STATE.md` and `TASK_DEPENDENCY_GRAPH.md` exactly.
-- Never delete, replace, or downgrade an existing working implementation just to make the repository look more consistent. Inspect the implementation first, preserve compatible working behavior, and use an explicit recovery task when older verified code must be restored.
-- When an implementation snapshot contains working tested code, treat it as evidence to reconcile with current contracts, not as disposable scaffolding.
-- A task that produces mostly documentation but leaves its executable acceptance criteria undone is `PARTIAL`, not `DONE`.
+- After a task is explicitly assigned, executable implementation and its tests have priority over documentation expansion.
+- Do not create or materially expand planning, architecture, research, strategy, or process documents unless the assigned task explicitly requires it, an approved ADR requires it, a failing verification gate requires a targeted correction, or the orchestrator/user requests it.
+- This restriction applies to **all documentation formats**, not only Markdown.
+- Do not spend a task cycle reorganizing or rewriting approved documentation when the assigned executable acceptance criteria remain unfinished.
+- Do not start work from a later phase merely because its documentation is interesting, available, or easy to write.
+- Never delete, replace, or downgrade an existing working implementation just to make the repository look more consistent. Inspect it first and preserve compatible working behavior; use an explicit recovery task when older verified code must be restored.
+- A task that produces mostly documentation but leaves executable acceptance criteria undone is `PARTIAL`, not `DONE`.
 
 ## Operating mode
 
-1. Determine the current phase and next unblocked task from `AGENT_STATE.md`/`BACKLOG.md`.
-2. Consult `TASK_DEPENDENCY_GRAPH.md` and confirm every prerequisite.
-3. Validate that the task satisfies Definition of Ready.
-4. Read the task family specification: UI/cloud, industry, domain, or release as applicable.
-5. Create or refine the task specification only if required by the task/gate.
-6. Inspect all affected existing code before editing.
-7. Implement the smallest coherent change that satisfies the contract.
-8. Add tests at the same time as production code.
-9. Run all required verification commands.
-10. Review the diff for accidental changes, security issues, duplicated rules, and schema drift.
-11. Record evidence and update status.
-12. Only then move to the next task.
+1. Confirm the single task explicitly assigned by the orchestrator/user.
+2. Validate its dependencies and Definition of Ready.
+3. Read only the relevant detailed specifications needed for that task, plus the mandatory startup documents.
+4. Inspect the actual implementation before editing.
+5. Implement the smallest coherent change that satisfies the contract.
+6. Add tests at the same time as production code.
+7. Run required verification commands.
+8. Review the diff for accidental changes, security issues, duplicated rules, and schema drift.
+9. Record evidence and update status.
+10. Stop. Do not select or start the next implementation task without explicit authorization.
 
 ## Absolute product rules
 
@@ -189,7 +197,7 @@ TESTS: <commands + result>
 SECURITY: <impact>
 EVIDENCE: <links/commands/artifacts>
 KNOWN_LIMITATIONS: <none/list>
-NEXT_TASK: <ID>
+NEXT_TASK: <ID — recommendation only, not authorization>
 ```
 
 ## Final instruction
