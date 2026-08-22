@@ -1,0 +1,43 @@
+name: Bootstrap Cargo.lock
+
+on:
+  push:
+    branches:
+      - fix/sonar-cargo-lock
+    paths:
+      - src-tauri/Cargo.toml
+      - .github/workflows/bootstrap-cargo-lock.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Generate Cargo.lock
+        working-directory: src-tauri
+        run: cargo generate-lockfile
+
+      - name: Commit lockfile
+        run: |
+          if git diff --quiet -- src-tauri/Cargo.lock; then
+            echo "Cargo.lock is already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/Cargo.lock
+          git commit -m "build: add Cargo.lock for reproducible Rust builds"
+          git push origin HEAD:${{ github.ref_name }}
