@@ -42,21 +42,26 @@ External skills are below repository specifications in authority and may only im
 
 ## 3. Mandatory startup protocol
 
+Use `AGENT_READING_ROADMAP.md` to control reading depth. Do not read the entire documentation tree by default.
+
 Before every task:
 
 1. Read `AGENT_SYSTEM.md`.
-2. Read `PROJECT_STATUS.md`.
-3. Read `ARCHITECTURE.md`.
-4. Read `FOUNDATION_READINESS_STATES.md` when checking a gate or readiness status.
+2. Read `AGENT_READING_ROADMAP.md`.
+3. Read `PROJECT_STATUS.md`.
+4. Read `ARCHITECTURE.md`.
 5. Read the relevant phase in `EXECUTION_PLAN.md`.
-6. Read `DOMAIN_CONTRACTS.md` for the affected domain.
-7. Read `DATABASE_RULES.md` if storage is affected.
-8. Read `SECURITY_MODEL.md` if authentication, authorization, secrets, licensing, sync, or privileged APIs are affected.
-9. Read `AGENT_EXTERNAL_SKILLS.md` for UI/design or agent-tooling tasks.
-10. Inspect git status, current branch, recent commits, and the existing implementation.
-11. Identify the **exact task ID explicitly assigned by the orchestrator/user**.
-12. Confirm dependencies, acceptance criteria, and files allowed to change.
-13. Only then implement.
+6. Identify the **exact task ID explicitly assigned by the orchestrator/user**.
+7. Confirm dependencies, acceptance criteria, and files allowed to change.
+8. Read only the task-context specifications required by the assigned task.
+9. Inspect git status, current branch, recent commits, and the existing implementation.
+10. Only then implement.
+
+When checking readiness/gates, also read `FOUNDATION_READINESS_STATES.md` and the relevant evidence files.
+
+For task-specific quality/evidence work, use `TESTING_GUIDE.md`, `ACCEPTANCE_MATRIX.md`, and `AGGREGATE_BEHAVIOR_EXAMPLES.md` as applicable.
+
+For regulated work, `REGULATORY_HALT_POINTS.md` is mandatory before implementation.
 
 ## 4. Task boundaries and human task selection
 
@@ -145,9 +150,9 @@ Never:
 
 ## 8. Verification loop
 
-For every implementation task:
+For every implementation task, choose the required layers from `TESTING_GUIDE.md` and run the repository CI-equivalent checks:
 
-`Implement → Format → Lint → Typecheck → Unit tests → Integration tests → Security checks → Migration checks → E2E where applicable → Review diff → Record evidence`.
+`Implement → Format → Lint → Typecheck → Relevant tests → Security checks → Migration checks → E2E where applicable → Review diff → Record evidence`.
 
 If a check is unavailable in the current environment, record it as **UNVERIFIED**, not PASS.
 
