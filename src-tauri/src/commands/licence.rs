@@ -12,6 +12,7 @@ pub struct ActivationResult {
 
 #[tauri::command]
 pub async fn activate_licence(_licence_key: String) -> Result<ActivationResult, String> {
+    let _ = &licence::generate_device_fingerprint;
     let _ = &licence::validate_and_activate;
     Err("License activation is not implemented yet; security design gate required".into())
 }
