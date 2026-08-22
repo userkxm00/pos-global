@@ -4,38 +4,54 @@ You are the implementation agent for POS Global. Your job is to build the produc
 
 ## Read first
 
+Use `AGENT_READING_ROADMAP.md` to control reading depth. Do not read the entire documentation tree by default.
+
+### Startup core
+
 Before touching code, read:
 
 - `AGENT_SYSTEM.md`
-- `FOUNDATION_READINESS_STATES.md`
-- `FOUNDATION_EVIDENCE.md`
+- `AGENT_READING_ROADMAP.md`
+- `PROJECT_STATUS.md`
 - `ARCHITECTURE.md`
 - `EXECUTION_PLAN.md`
-- `EXECUTION_PLAN_DETAILED.md`
-- `SCHEMA.md`
-- `DATABASE_RULES.md`
+- `FOUNDATION_READINESS_STATES.md` when checking readiness/gates
+- `TASK_SPEC.md`
+- `DEFINITION_OF_READY.md`
+
+### Task-context documents
+
+Read only those required by the assigned task, such as:
+
 - `DOMAIN_CONTRACTS.md`
-- `PHASE_0_5_DOMAIN_FINALIZATION.md`
-- `PHASE_0_6_COMMERCIAL_REGULATORY_FINALIZATION.md`
+- `DATABASE_RULES.md`
 - `SECURITY_MODEL.md`
-- `SECURITY_SCAN_POLICY.md`
-- `DEPENDENCY_POLICY.md`
 - `SYNC_SPEC.md`
-- `PRODUCT_SPEC.md`
 - `UI_SPEC.md`
 - `UI_CLOUD_EXECUTION_PLAN.md`
 - `INDUSTRY_EXECUTION_PLAN.md`
 - `CAPABILITY_MATRIX.md`
-- `TASK_DEPENDENCY_GRAPH.md`
-- `AGENT_EXTERNAL_SKILLS.md`
+- `RELEASE_SPEC.md`
+- `COMMERCIAL_PROVIDER_MATRIX.md`
+- `PHASE_0_5_DOMAIN_FINALIZATION.md`
+- `PHASE_0_6_COMMERCIAL_REGULATORY_FINALIZATION.md`
+- relevant ADRs
+
+For quality/evidence work, read `TESTING_GUIDE.md`, `FOUNDATION_EVIDENCE.md`, and `ACCEPTANCE_MATRIX.md` as applicable.
+
+For regulated work, read `REGULATORY_HALT_POINTS.md` before implementation.
+
+For aggregate behavior examples, consult `AGGREGATE_BEHAVIOR_EXAMPLES.md` when the assigned task touches a listed domain.
+
+For UI/design or agent-tooling tasks, read `AGENT_EXTERNAL_SKILLS.md`.
+
+For targeted external research, use:
+
 - `AGENT_REFERENCE_RESEARCH.md`
 - `AGENT_REFERENCE_RESEARCH_FRAPPE.md`
 - `AGENT_REFERENCE_RESEARCH_FRAPPE_ADDENDUM_2.md`
-- `RELEASE_SPEC.md`
-- `DEFINITION_OF_READY.md`
-- `TASK_SPEC.md`
-- `BACKLOG.md`
-- `PROJECT_STATUS.md`
+
+External research is bounded research, never product authority.
 
 Then inspect the actual repository. Never assume the files describe code that does not exist.
 
@@ -114,10 +130,19 @@ Before coding:
 4. Inspect the actual implementation before editing.
 5. Implement the smallest coherent change that satisfies the contract.
 6. Add tests at the same time as production code.
-7. Run required verification commands.
+7. Run required verification commands using `TESTING_GUIDE.md` when applicable.
 8. Review the diff for accidental changes, security issues, duplicated rules, and schema drift.
 9. Record evidence and update status.
 10. Stop. Do not select or start the next implementation task without explicit authorization.
+
+## Regulatory halt behavior
+
+For any task that asserts or implements jurisdiction-specific tax, invoicing, reporting, e-invoicing, fiscalization, retention, privacy, or other regulated behavior:
+
+1. Read `REGULATORY_HALT_POINTS.md`.
+2. If the approved authoritative evidence package is missing, stop with `BLOCKED` or `DECISION REQUIRED`.
+3. Never infer a local rule from another jurisdiction or an external repository.
+4. Keep jurisdiction-specific rules behind approved adapter/configuration boundaries.
 
 ## Absolute product rules
 
