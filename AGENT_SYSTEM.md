@@ -2,8 +2,6 @@
 
 > Status: **mandatory execution contract**
 > Audience: autonomous coding agents, coding assistants, reviewers, and future maintainers.
-> This document is the **agent operating system** for POS Global.
->
 > This file governs *how* an agent works. `ARCHITECTURE.md` governs *what architecture is allowed*. `EXECUTION_PLAN.md` governs *what gets built and in what order*. `FOUNDATION_READINESS_STATES.md` defines readiness and execution authority, and `DEFINITION_OF_READY.md` defines the Definition of Ready for tasks.
 
 ## 0. Readiness and execution control
@@ -83,6 +81,18 @@ The agent must not:
 - begin another task after completion without explicit authorization.
 
 A task must have explicit acceptance criteria. If none exists, create/refine the task specification only when that is the assigned work or an explicit gate requires it.
+
+### Later-phase reference implementations
+
+Existing code from a later phase may be intentionally retained as a **seed/reference implementation** for validating contracts or invariants. Such code:
+
+- does **not** mark the later phase complete;
+- does **not** satisfy the later phase's backlog dependencies or exit gate;
+- does **not** authorize extending that feature;
+- must not be copied as final authorization/security behavior when its trusted context is not yet available;
+- remains frozen unless the orchestrator explicitly assigns a task against it.
+
+In particular, a partially complete sales reference implementation may exist during Foundation work. Agents must not interpret its presence as permission to start Phase 3 early. Authentication and authorization must be established through the Phase 1 contracts before privileged sales behavior is considered production-ready.
 
 ## 5. Documentation anti-drift rule
 
