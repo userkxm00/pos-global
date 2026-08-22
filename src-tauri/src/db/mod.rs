@@ -22,6 +22,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "005_tenancy_and_financial_hardening",
         include_str!("migrations/005_tenancy_and_financial_hardening.sql"),
     ),
+    (
+        "006_quantity_precision_hardening",
+        include_str!("migrations/006_quantity_precision_hardening.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {
@@ -68,7 +72,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 5);
+        assert_eq!(applied, 6);
 
         for table in [
             "business_settings",
@@ -105,7 +109,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 5);
+        assert_eq!(applied, 6);
 
         let capability_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM capabilities", [], |row| row.get(0))
@@ -140,6 +144,29 @@ mod tests {
                     |row| row.get(0),
                 )
                 .expect("financial minor column should exist");
+            assert_eq!(declared_type, "INTEGER", "{table}.{column} must be INTEGER");
+        }
+    }
+
+    #[test]
+    fn quantity_precision_columns_are_integer_authority_columns() {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        init_database(&conn).expect("migrations should succeed");
+
+        for (table, column) in [
+            ("inventory", "quantity_milli"),
+            ("sale_items", "quantity_milli"),
+            ("stock_movements", "quantity_delta_milli"),
+            ("stock_movements", "quantity_before_milli"),
+            ("stock_movements", "quantity_after_milli"),
+        ] {
+            let declared_type: String = conn
+                .query_row(
+                    "SELECT type FROM pragma_table_info(?1) WHERE name = ?2",
+                    rusqlite::params![table, column],
+                    |row| row.get(0),
+                )
+                .expect("quantity precision column should exist");
             assert_eq!(declared_type, "INTEGER", "{table}.{column} must be INTEGER");
         }
     }

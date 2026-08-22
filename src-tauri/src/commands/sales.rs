@@ -11,10 +11,6 @@ pub struct SaleItem {
 }
 
 impl SaleItem {
-    fn quantity(&self) -> f64 {
-        self.quantity_milli as f64 / 1000.0
-    }
-
     fn line_total_minor(&self) -> Result<i64, String> {
         if self.quantity_milli <= 0 || self.unit_price_minor < 0 {
             return Err("invalid sale quantity or price".into());
@@ -40,7 +36,7 @@ pub struct CreateSaleRequest {
     pub currency: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SalesReportSummary {
     pub sales_count: i64,
     pub total_minor: i64,
@@ -68,9 +64,6 @@ pub fn execute_create_sale(
         .unchecked_transaction()
         .map_err(|e| format!("failed to start transaction: {e}"))?;
 
-    // Reserve the idempotency key inside the same transaction as the sale.
-    // With the local DbState mutex, concurrent commands on one device are
-    // serialized; the UNIQUE primary key also protects the persisted record.
     let reserved = tx
         .execute(
             "INSERT INTO idempotency_keys (key, operation, result_json)
@@ -188,17 +181,19 @@ pub fn execute_create_sale(
                 unit_price,
                 line_total,
                 unit_price_minor,
-                line_total_minor
+                line_total_minor,
+                quantity_milli
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7)",
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7, ?8)",
             params![
                 uuid::Uuid::new_v4().to_string(),
                 sale_id,
                 item.product_id,
                 item.variant_id,
-                item.quantity(),
+                item.quantity_milli as f64 / 1000.0,
                 item.unit_price_minor,
-                line_total_minor
+                line_total_minor,
+                item.quantity_milli
             ],
         )
         .map_err(|e| format!("failed to create sale item: {e}"))?;
@@ -206,14 +201,15 @@ pub fn execute_create_sale(
         let updated = tx
             .execute(
                 "UPDATE inventory
-                 SET quantity = quantity - ?1,
+                 SET quantity_milli = quantity_milli - ?1,
+                     quantity = (quantity_milli - ?1) / 1000.0,
                      updated_at = datetime('now')
                  WHERE branch_id = ?2
                    AND product_id = ?3
                    AND ((variant_id = ?4) OR (variant_id IS NULL AND ?4 IS NULL))
-                   AND quantity >= ?1",
+                   AND quantity_milli >= ?1",
                 params![
-                    item.quantity(),
+                    item.quantity_milli,
                     request.branch_id,
                     item.product_id,
                     item.variant_id
@@ -240,27 +236,33 @@ pub fn execute_create_sale(
                 reason,
                 source_type,
                 source_id,
-                user_id
+                user_id,
+                quantity_delta_milli,
+                quantity_before_milli,
+                quantity_after_milli
              )
              SELECT
                 ?1,
                 branch_id,
                 product_id,
                 variant_id,
-                -?2,
-                quantity + ?2,
-                quantity,
+                -?2 / 1000.0,
+                (quantity_milli + ?2) / 1000.0,
+                quantity_milli / 1000.0,
                 'sale',
                 'sale',
                 ?3,
-                ?4
+                ?4,
+                -?2,
+                quantity_milli + ?2,
+                quantity_milli
              FROM inventory
              WHERE branch_id = ?5
                AND product_id = ?6
                AND ((variant_id = ?7) OR (variant_id IS NULL AND ?7 IS NULL))",
             params![
                 uuid::Uuid::new_v4().to_string(),
-                item.quantity(),
+                item.quantity_milli,
                 sale_id,
                 request.user_id,
                 request.branch_id,
@@ -326,21 +328,26 @@ pub fn execute_create_sale(
     Ok(sale_id)
 }
 
-#[tauri::command]
-pub fn get_sales_report(
-    state: tauri::State<crate::db::DbState>,
+pub fn execute_sales_report(
+    conn: &Connection,
+    branch_id: &str,
 ) -> Result<SalesReportSummary, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("database lock failed: {e}"))?;
+    let branch_id = branch_id.trim();
+    if branch_id.is_empty() {
+        return Err("branch_id is required for sales report".into());
+    }
+
     let sales_count = conn
-        .query_row("SELECT COUNT(*) FROM sales", [], |row| row.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM sales WHERE branch_id = ?1",
+            [branch_id],
+            |row| row.get(0),
+        )
         .map_err(|e| format!("failed to read sales report: {e}"))?;
     let total_minor = conn
         .query_row(
-            "SELECT COALESCE(SUM(total_minor), 0) FROM sales",
-            [],
+            "SELECT COALESCE(SUM(total_minor), 0) FROM sales WHERE branch_id = ?1",
+            [branch_id],
             |row| row.get(0),
         )
         .map_err(|e| format!("failed to read sales total: {e}"))?;
@@ -349,6 +356,18 @@ pub fn get_sales_report(
         sales_count,
         total_minor,
     })
+}
+
+#[tauri::command]
+pub fn get_sales_report(
+    state: tauri::State<crate::db::DbState>,
+    branch_id: String,
+) -> Result<SalesReportSummary, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("database lock failed: {e}"))?;
+    execute_sales_report(&conn, &branch_id)
 }
 
 fn validate_request(request: &CreateSaleRequest) -> Result<(), String> {
