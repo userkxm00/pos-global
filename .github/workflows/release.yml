@@ -4,6 +4,11 @@ on:
   push:
     tags: ['v*.*.*']
 
+# The release workflow creates GitHub Releases and uploads signed assets.
+# Keep the token scope explicit and minimal for this job.
+permissions:
+  contents: write
+
 jobs:
   release:
     strategy:
