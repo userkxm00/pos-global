@@ -155,6 +155,8 @@ It is not a POS application dependency.
 
 ## Installation and provenance policy
 
+**Installation policy:** external skills are installed only in the agent/developer environment; they are never product runtime dependencies solely because the agent uses them.
+
 External skills and research projects are agent/developer tooling or references, not desktop application dependencies.
 
 Never add an external project's npm package, Python package, runtime binary, or entire repository to the product solely because the agent uses the project's ideas.
