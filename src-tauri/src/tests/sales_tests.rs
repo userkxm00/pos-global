@@ -1,4 +1,6 @@
-use crate::commands::sales::{execute_create_sale, execute_sales_report, CreateSaleRequest, SaleItem};
+use crate::commands::sales::{
+    execute_create_sale, execute_sales_report, CreateSaleRequest, SaleItem,
+};
 use rusqlite::Connection;
 
 fn setup_db() -> Connection {
