@@ -1,4 +1,4 @@
-use crate::commands::sales::{execute_create_sale, CreateSaleRequest, SaleItem};
+use crate::commands::sales::{execute_create_sale, execute_sales_report, CreateSaleRequest, SaleItem};
 use rusqlite::Connection;
 
 fn setup_db() -> Connection {
@@ -308,23 +308,11 @@ fn sales_report_is_branch_scoped() {
     )
     .unwrap();
 
-    let branch_one: (i64, i64) = conn
-        .query_row(
-            "SELECT COUNT(*), COALESCE(SUM(total_minor), 0)
-             FROM sales WHERE branch_id = 'branch-1'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap();
-    let branch_two: (i64, i64) = conn
-        .query_row(
-            "SELECT COUNT(*), COALESCE(SUM(total_minor), 0)
-             FROM sales WHERE branch_id = 'branch-2'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap();
+    let branch_one = execute_sales_report(&conn, "branch-1").unwrap();
+    let branch_two = execute_sales_report(&conn, "branch-2").unwrap();
 
-    assert_eq!(branch_one, (1, 125));
-    assert_eq!(branch_two, (1, 999));
+    assert_eq!(branch_one.sales_count, 1);
+    assert_eq!(branch_one.total_minor, 125);
+    assert_eq!(branch_two.sales_count, 1);
+    assert_eq!(branch_two.total_minor, 999);
 }
