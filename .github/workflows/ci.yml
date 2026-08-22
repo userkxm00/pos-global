@@ -49,6 +49,8 @@ jobs:
           node-version: 22
       - name: Install frontend tooling for deterministic Tauri icon generation
         run: npm install --ignore-scripts
+      - name: Build frontend for Tauri Rust checks
+        run: npm run build
       - name: Generate Tauri icons from source SVG
         run: npx --no-install tauri icon src-tauri/app-icon.svg
       - uses: dtolnay/rust-toolchain@stable

@@ -25,7 +25,7 @@ fn main() {
             let db_path = app_data_dir.join("pos-global.sqlite");
             let db =
                 db::open_database(&db_path).expect("local database initialization must succeed");
-            app.manage(db::DbState(db));
+            app.manage(db::DbState(db.into()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
