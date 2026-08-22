@@ -1,13 +1,13 @@
 # SonarQube Cloud verification
 
-GitHub-hosted Actions are intentionally not an automatic gate while Actions minutes are exhausted.
-
-For ongoing review, use Gitar plus SonarQube Cloud.
+GitHub Actions automatic verification is enabled because this repository is public and uses GitHub-hosted standard runners. Gitar and SonarQube Cloud remain complementary review/analysis layers.
 
 ## SonarQube Cloud
 
-Prefer SonarQube Cloud Automatic Analysis for the GitHub repository when the project is eligible. Automatic Analysis runs in SonarQube Cloud and therefore does not consume GitHub Actions minutes.
+The repository is configured with `sonar-project.properties` for the `userkxm00_pos-global` project key and `userkxm00` organization. A SonarQube Cloud project must still be imported/connected in SonarQube Cloud; the properties file alone does not create the cloud project.
 
-Important: Rust is currently not eligible for SonarQube Cloud Automatic Analysis. Sonar is therefore a supplemental static-analysis signal for supported code (not a replacement for Rust tests). Gitar remains the primary cross-language review during the Actions-quota constraint.
+The CI workflow runs the SonarQube scan on pushes to `main`, manual verification runs, and same-repository pull requests when the required `SONAR_TOKEN` secret is available. Pull requests from forks do not receive the secret and therefore do not run the Sonar job.
 
-If CI-based Sonar analysis is required later for Rust/full-project analysis, re-enable the GitHub Actions Sonar workflow after Actions capacity is available or move it to a suitable runner.
+Important: Rust is currently not eligible for SonarQube Cloud Automatic Analysis. Sonar is therefore a supplemental static-analysis signal for supported code, not a replacement for Rust formatting, clippy, or tests. Gitar provides an additional cross-language review signal.
+
+When GitHub Actions is later moved back to a private repository or a quota-constrained runner environment, preserve the same review separation: Gitar for contextual code review, SonarQube for static analysis, and executable Rust/frontend tests for behavior verification.
