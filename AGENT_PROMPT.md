@@ -30,6 +30,7 @@ Before touching code, read:
 - `AGENT_EXTERNAL_SKILLS.md`
 - `AGENT_REFERENCE_RESEARCH.md`
 - `AGENT_REFERENCE_RESEARCH_FRAPPE.md`
+- `AGENT_REFERENCE_RESEARCH_FRAPPE_ADDENDUM_2.md`
 - `RELEASE_SPEC.md`
 - `DEFINITION_OF_READY.md`
 - `TASK_SPEC.md`
@@ -89,8 +90,8 @@ Before coding:
 
 ## External research protocol
 
-1. Use `AGENT_REFERENCE_RESEARCH.md` and `AGENT_REFERENCE_RESEARCH_FRAPPE.md` only for bounded research, not as product authority.
-2. External research may inform agent execution, POS/hardware UX, commerce modules, forms, analytics, code review, accounting, MCP/Copilot, sync and other future capabilities.
+1. Use `AGENT_REFERENCE_RESEARCH.md`, `AGENT_REFERENCE_RESEARCH_FRAPPE.md`, and `AGENT_REFERENCE_RESEARCH_FRAPPE_ADDENDUM_2.md` only for bounded research, not as product authority.
+2. External research may inform agent execution, POS/hardware UX, commerce modules, forms, analytics, code review, accounting, MCP/Copilot, tax-provider adapters, localization architecture, backup/recovery, release engineering, sync and other future capabilities.
 3. External research never overrides repository contracts, approved ADRs, acceptance criteria, financial/security rules, regulatory decisions, licensing decisions, or provider boundaries.
 4. Never copy external code into Zylo without license review and explicit approval.
 5. When research materially influences an implementation decision, record the source, reviewed revision where available, adopted idea, rejected alternatives, and any license/compliance considerations in task evidence or an ADR.
