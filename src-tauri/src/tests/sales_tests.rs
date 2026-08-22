@@ -37,8 +37,8 @@ fn setup_db() -> Connection {
     .unwrap();
     conn.execute(
         "INSERT INTO inventory (
-            id, branch_id, product_id, variant_id, quantity, low_stock_threshold
-         ) VALUES ('inventory-1', 'branch-1', 'product-1', NULL, 10, 2)",
+            id, branch_id, product_id, variant_id, quantity, quantity_milli, low_stock_threshold
+         ) VALUES ('inventory-1', 'branch-1', 'product-1', NULL, 10, 10000, 2)",
         [],
     )
     .unwrap();
@@ -113,9 +113,9 @@ fn rejects_overselling_and_rolls_back() {
 
     assert!(execute_create_sale(&conn, &request(11000, "idem-4")).is_err());
 
-    let qty: f64 = conn
+    let qty_milli: i64 = conn
         .query_row(
-            "SELECT quantity FROM inventory WHERE id = 'inventory-1'",
+            "SELECT quantity_milli FROM inventory WHERE id = 'inventory-1'",
             [],
             |r| r.get(0),
         )
@@ -124,37 +124,37 @@ fn rejects_overselling_and_rolls_back() {
         .query_row("SELECT COUNT(*) FROM sales", [], |r| r.get(0))
         .unwrap();
 
-    assert_eq!(qty, 10.0);
+    assert_eq!(qty_milli, 10000);
     assert_eq!(sales, 0);
 }
 
 #[test]
-fn successful_sale_decrements_stock() {
+fn successful_sale_decrements_stock_using_integer_units() {
     let conn = setup_db();
     let sale_id =
         execute_create_sale(&conn, &request(2000, "idem-5")).expect("sale should succeed");
 
     assert!(!sale_id.is_empty());
 
-    let qty: f64 = conn
+    let qty_milli: i64 = conn
         .query_row(
-            "SELECT quantity FROM inventory WHERE id = 'inventory-1'",
+            "SELECT quantity_milli FROM inventory WHERE id = 'inventory-1'",
             [],
             |r| r.get(0),
         )
         .unwrap();
 
-    assert_eq!(qty, 8.0);
+    assert_eq!(qty_milli, 8000);
 }
 
 #[test]
-fn successful_sale_records_stock_movement() {
+fn successful_sale_records_integer_stock_movement() {
     let conn = setup_db();
     let sale_id = execute_create_sale(&conn, &request(2000, "idem-6")).unwrap();
 
-    let (delta, before, after): (f64, f64, f64) = conn
+    let (delta_milli, before_milli, after_milli): (i64, i64, i64) = conn
         .query_row(
-            "SELECT quantity_delta, quantity_before, quantity_after
+            "SELECT quantity_delta_milli, quantity_before_milli, quantity_after_milli
              FROM stock_movements
              WHERE source_id = ?1",
             [&sale_id],
@@ -162,9 +162,9 @@ fn successful_sale_records_stock_movement() {
         )
         .unwrap();
 
-    assert_eq!(delta, -2.0);
-    assert_eq!(before, 10.0);
-    assert_eq!(after, 8.0);
+    assert_eq!(delta_milli, -2000);
+    assert_eq!(before_milli, 10000);
+    assert_eq!(after_milli, 8000);
 }
 
 #[test]
@@ -184,9 +184,9 @@ fn retry_with_same_idempotency_key_returns_same_sale_without_duplicate_side_effe
     let outbox: i64 = conn
         .query_row("SELECT COUNT(*) FROM outbox_events", [], |r| r.get(0))
         .unwrap();
-    let qty: f64 = conn
+    let qty_milli: i64 = conn
         .query_row(
-            "SELECT quantity FROM inventory WHERE id = 'inventory-1'",
+            "SELECT quantity_milli FROM inventory WHERE id = 'inventory-1'",
             [],
             |r| r.get(0),
         )
@@ -195,7 +195,7 @@ fn retry_with_same_idempotency_key_returns_same_sale_without_duplicate_side_effe
     assert_eq!(sales, 1);
     assert_eq!(movements, 1);
     assert_eq!(outbox, 1);
-    assert_eq!(qty, 9.0);
+    assert_eq!(qty_milli, 9000);
 }
 
 #[test]
@@ -256,8 +256,75 @@ fn successful_sale_uses_minor_money_columns() {
             |r| r.get(0),
         )
         .unwrap();
+    let quantity_milli: i64 = conn
+        .query_row(
+            "SELECT quantity_milli FROM sale_items WHERE sale_id = ?1",
+            [&sale_id],
+            |r| r.get(0),
+        )
+        .unwrap();
 
     assert_eq!(total, 250);
     assert_eq!(line, 250);
     assert_eq!(payment, 250);
+    assert_eq!(quantity_milli, 2000);
+}
+
+#[test]
+fn sales_report_is_branch_scoped() {
+    let conn = setup_db();
+    conn.execute(
+        "INSERT INTO branches (id, name, currency, organization_id)
+         VALUES ('branch-2', 'Other', 'DZD', 'org-1')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO users (id, branch_id, full_name, username, role)
+         VALUES ('user-2', 'branch-2', 'Other Cashier', 'other-cashier', 'cashier')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO shifts (
+            id, branch_id, user_id, status, opening_balance, opening_balance_minor
+         ) VALUES ('shift-2', 'branch-2', 'user-2', 'open', 0, 0)",
+        [],
+    )
+    .unwrap();
+
+    execute_create_sale(&conn, &request(1000, "report-branch-1")).unwrap();
+
+    conn.execute(
+        "INSERT INTO sales (
+            id, branch_id, shift_id, user_id, currency,
+            subtotal, discount_amount, tax_amount, total,
+            subtotal_minor, discount_amount_minor, tax_amount_minor, total_minor, status
+         ) VALUES (
+            'sale-branch-2', 'branch-2', 'shift-2', 'user-2', 'DZD',
+            0, 0, 0, 0, 999, 0, 0, 999, 'completed'
+         )",
+        [],
+    )
+    .unwrap();
+
+    let branch_one: (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(total_minor), 0)
+             FROM sales WHERE branch_id = 'branch-1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let branch_two: (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(total_minor), 0)
+             FROM sales WHERE branch_id = 'branch-2'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+
+    assert_eq!(branch_one, (1, 125));
+    assert_eq!(branch_two, (1, 999));
 }
