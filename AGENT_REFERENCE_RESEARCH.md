@@ -143,6 +143,60 @@ Role:
 
 Reference-only. The repository describes reconstructed/public-observation material; do not treat it as official vendor prompts or authoritative product architecture.
 
+## 10. Flutter Billing App — POS and hardware reference
+
+Source: `https://github.com/Dinesh-Sowndar/flutter_billing_app`
+
+License status: the repository metadata currently does **not** declare a license. Treat the repository as **reference-only** and do not copy code, assets, or dependencies until a source-licensing review confirms permission.
+
+Role:
+- offline-first POS checkout UX;
+- barcode/QR scanning workflows;
+- thermal receipt printing patterns;
+- shop settings and receipt customization;
+- product and billing feature boundaries;
+- feature-first Clean Architecture organization;
+- hardware integration seams for scanners/printers.
+
+Use for:
+- POS checkout UX review;
+- barcode/hardware task design;
+- receipt/printer adapter requirements;
+- offline user-flow comparisons.
+
+Do not adopt Flutter/Hive/Bloc/GetIt from this project as Zylo runtime technology. Zylo's Tauri/Rust/SQLite contracts remain authoritative.
+
+## 11. Alibaba Page Agent — web GUI agent reference
+
+Source: `https://github.com/alibaba/page-agent`
+
+Reviewed license: MIT.
+
+Role:
+- in-page GUI-agent concepts;
+- text/DOM-based UI grounding without screenshot dependence;
+- natural-language action execution;
+- SaaS copilot patterns;
+- accessibility and smart-form-filling ideas;
+- optional MCP/browser control patterns.
+
+Use when designing future Zylo web-portal/admin copilot capabilities or natural-language UI assistance. Do not use it as the POS-domain authority and do not make it a dependency of the desktop POS core without an explicit architecture decision.
+
+## 12. EverShop — commerce module/extension architecture reference
+
+Source: `https://github.com/evershopcommerce/evershop`
+
+Reviewed license: GPL-3.0.
+
+Role:
+- modular commerce architecture;
+- extension/module boundaries;
+- theme/customization separation;
+- React/TypeScript commerce workflows;
+- developer-facing extensibility patterns.
+
+Use to research how a broad commerce platform can separate core capabilities from industry-specific extensions. Because EverShop is GPL-3.0, **do not copy or adapt its code into the closed-source commercial Zylo product without a separate legal review**. Architecture ideas alone may be studied without treating the repository as implementation authority.
+
 ## Authority and safety rules
 
 1. Repository contracts remain the highest authority.
@@ -151,3 +205,4 @@ Reference-only. The repository describes reconstructed/public-observation materi
 4. Never copy code from a research repository into Zylo without checking the source license and obtaining the required approval.
 5. Never claim that a pattern is production-proven for Zylo merely because it exists in an external project.
 6. When external research materially affects an implementation task, record the source, reviewed revision where available, the adopted idea, and rejected alternatives in task evidence or an ADR.
+7. Repositories with unknown/unconfirmed licensing are reference-only until legal provenance is established.
