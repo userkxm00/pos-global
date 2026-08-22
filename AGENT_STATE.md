@@ -6,8 +6,8 @@
 
 - Phase: 0 — Foundation Gate
 - Status: FOUNDATION VERIFICATION IN PROGRESS
-- Current task: verify the exact `foundation/v2` head after the migration-test merge
-- Last verified commit: see the latest successful `foundation-gate-evidence` artifact for the exact `foundation/v2` head
+- Current task: verify the exact `main` head with the authoritative Foundation Gate workflow
+- Last verified commit: see the latest successful `foundation-gate-evidence` artifact for the exact `main` head
 - Next task: close Foundation Gate, then initialize Phase 1 only after `AGENT_IMPLEMENTATION_READY`
 
 ## Rules
@@ -26,11 +26,12 @@
 | 2026-08-18 | Frontend baseline | npm build | PASS | PR CI run |
 | 2026-08-18 | Rust baseline | cargo check/test | PASS on migration-test PR head | PR #3 CI run |
 | 2026-08-18 | Migration verification | fresh DB + repeatability + rollback + exact-money column tests | PASS on PR #3 head | PR #3 CI run |
-| 2026-08-18 | Post-merge exact-head verification | foundation-gate-evidence | PENDING | `foundation/v2` push CI |
+| 2026-08-22 | Foundation evidence branch alignment | authoritative workflow updated from foundation/v2 to main | PENDING | PR: foundation-gate-main-alignment |
+| 2026-08-22 | Post-merge exact-head verification | foundation-gate-evidence | PENDING | `main` push CI after alignment PR |
 
 ## Known blockers
 
-- Exact post-merge `foundation/v2` CI/evidence must be green before `FOUNDATION_VERIFIED`.
+- Exact post-merge `main` CI/evidence must be green before `FOUNDATION_VERIFIED`.
 - Dependency vulnerability findings must have explicit disposition; do not use blind force upgrades.
 - Dependency lockfiles are a reproducibility requirement to close before production/release gating; do not fabricate them.
 - Production signing secrets are intentionally absent until release infrastructure is configured.
