@@ -23,8 +23,8 @@ fn main() {
             std::fs::create_dir_all(&app_data_dir)
                 .expect("application data directory must be creatable");
             let db_path = app_data_dir.join("pos-global.sqlite");
-            let db = db::open_database(&db_path)
-                .expect("local database initialization must succeed");
+            let db =
+                db::open_database(&db_path).expect("local database initialization must succeed");
             app.manage(db::DbState(db));
             Ok(())
         })
