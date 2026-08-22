@@ -56,7 +56,9 @@ REQUIRED_MARKERS = {
     "INDUSTRY_EXECUTION_PLAN.md": ["Universal industry sequence", "acceptance/evidence", "shared financial"],
 }
 
-TASK_RE = re.compile(r"\bF\d+(?:\.\d+)?\.\d{2}\b")
+# Exact task IDs may have one or two numeric components after the phase number,
+# e.g. F1.01, F0.5.01, or F7.01.01.
+TASK_RE = re.compile(r"\bF\d+(?:\.\d+){1,2}\b")
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -118,13 +120,22 @@ def validate_backlog(errors: list[str]) -> set[str]:
 def validate_task_references(errors: list[str], task_ids: set[str]) -> None:
     if not task_ids:
         return
+
     ignored_dirs = {"node_modules", "target", ".git"}
     for path in ROOT.rglob("*.md"):
         if any(part in ignored_dirs for part in path.parts):
             continue
-        for task_id in sorted(set(TASK_RE.findall(read(path)))):
-            if task_id not in task_ids:
-                fail(errors, f"{path.relative_to(ROOT)} references unknown task ID: {task_id}")
+
+        for task_ref in sorted(set(TASK_RE.findall(read(path)))):
+            if task_ref in task_ids:
+                continue
+
+            # Family/namespace references such as F7.01 are valid when the
+            # backlog contains concrete tasks under that family, e.g. F7.01.01.
+            if any(task_id.startswith(f"{task_ref}.") for task_id in task_ids):
+                continue
+
+            fail(errors, f"{path.relative_to(ROOT)} references unknown task ID: {task_ref}")
 
 
 def validate_markdown_links(errors: list[str]) -> None:
@@ -155,7 +166,7 @@ def validate_agent_contracts(errors: list[str]) -> None:
     prompt = ROOT / "AGENT_PROMPT.md"
     if agent.is_file():
         text = read(agent).lower()
-        for marker in ("before every task", "evidence", "gate", "definition of ready"):
+        for marker in ("agent operating system", "before every task", "evidence", "gate", "definition of ready"):
             if marker not in text:
                 fail(errors, f"AGENT_SYSTEM.md missing operational rule: {marker}")
     if prompt.is_file():
@@ -192,8 +203,8 @@ def validate_workflows(errors: list[str]) -> None:
     else:
         text = read(evidence)
         for marker in [
-            "push:", "branches: [foundation/v2]", "github.sha",
-            "git ls-remote origin refs/heads/foundation/v2",
+            "push:", "branches: [main]", "github.sha",
+            "git ls-remote origin refs/heads/main",
             "npm run build", "cargo check", "cargo test", "npm audit --omit=dev",
             ".github/scripts/validate_foundation.py", "actions/upload-artifact@v4",
             ".github/scripts/emit_foundation_evidence.py",
