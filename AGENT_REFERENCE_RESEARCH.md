@@ -197,6 +197,89 @@ Role:
 
 Use to research how a broad commerce platform can separate core capabilities from industry-specific extensions. Because EverShop is GPL-3.0, **do not copy or adapt its code into the closed-source commercial Zylo product without a separate legal review**. Architecture ideas alone may be studied without treating the repository as implementation authority.
 
+## 13. Alibaba Open Code Review — code-review and quality-gate reference
+
+Source: `https://github.com/alibaba/open-code-review`
+
+Reviewed license: Apache-2.0.
+
+Role:
+- hybrid deterministic + LLM-assisted code review;
+- precise line-level review findings;
+- repository-level context for reviews;
+- security-oriented rule patterns;
+- multi-language static checks coordinated with agent review.
+
+Use when evolving Zylo's agent verification/review loop, PR review policy, evidence capture, and deterministic-vs-agentic quality gates. Do not treat its ruleset or product architecture as authoritative for Zylo.
+
+## 14. Alibaba Designable — configurable UI/form-builder reference
+
+Source: `https://github.com/alibaba/designable`
+
+Reviewed license: MIT.
+
+Role:
+- configurable visual/form editing patterns;
+- schema-driven UI composition;
+- designable React component concepts;
+- extensible form/editor architecture.
+
+Use for future Zylo capabilities such as customizable business settings, schema-driven forms, configurable dashboards, and admin-side UI composition. Do not introduce the library as a runtime dependency unless a separate architecture decision approves it.
+
+## 15. Alibaba ChatUI — assistant/chat UI reference
+
+Source: `https://github.com/alibaba/ChatUI`
+
+License: not recorded in this registry because the repository metadata was not independently verified during this review.
+
+Role:
+- conversational assistant interface patterns;
+- message composition and rendering;
+- agent status/progress UX;
+- future Zylo admin/customer copilot UI research.
+
+Treat as reference-only until licensing is explicitly verified. Do not copy code or assets before that review.
+
+## 16. Alibaba Formily — dynamic forms/configuration reference
+
+Source: `https://github.com/alibaba/formily`
+
+Role:
+- schema-driven dynamic forms;
+- field composition and validation patterns;
+- reusable form logic across business contexts;
+- patterns applicable to industry-specific product attributes and business configuration.
+
+Use as research for Zylo's dynamic onboarding, custom attributes, configurable settings, and industry-specific forms. Do not make Formily a runtime dependency without a dedicated architecture decision and license review.
+
+## 17. Dinesh Responsive Dashboard Admin Panel — dashboard UI reference
+
+Source: `https://github.com/Dinesh-Sowndar/flutter_responsive_dashboard_admin_panel_ui`
+
+License status: repository metadata currently does **not** declare a license. Treat as reference-only until licensing is verified.
+
+Role:
+- responsive dashboard composition;
+- admin-panel navigation and density patterns;
+- dashboard cards and analytical layouts;
+- desktop/web back-office UI inspiration.
+
+Do not adopt Flutter-specific runtime architecture. Use only as a visual/product-reference source under Zylo's React/Tauri UI contracts.
+
+## 18. Dinesh Food App UI — restaurant UI reference
+
+Source: `https://github.com/Dinesh-Sowndar/flutter_food_app_ui`
+
+License status: repository licensing was not independently verified during this review. Treat as reference-only until verified.
+
+Role:
+- restaurant/food ordering UI inspiration;
+- menu/category presentation;
+- product customization and modifier-like interaction patterns;
+- food-service visual hierarchy useful for Restaurant/Café use cases.
+
+Use only for design/domain research. Do not copy code or assets without licensing review.
+
 ## Authority and safety rules
 
 1. Repository contracts remain the highest authority.
