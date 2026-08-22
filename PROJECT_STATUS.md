@@ -4,13 +4,13 @@
 
 ## Current state
 
-The repository is in **Foundation Verification**. The agent-executable blueprint is designed, and the remaining work is evidence-based verification of the exact `foundation/v2` head.
+The repository is in **Foundation Verification**. The agent-executable blueprint is designed, and the remaining work is evidence-based verification of the exact `main` head.
 
 ### Readiness state
 
 `FOUNDATION_DESIGNED` → **verification in progress** → `FOUNDATION_VERIFIED` → `AGENT_IMPLEMENTATION_READY`.
 
-The project must not be treated as `AGENT_IMPLEMENTATION_READY` until the exact `foundation/v2` head has current green CI and an uploaded `foundation-gate-evidence-<commit-sha>` artifact.
+The project must not be treated as `AGENT_IMPLEMENTATION_READY` until the exact `main` head has current green CI and an uploaded `foundation-gate-evidence-<commit-sha>` artifact.
 
 ### Architecture decisions
 - Desktop: Tauri 2 + Rust.
@@ -28,7 +28,7 @@ The project must not be treated as `AGENT_IMPLEMENTATION_READY` until the exact 
 
 A prior CI run proved the frontend build but the Rust job failed during Tauri context generation because the expected application icon was absent. The foundation now includes a deterministic SVG icon source and CI generates the required Tauri icon set before Rust verification. This is a foundation-build repair, not an excuse to mark the previous failure as passed.
 
-The migration-test PR also added real SQLite migration, repeatability, exact-money-column and rollback tests. Those passed on the PR head; the resulting post-merge `foundation/v2` commit still requires its own exact-head CI/evidence run.
+The migration-test PR also added real SQLite migration, repeatability, exact-money-column and rollback tests. Those passed on the PR head; the resulting post-merge `main` commit still requires its own exact-head CI/evidence run.
 
 ## Reference implementation boundary
 

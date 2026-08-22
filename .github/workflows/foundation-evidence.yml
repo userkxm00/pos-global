@@ -2,7 +2,7 @@ name: Foundation Gate Evidence
 
 on:
   push:
-    branches: [foundation/v2]
+    branches: [main]
 
 permissions:
   contents: read
@@ -27,10 +27,10 @@ jobs:
           EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ACTUAL_SHA="$(git ls-remote origin refs/heads/foundation/v2 | awk '{print $1}')"
+          ACTUAL_SHA="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
           test "$ACTUAL_SHA" = "$EXPECTED_SHA"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          echo "Exact foundation/v2 head verified: $EXPECTED_SHA"
+          echo "Exact main head verified: $EXPECTED_SHA"
 
       - uses: actions/setup-node@v4
         with:
@@ -104,10 +104,10 @@ jobs:
           {
             echo '## Foundation Gate Evidence'
             echo
-            echo "Exact branch: \`refs/heads/foundation/v2\`"
+            echo "Exact branch: \`refs/heads/main\`"
             echo "Exact commit: \`${GITHUB_SHA}\`"
             echo "Verification workflow: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo
-            echo 'All mandatory foundation validation steps completed successfully on the exact post-merge branch head.'
+            echo 'All mandatory foundation validation steps completed successfully on the exact post-merge main branch head.'
             echo 'The uploaded artifact is authoritative exact-head machine evidence.'
           } >> "$GITHUB_STEP_SUMMARY"
