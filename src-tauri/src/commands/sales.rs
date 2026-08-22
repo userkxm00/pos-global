@@ -98,11 +98,7 @@ pub fn execute_create_sale(
 
         let sale_id = serde_json::from_str::<serde_json::Value>(&result_json)
             .ok()
-            .and_then(|v| {
-                v.get("sale_id")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned)
-            })
+            .and_then(|v| v.get("sale_id").and_then(|v| v.as_str()).map(str::to_owned))
             .ok_or_else(|| "stored idempotency result is invalid".to_string())?;
 
         tx.rollback()
