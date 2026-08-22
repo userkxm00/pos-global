@@ -35,8 +35,8 @@ jobs:
 
       - name: Commit lockfile
         run: |
-          if git diff --quiet -- src-tauri/Cargo.lock; then
-            echo "Cargo.lock is already up to date."
+          if test -f src-tauri/Cargo.lock && git ls-files --error-unmatch src-tauri/Cargo.lock >/dev/null 2>&1 && git diff --quiet -- src-tauri/Cargo.lock; then
+            echo "Cargo.lock is already tracked and up to date."
             exit 0
           fi
 
