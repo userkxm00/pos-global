@@ -37,14 +37,20 @@ Read external-reference documents only when the task is materially related to th
 
 External research is never product authority.
 
-## Tier 4 — Gate/evidence files
+## Tier 4 — Gate, communication, and evidence files
 
-Read when validating or closing a gate:
+Read when validating, completing, blocking, or handing off a task/gate:
 
 - `FOUNDATION_EVIDENCE.md`
 - `ACCEPTANCE_MATRIX.md`
+- `AGENT_COMMUNICATION_PROTOCOL.md`
+- `BLOCKING_CRITERIA.md`
+- `EVIDENCE_TEMPLATE.md`
+- `MILESTONE_CHECKPOINTS.md`
 - task evidence/artifacts
 - relevant ADRs
+
+These files define reporting, blocking, evidence, and milestone mechanics. They do not authorize a new implementation task.
 
 ## Anti-paralysis rule
 
