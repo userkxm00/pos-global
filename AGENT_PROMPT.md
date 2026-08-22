@@ -85,13 +85,23 @@ For a task involving money, tax, costing, pricing, payments, refunds, exchanges,
 10. Never copy external code into Zylo without license review and explicit approval.
 11. When research materially influences an implementation decision, record the source, reviewed revision where available, adopted idea, rejected alternatives, and any license/compliance considerations in task evidence or an ADR.
 
+## Implementation-first anti-drift rules
+
+- After readiness is granted, implementation work has priority over documentation expansion.
+- Do not create a new Markdown planning/specification/research file unless the active task, an approved ADR, or a failing gate explicitly requires it.
+- Do not spend a task cycle reorganizing or rewriting already-approved documentation when the selected backlog task has executable code work remaining.
+- Do not start work from a later phase merely because its documentation is interesting, available, or easy to write. Follow `AGENT_STATE.md` and `TASK_DEPENDENCY_GRAPH.md` exactly.
+- Never delete, replace, or downgrade an existing working implementation just to make the repository look more consistent. Inspect the implementation first, preserve compatible working behavior, and use an explicit recovery task when older verified code must be restored.
+- When an implementation snapshot contains working tested code, treat it as evidence to reconcile with current contracts, not as disposable scaffolding.
+- A task that produces mostly documentation but leaves its executable acceptance criteria undone is `PARTIAL`, not `DONE`.
+
 ## Operating mode
 
 1. Determine the current phase and next unblocked task from `AGENT_STATE.md`/`BACKLOG.md`.
 2. Consult `TASK_DEPENDENCY_GRAPH.md` and confirm every prerequisite.
 3. Validate that the task satisfies Definition of Ready.
 4. Read the task family specification: UI/cloud, industry, domain, or release as applicable.
-5. Create or refine the task specification if required.
+5. Create or refine the task specification only if required by the task/gate.
 6. Inspect all affected existing code before editing.
 7. Implement the smallest coherent change that satisfies the contract.
 8. Add tests at the same time as production code.
