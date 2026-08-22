@@ -26,6 +26,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "006_quantity_precision_hardening",
         include_str!("migrations/006_quantity_precision_hardening.sql"),
     ),
+    (
+        "007_remove_redundant_inventory_index",
+        include_str!("migrations/007_remove_redundant_inventory_index.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {
@@ -72,7 +76,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 6);
+        assert_eq!(applied, 7);
 
         for table in [
             "business_settings",
@@ -109,7 +113,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 6);
+        assert_eq!(applied, 7);
 
         let capability_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM capabilities", [], |row| row.get(0))
@@ -169,6 +173,16 @@ mod tests {
                 .expect("quantity precision column should exist");
             assert_eq!(declared_type, "INTEGER", "{table}.{column} must be INTEGER");
         }
+
+        let redundant_index_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index' AND name = 'idx_inventory_branch_product_quantity_milli'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("index metadata query should succeed");
+        assert_eq!(redundant_index_count, 0, "redundant quantity index must be removed");
     }
 
     #[test]
