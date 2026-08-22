@@ -182,7 +182,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("index metadata query should succeed");
-        assert_eq!(redundant_index_count, 0, "redundant quantity index must be removed");
+        assert_eq!(
+            redundant_index_count, 0,
+            "redundant quantity index must be removed"
+        );
     }
 
     #[test]
