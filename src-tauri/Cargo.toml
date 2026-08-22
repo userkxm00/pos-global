@@ -1,0 +1,31 @@
+[package]
+name = "pos-global"
+version = "0.1.0"
+description = "Global offline-first commerce platform"
+authors = ["Project Team"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+sha2 = "0.10"
+uuid = { version = "1.10.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+# Dependency policy:
+# Do not add dependencies casually. Every new dependency requires a documented
+# reason, alternatives, security/license review, and build/test impact review.
+# SHA-256 is a hash, not a digital signature. License signing uses a separately
+# reviewed public-key signature design. Update signing keys are separate again.

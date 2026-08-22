@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "POS Global",
+  "version": "0.1.0",
+  "identifier": "com.posglobal.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{
+      "title": "POS Global",
+      "width": 1280,
+      "height": 800,
+      "minWidth": 1024,
+      "minHeight": 700,
+      "resizable": true,
+      "fullscreen": false
+    }],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' https://*.supabase.co"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_TAURI_UPDATE_PUBLIC_KEY",
+      "endpoints": [
+        "https://github.com/userkxm00/pos-global/releases/latest/download/latest.json"
+      ],
+      "windows": {"installMode": "passive"}
+    }
+  }
+}
