@@ -36,7 +36,7 @@ pub struct CreateSaleRequest {
     pub currency: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SalesReportSummary {
     pub sales_count: i64,
     pub total_minor: i64,
@@ -64,9 +64,6 @@ pub fn execute_create_sale(
         .unchecked_transaction()
         .map_err(|e| format!("failed to start transaction: {e}"))?;
 
-    // Reserve the idempotency key inside the same transaction as the sale.
-    // With the local DbState mutex, concurrent commands on one device are
-    // serialized; the UNIQUE primary key also protects the persisted record.
     let reserved = tx
         .execute(
             "INSERT INTO idempotency_keys (key, operation, result_json)
@@ -331,20 +328,15 @@ pub fn execute_create_sale(
     Ok(sale_id)
 }
 
-#[tauri::command]
-pub fn get_sales_report(
-    state: tauri::State<crate::db::DbState>,
-    branch_id: String,
+pub fn execute_sales_report(
+    conn: &Connection,
+    branch_id: &str,
 ) -> Result<SalesReportSummary, String> {
     let branch_id = branch_id.trim();
     if branch_id.is_empty() {
         return Err("branch_id is required for sales report".into());
     }
 
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("database lock failed: {e}"))?;
     let sales_count = conn
         .query_row(
             "SELECT COUNT(*) FROM sales WHERE branch_id = ?1",
@@ -364,6 +356,18 @@ pub fn get_sales_report(
         sales_count,
         total_minor,
     })
+}
+
+#[tauri::command]
+pub fn get_sales_report(
+    state: tauri::State<crate::db::DbState>,
+    branch_id: String,
+) -> Result<SalesReportSummary, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("database lock failed: {e}"))?;
+    execute_sales_report(&conn, &branch_id)
 }
 
 fn validate_request(request: &CreateSaleRequest) -> Result<(), String> {
