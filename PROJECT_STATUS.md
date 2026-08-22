@@ -30,6 +30,16 @@ A prior CI run proved the frontend build but the Rust job failed during Tauri co
 
 The migration-test PR also added real SQLite migration, repeatability, exact-money-column and rollback tests. Those passed on the PR head; the resulting post-merge `foundation/v2` commit still requires its own exact-head CI/evidence run.
 
+## Reference implementation boundary
+
+`src-tauri/src/commands/sales.rs` contains a deliberately retained **seed/reference slice** of sale behavior used to validate critical transaction, idempotency, stock-ledger, exact-money, and branch-scoping invariants during Foundation work.
+
+This code **does not mean Phase 3 is complete, does not unlock Phase 3 tasks, and is not authorization for an agent to continue expanding sales functionality during Foundation or Phase 1/2 work**. The implementation is frozen unless an explicitly assigned task targets it.
+
+The reference slice must not be treated as the final authorization model. In particular, `create_sale` currently receives user/branch/shift identifiers through its request boundary and validates their relationships to the open shift; it does not replace the future authenticated-session and Rust authorization context defined for Phase 1. Phase 1 authorization work must close this boundary before the sale path is treated as production-ready.
+
+The authoritative Phase 3 completion criteria remain the Phase 3 backlog, task dependencies, acceptance criteria, tests, and evidence. Existing reference code never changes phase readiness or grants permission to skip earlier tasks.
+
 ## Not yet production-ready
 
 Core business modules, full RLS policies, cloud sync implementation, license server, billing website, hardware adapters, complete reporting, E2E testing, code signing and production deployment still require implementation and evidence.
