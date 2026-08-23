@@ -130,9 +130,12 @@ pub fn create_organization(
         params![id, name, default_currency, default_language],
     )?;
 
-    get_organization(conn, &id)?.ok_or_else(|| {
-        OrganizationError::Database("Failed to load newly created organization".into())
-    })
+    match get_organization(conn, &id)? {
+        Some(org) => Ok(org),
+        None => Err(OrganizationError::Database(
+            "Failed to load newly created organization".into(),
+        )),
+    }
 }
 
 /// Retrieves an organization by ID.
@@ -188,8 +191,12 @@ pub fn update_organization(
         )));
     }
 
-    get_organization(conn, &id)?
-        .ok_or_else(|| OrganizationError::NotFound(format!("Organization '{id}' disappeared")))
+    match get_organization(conn, &id)? {
+        Some(org) => Ok(org),
+        None => Err(OrganizationError::NotFound(format!(
+            "Organization '{id}' disappeared"
+        ))),
+    }
 }
 
 /// Lists all organizations ordered by creation date.

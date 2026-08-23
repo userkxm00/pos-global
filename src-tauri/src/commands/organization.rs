@@ -27,9 +27,10 @@ pub fn get_organization(
         .0
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
-    organization::get_organization(&conn, &organization_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Organization with ID '{organization_id}' not found"))
+    match organization::get_organization(&conn, &organization_id).map_err(|e| e.to_string())? {
+        Some(org) => Ok(org),
+        None => Err(format!("Organization with ID '{organization_id}' not found")),
+    }
 }
 
 #[tauri::command]

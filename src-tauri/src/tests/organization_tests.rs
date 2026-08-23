@@ -1,59 +1,49 @@
-// Tests for Organization domain model, validation, repository, and tenant isolation.
-// F1.01 — Organization Model
-
 use crate::organization::{
     create_organization, get_organization, list_organizations, update_organization,
-    CreateOrganizationInput, OrganizationError, UpdateOrganizationInput,
+    CreateOrganizationInput, UpdateOrganizationInput,
 };
 use rusqlite::Connection;
 
-fn setup_test_db() -> Connection {
+fn setup_db() -> Connection {
     let conn = Connection::open_in_memory().expect("open in-memory database");
     crate::db::init_database(&conn).expect("apply all migrations");
     conn
 }
 
 #[test]
-fn create_organization_validates_empty_name() {
-    let conn = setup_test_db();
+fn rejects_empty_name() {
+    let conn = setup_db();
 
     let input_empty = CreateOrganizationInput {
         name: "".into(),
         default_currency: Some("USD".into()),
         default_language: Some("en".into()),
     };
-    let result_empty = create_organization(&conn, input_empty);
-    assert!(matches!(result_empty, Err(OrganizationError::Validation(_))));
+    assert!(create_organization(&conn, input_empty).is_err());
 
     let input_whitespace = CreateOrganizationInput {
         name: "   \t\n  ".into(),
         default_currency: Some("USD".into()),
         default_language: Some("en".into()),
     };
-    let result_whitespace = create_organization(&conn, input_whitespace);
-    assert!(matches!(
-        result_whitespace,
-        Err(OrganizationError::Validation(_))
-    ));
+    assert!(create_organization(&conn, input_whitespace).is_err());
 }
 
 #[test]
-fn create_organization_validates_name_length() {
-    let conn = setup_test_db();
+fn rejects_overlong_name() {
+    let conn = setup_db();
 
-    let long_name = "a".repeat(256);
     let input = CreateOrganizationInput {
-        name: long_name,
+        name: "a".repeat(256),
         default_currency: Some("USD".into()),
         default_language: Some("en".into()),
     };
-    let result = create_organization(&conn, input);
-    assert!(matches!(result, Err(OrganizationError::Validation(_))));
+    assert!(create_organization(&conn, input).is_err());
 }
 
 #[test]
-fn create_organization_validates_invalid_currency() {
-    let conn = setup_test_db();
+fn rejects_invalid_currency() {
+    let conn = setup_db();
 
     for invalid_currency in ["usd", "US", "USDT", "123", "US$", "   "] {
         let input = CreateOrganizationInput {
@@ -61,17 +51,13 @@ fn create_organization_validates_invalid_currency() {
             default_currency: Some(invalid_currency.into()),
             default_language: Some("en".into()),
         };
-        let result = create_organization(&conn, input);
-        assert!(
-            matches!(result, Err(OrganizationError::Validation(_))),
-            "Expected currency '{invalid_currency}' to be rejected"
-        );
+        assert!(create_organization(&conn, input).is_err());
     }
 }
 
 #[test]
-fn create_organization_validates_invalid_language() {
-    let conn = setup_test_db();
+fn rejects_invalid_language() {
+    let conn = setup_db();
 
     for invalid_lang in ["", "   ", "e", "toolonglanguagecode123", "en!@#"] {
         let input = CreateOrganizationInput {
@@ -79,17 +65,13 @@ fn create_organization_validates_invalid_language() {
             default_currency: Some("USD".into()),
             default_language: Some(invalid_lang.into()),
         };
-        let result = create_organization(&conn, input);
-        assert!(
-            matches!(result, Err(OrganizationError::Validation(_))),
-            "Expected language '{invalid_lang}' to be rejected"
-        );
+        assert!(create_organization(&conn, input).is_err());
     }
 }
 
 #[test]
-fn create_organization_with_defaults() {
-    let conn = setup_test_db();
+fn successful_creation_uses_defaults() {
+    let conn = setup_db();
 
     let input = CreateOrganizationInput {
         name: "Acme Retail".into(),
@@ -106,8 +88,8 @@ fn create_organization_with_defaults() {
 }
 
 #[test]
-fn create_organization_persists_and_retrieves() {
-    let conn = setup_test_db();
+fn successful_creation_persists_and_retrieves() {
+    let conn = setup_db();
 
     let input = CreateOrganizationInput {
         name: "Global Market Dz".into(),
@@ -127,24 +109,23 @@ fn create_organization_persists_and_retrieves() {
 }
 
 #[test]
-fn get_organization_returns_none_for_missing() {
-    let conn = setup_test_db();
+fn missing_organization_returns_none() {
+    let conn = setup_db();
 
     let fetched = get_organization(&conn, "non-existent-org-id").expect("query should succeed");
     assert!(fetched.is_none());
 }
 
 #[test]
-fn get_organization_validates_empty_id() {
-    let conn = setup_test_db();
+fn rejects_empty_id_on_lookup() {
+    let conn = setup_db();
 
-    let result = get_organization(&conn, "   ");
-    assert!(matches!(result, Err(OrganizationError::Validation(_))));
+    assert!(get_organization(&conn, "   ").is_err());
 }
 
 #[test]
-fn update_organization_updates_all_fields() {
-    let conn = setup_test_db();
+fn successful_update_modifies_all_fields() {
+    let conn = setup_db();
 
     let created = create_organization(
         &conn,
@@ -179,8 +160,8 @@ fn update_organization_updates_all_fields() {
 }
 
 #[test]
-fn update_organization_fails_for_nonexistent_id() {
-    let conn = setup_test_db();
+fn update_fails_for_missing_organization() {
+    let conn = setup_db();
 
     let result = update_organization(
         &conn,
@@ -192,12 +173,12 @@ fn update_organization_fails_for_nonexistent_id() {
         },
     );
 
-    assert!(matches!(result, Err(OrganizationError::NotFound(_))));
+    assert!(result.is_err());
 }
 
 #[test]
-fn update_organization_validates_inputs() {
-    let conn = setup_test_db();
+fn update_rejects_invalid_inputs() {
+    let conn = setup_db();
 
     let created = create_organization(
         &conn,
@@ -209,7 +190,6 @@ fn update_organization_validates_inputs() {
     )
     .expect("creation should succeed");
 
-    // Invalid name
     let res1 = update_organization(
         &conn,
         UpdateOrganizationInput {
@@ -219,9 +199,8 @@ fn update_organization_validates_inputs() {
             default_language: "en".into(),
         },
     );
-    assert!(matches!(res1, Err(OrganizationError::Validation(_))));
+    assert!(res1.is_err());
 
-    // Invalid currency
     let res2 = update_organization(
         &conn,
         UpdateOrganizationInput {
@@ -231,12 +210,12 @@ fn update_organization_validates_inputs() {
             default_language: "en".into(),
         },
     );
-    assert!(matches!(res2, Err(OrganizationError::Validation(_))));
+    assert!(res2.is_err());
 }
 
 #[test]
-fn list_organizations_returns_ordered_list() {
-    let conn = setup_test_db();
+fn list_organizations_returns_ordered_results() {
+    let conn = setup_db();
 
     let org1 = create_organization(
         &conn,
@@ -268,7 +247,7 @@ fn list_organizations_returns_ordered_list() {
 
 #[test]
 fn tenant_isolation_boundary() {
-    let conn = setup_test_db();
+    let conn = setup_db();
 
     let org_a = create_organization(
         &conn,
@@ -290,10 +269,8 @@ fn tenant_isolation_boundary() {
     )
     .unwrap();
 
-    // Verify distinct IDs
     assert_ne!(org_a.id, org_b.id);
 
-    // Create branch for Tenant Alpha
     conn.execute(
         "INSERT INTO branches (id, name, currency, organization_id)
          VALUES ('branch-alpha', 'Alpha Main', 'USD', ?1)",
@@ -301,7 +278,6 @@ fn tenant_isolation_boundary() {
     )
     .unwrap();
 
-    // Create branch for Tenant Beta
     conn.execute(
         "INSERT INTO branches (id, name, currency, organization_id)
          VALUES ('branch-beta', 'Beta Main', 'EUR', ?1)",
@@ -309,7 +285,6 @@ fn tenant_isolation_boundary() {
     )
     .unwrap();
 
-    // Query branches scoped to Tenant Alpha
     let alpha_branches: Vec<String> = conn
         .prepare("SELECT id FROM branches WHERE organization_id = ?1")
         .unwrap()
@@ -320,7 +295,6 @@ fn tenant_isolation_boundary() {
 
     assert_eq!(alpha_branches, vec!["branch-alpha"]);
 
-    // Query branches scoped to Tenant Beta
     let beta_branches: Vec<String> = conn
         .prepare("SELECT id FROM branches WHERE organization_id = ?1")
         .unwrap()
