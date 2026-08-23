@@ -15,6 +15,7 @@ Build a commercial, global, offline-first POS and store-management platform that
 - Never add dependencies without a documented reason and compatibility/security review.
 - Never allow an agent to invent a major financial, regulatory, security, schema, synchronization or licensing rule silently.
 - Never design shared business contracts as desktop-only when they may be consumed by future mobile clients; cross-client compatibility must be preserved by explicit contracts.
+- Never treat the full industry/module roadmap as MVP scope without explicit product approval.
 
 ## Phase 0 — Foundation Gate
 Deliver: architecture, domain model, schema, migration runner, exact-money policy, units policy, tenant model, capability/module model, security boundaries, Supabase contract, updater contract, CI contract, testing strategy and cross-client compatibility boundaries for future desktop/mobile clients.
@@ -27,6 +28,18 @@ Exit: every shared business primitive has an explicit contract; unresolved decis
 ## Phase 0.6 — Commercial & Regulatory Finalization Gate
 Deliver: license/business model, entitlement policy, billing-provider abstraction and eligibility review, POS payment-provider strategy, launch-market scope, jurisdiction adapter architecture, Algeria regulatory research package, France/EU expansion scope, website commercial lifecycle and regulatory evidence policy. See `PHASE_0_6_COMMERCIAL_REGULATORY_FINALIZATION.md`.
 Exit: launch markets are explicitly approved; provider choices have an evidence/eligibility checklist; no global compliance claim depends on an undocumented assumption.
+
+## Phase 0.65 — Product Strategy & MVP Gate
+Deliver: approved initial launch market, ICP, first industry/bounded industry scope, primary reason-to-buy, MVP capability list, explicit non-goals, business model hypothesis, pricing hypothesis, competitive positioning, onboarding journey, initial migration/import scope, integration boundaries and milestone definitions. See `PRODUCT_STRATEGY.md`.
+
+Rules:
+- Phase 7 industry families are roadmap scope, not automatic MVP scope.
+- Mobile remains future-compatible but is not automatically MVP scope; promote it only by explicit product decision.
+- Integration boundaries must be defined before provider-specific implementations expand MVP scope.
+- Do not invent target market, pricing, positioning or launch dates.
+- Product, pricing, launch, regulatory and competitive decisions require human approval.
+
+Exit: MVP can be described in one bounded sentence; its user, market, reason-to-buy, required workflow, non-goals and commercial hypothesis are explicitly recorded; a measurable MVP-ready milestone exists.
 
 ## Phase 0.7 — Agent Readiness Gate
 Deliver: complete agent operating system, master/planner/implementer/reviewer prompts, granular backlog, task specification, Definition of Ready/Done, ADR protocol, evidence protocol, golden E2E flows, acceptance matrix and persistent agent state.
@@ -58,18 +71,22 @@ Exit: offline sales sync exactly once; duplicate/retry/conflict tests pass; the 
 
 ## Phase 7 — Industry modules
 Use capabilities rather than separate products. Initial module families: Retail, Fashion, Grocery, Electronics, Automotive, Pharmacy, Furniture, Hardware, Restaurant, Café, Fast Food, Bakery, Repair, Rental, Salon, Wholesale, Hospitality, Events, Services and other configurable commerce workflows.
-Exit: each module has domain tests and does not corrupt the shared inventory/sales/financial invariants.
+
+MVP rule: only the industry/capability scope approved in `PRODUCT_STRATEGY.md` may be implemented for the first commercial release. Other families remain roadmap work until validated.
+
+Exit: each implemented module has domain tests and does not corrupt the shared inventory/sales/financial invariants.
 
 ## Phase 8 — Licensing
 Signed license format, activation, device entitlement, plans, expiry/grace, revocation, offline verification, device reset and server-side license administration. License signing key is isolated from updater signing key.
 Exit: tamper/replay/offline/clock and entitlement tests pass; entitlement and version compatibility rules are defined for desktop and future mobile clients where applicable.
 
 ## Phase 9 — Website and billing
-Marketing site, pricing, account portal, checkout, desktop/mobile download center, license management, documentation and support entry points. Desktop distributions may include Windows/macOS/Linux installers; mobile distribution must integrate with the appropriate official app-store listings and any approved direct-distribution channel. Billing provider must be selected after the Phase 0.6 commercial/legal review.
-Exit: a customer can acquire, activate and manage a license without manual database intervention; the official website provides a clear release/distribution entry point for supported desktop and mobile clients.
+Marketing site, positioning/pricing, account portal, onboarding entry points, checkout, desktop/mobile download center, license management, documentation and support entry points. Desktop distributions may include Windows/macOS/Linux installers; mobile distribution must integrate with the appropriate official app-store listings and any approved direct-distribution channel. Billing provider must be selected after the Phase 0.6 commercial/legal review.
+Exit: a customer can understand the product promise, acquire/access the approved MVP, onboard, activate and manage a license without manual database intervention; the official website provides clear release/distribution entry points for supported desktop and mobile clients.
 
 ## Phase 10 — Hardware
 Barcode scanner, receipt printer, cash drawer, label printer, supported scales and optional customer display through stable Rust abstractions. Device failures must not corrupt transactions.
+MVP rule: implement only hardware required by the approved first market and first merchant workflow; keep the abstraction extensible for later hardware families.
 
 ## Phase 11 — Reporting and operations
 Sales, inventory, valuation, COGS, profit, cash, tax, debt, customer, product and branch reports. Add export and audit views.
@@ -78,7 +95,7 @@ Sales, inventory, valuation, COGS, profit, cash, tax, debt, customer, product an
 Windows/macOS/Linux builds, Android/iOS build pipelines, code signing, GitHub Actions, staged releases, signed Tauri updater artifacts for desktop, update availability UI, safe-install point, rollback/recovery strategy, app-store submission/release automation where supported, version compatibility policy and release notes.
 
 ## Phase 13 — Production hardening
-Performance, crash/error monitoring, backups, restore drills, migration rollback strategy, security review, dependency audit, accessibility, RTL/i18n, E2E, desktop/mobile compatibility testing and pilot stores.
+Performance, crash/error monitoring, backups, restore drills, migration rollback strategy, security review, dependency audit, accessibility, RTL/i18n, E2E, desktop/mobile compatibility testing, onboarding validation, data-import validation, pilot support procedures and pilot stores.
 
 ## Phase 14 — Launch
 Private beta → monitored pilot → paid beta → production. Keep rollback, incident response and support procedures ready.
@@ -93,7 +110,7 @@ Deliver a unified distribution lifecycle: official website download center, desk
 Exit: Android and iOS clients authenticate securely, access only authorized organization/branch data, synchronize without duplicate business transactions, follow the shared financial/inventory invariants, pass cross-client compatibility and sync tests, and can be released through the official distribution lifecycle without manual database intervention.
 
 ## Definition of Ready
-A task may start only when its objective, dependencies, acceptance criteria, security impact, database impact, affected contracts and required evidence are known. Critical financial/regulatory/security/schema/provider decisions must be resolved or explicitly blocked before implementation.
+A task may start only when its objective, dependencies, acceptance criteria, security impact, database impact, affected contracts and required evidence are known. Critical financial/regulatory/security/schema/provider/product decisions must be resolved or explicitly blocked before implementation.
 
 ## Definition of Done
-A phase is complete only when code, migrations, tests, security checks, failure paths, documentation and acceptance evidence exist and CI passes. A passing build alone is never sufficient.
+A phase is complete only when code, migrations, tests, security checks, failure paths, documentation, product acceptance and executable evidence exist and CI passes. A passing build alone is never sufficient.
