@@ -27,6 +27,7 @@ This roadmap reduces startup overhead without weakening repository contracts.
 - `COMMERCIAL_PROVIDER_MATRIX.md` for provider decisions
 - `PHASE_0_5_DOMAIN_FINALIZATION.md` / `PHASE_0_6_COMMERCIAL_REGULATORY_FINALIZATION.md` when the task touches the decisions defined there
 - `AGENT_EXTERNAL_SKILLS.md` only for UI/design or agent-tooling work
+- `REFERENCE_CATALOG.md` for website, UI, mobile, design-system, or other tasks that may benefit from an approved external reference
 
 ## Tier 3 — Targeted research
 
