@@ -30,6 +30,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "007_remove_redundant_inventory_index",
         include_str!("migrations/007_remove_redundant_inventory_index.sql"),
     ),
+    (
+        "008_inventory_and_schema_hardening",
+        include_str!("migrations/008_inventory_and_schema_hardening.sql"),
+    ),
+    (
+        "009_remove_redundant_product_barcode_index",
+        include_str!("migrations/009_remove_redundant_product_barcode_index.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {
@@ -76,7 +84,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 7);
+        assert_eq!(applied, 9);
 
         for table in [
             "business_settings",
@@ -113,7 +121,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 7);
+        assert_eq!(applied, 9);
 
         let capability_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM capabilities", [], |row| row.get(0))
@@ -186,6 +194,47 @@ mod tests {
             redundant_index_count, 0,
             "redundant quantity index must be removed"
         );
+
+        let redundant_barcode_index_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index' AND name = 'idx_products_barcode'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("barcode index metadata query should succeed");
+        assert_eq!(
+            redundant_barcode_index_count, 0,
+            "redundant barcode index must be removed"
+        );
+    }
+
+    #[test]
+    fn inventory_identity_requires_single_non_variant_row() {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        init_database(&conn).expect("migrations should succeed");
+
+        let partial_unique_index_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index'
+                   AND name = 'ux_inventory_branch_product_no_variant'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("inventory identity index query should succeed");
+        assert_eq!(partial_unique_index_count, 1);
+
+        let variant_unique_index_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index'
+                   AND name = 'ux_inventory_branch_product_variant'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("variant inventory identity index query should succeed");
+        assert_eq!(variant_unique_index_count, 1);
     }
 
     #[test]
