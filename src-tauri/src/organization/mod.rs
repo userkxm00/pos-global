@@ -38,9 +38,15 @@ pub enum OrganizationError {
 impl std::fmt::Display for OrganizationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            OrganizationError::Validation(msg) => write!(f, "Validation error: {msg}"),
-            OrganizationError::NotFound(msg) => write!(f, "Organization not found: {msg}"),
-            OrganizationError::Database(msg) => write!(f, "Database error: {msg}"),
+            OrganizationError::Validation(msg) => {
+                write!(f, "Validation error: {msg}")
+            }
+            OrganizationError::NotFound(msg) => {
+                write!(f, "Organization not found: {msg}")
+            }
+            OrganizationError::Database(msg) => {
+                write!(f, "Database error: {msg}")
+            }
         }
     }
 }
@@ -53,7 +59,7 @@ impl From<rusqlite::Error> for OrganizationError {
     }
 }
 
-/// Validates organization name. Must be non-empty and within reasonable length.
+/// Validates organization name. Must be non-empty and within length bounds.
 pub fn validate_name(name: &str) -> Result<String, OrganizationError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -74,13 +80,13 @@ pub fn validate_currency(currency: &str) -> Result<String, OrganizationError> {
     let trimmed = currency.trim();
     if trimmed.len() != 3 || !trimmed.chars().all(|c| c.is_ascii_uppercase()) {
         return Err(OrganizationError::Validation(format!(
-            "Invalid ISO currency code '{trimmed}'. Expected 3 uppercase ASCII letters (e.g. 'USD', 'DZD', 'EUR')"
+            "Invalid ISO currency code '{trimmed}'"
         )));
     }
     Ok(trimmed.to_string())
 }
 
-/// Validates language code. Must be 2-10 ASCII characters (e.g. 'en', 'fr', 'ar').
+/// Validates language code. Must be 2-10 ASCII characters.
 pub fn validate_language(language: &str) -> Result<String, OrganizationError> {
     let trimmed = language.trim();
     if trimmed.len() < 2
@@ -90,7 +96,7 @@ pub fn validate_language(language: &str) -> Result<String, OrganizationError> {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
         return Err(OrganizationError::Validation(format!(
-            "Invalid language code '{trimmed}'. Expected 2-10 alphanumeric characters (e.g. 'en', 'fr', 'ar')"
+            "Invalid language code '{trimmed}'"
         )));
     }
     Ok(trimmed.to_string())
@@ -200,7 +206,9 @@ pub fn update_organization(
 }
 
 /// Lists all organizations ordered by creation date.
-pub fn list_organizations(conn: &Connection) -> Result<Vec<Organization>, OrganizationError> {
+pub fn list_organizations(
+    conn: &Connection,
+) -> Result<Vec<Organization>, OrganizationError> {
     let mut stmt = conn.prepare(
         "SELECT id, name, default_currency, default_language, created_at
          FROM organizations

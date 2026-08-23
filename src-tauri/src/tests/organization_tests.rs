@@ -79,7 +79,8 @@ fn successful_creation_uses_defaults() {
         default_language: None,
     };
 
-    let org = create_organization(&conn, input).expect("organization creation should succeed");
+    let org = create_organization(&conn, input)
+        .expect("organization creation should succeed");
     assert!(!org.id.is_empty());
     assert_eq!(org.name, "Acme Retail");
     assert_eq!(org.default_currency, "USD");
@@ -97,7 +98,8 @@ fn successful_creation_persists_and_retrieves() {
         default_language: Some("ar".into()),
     };
 
-    let created = create_organization(&conn, input).expect("organization creation should succeed");
+    let created = create_organization(&conn, input)
+        .expect("organization creation should succeed");
     let fetched = get_organization(&conn, &created.id)
         .expect("query should succeed")
         .expect("organization should exist");
@@ -112,7 +114,8 @@ fn successful_creation_persists_and_retrieves() {
 fn missing_organization_returns_none() {
     let conn = setup_db();
 
-    let fetched = get_organization(&conn, "non-existent-org-id").expect("query should succeed");
+    let fetched = get_organization(&conn, "non-existent-org-id")
+        .expect("query should succeed");
     assert!(fetched.is_none());
 }
 
