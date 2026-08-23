@@ -59,3 +59,9 @@ These files define reporting, blocking, evidence, and milestone mechanics. They 
 Do not read the entire repository documentation tree by default. Expand from Tier 1 only as required by the assigned task.
 
 The agent must never interpret a reading list as permission to start another task.
+
+## Execution-over-planning rule
+
+Once the assigned task is Ready and its required decisions are resolved, implementation takes priority over creating additional planning material. Do not create new planning, strategy, architecture, or process documents unless the assigned task, an approved ADR, or a failing verification gate explicitly requires one.
+
+The product roadmap remains global and multi-industry. The approved first validation scope is only an MVP sequencing constraint and must never be treated as a permanent product restriction.
