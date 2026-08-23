@@ -23,7 +23,10 @@ fn create_organization_validates_empty_name() {
         default_language: Some("en".into()),
     };
     let result_empty = create_organization(&conn, input_empty);
-    assert!(matches!(result_empty, Err(OrganizationError::Validation(_))));
+    assert!(matches!(
+        result_empty,
+        Err(OrganizationError::Validation(_))
+    ));
 
     let input_whitespace = CreateOrganizationInput {
         name: "   \t\n  ".into(),
@@ -31,7 +34,10 @@ fn create_organization_validates_empty_name() {
         default_language: Some("en".into()),
     };
     let result_whitespace = create_organization(&conn, input_whitespace);
-    assert!(matches!(result_whitespace, Err(OrganizationError::Validation(_))));
+    assert!(matches!(
+        result_whitespace,
+        Err(OrganizationError::Validation(_))
+    ));
 }
 
 #[test]
@@ -70,7 +76,7 @@ fn create_organization_validates_invalid_currency() {
 fn create_organization_validates_invalid_language() {
     let conn = setup_test_db();
 
-    for invalid_lang in ["", "   ", "toolonglanguagecode123", "en!@#"] {
+    for invalid_lang in ["", "   ", "e", "toolonglanguagecode123", "en!@#"] {
         let input = CreateOrganizationInput {
             name: "Test Org".into(),
             default_currency: Some("USD".into()),

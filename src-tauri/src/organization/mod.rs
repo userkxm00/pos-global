@@ -83,7 +83,7 @@ pub fn validate_currency(currency: &str) -> Result<String, OrganizationError> {
 /// Validates language code. Must be 2-10 ASCII characters (e.g. 'en', 'fr', 'ar').
 pub fn validate_language(language: &str) -> Result<String, OrganizationError> {
     let trimmed = language.trim();
-    if trimmed.is_empty()
+    if trimmed.len() < 2
         || trimmed.len() > 10
         || !trimmed
             .chars()
@@ -130,8 +130,9 @@ pub fn create_organization(
         params![id, name, default_currency, default_language],
     )?;
 
-    get_organization(conn, &id)?
-        .ok_or_else(|| OrganizationError::Database("Failed to load newly created organization".into()))
+    get_organization(conn, &id)?.ok_or_else(|| {
+        OrganizationError::Database("Failed to load newly created organization".into())
+    })
 }
 
 /// Retrieves an organization by ID.
