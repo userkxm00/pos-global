@@ -23,10 +23,7 @@ fn create_organization_validates_empty_name() {
         default_language: Some("en".into()),
     };
     let result_empty = create_organization(&conn, input_empty);
-    assert!(matches!(
-        result_empty,
-        Err(OrganizationError::Validation(_))
-    ));
+    assert!(matches!(result_empty, Err(OrganizationError::Validation(_))));
 
     let input_whitespace = CreateOrganizationInput {
         name: "   \t\n  ".into(),
