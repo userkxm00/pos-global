@@ -4,13 +4,13 @@
 
 ## Current state
 
-The repository is in **Foundation Verification**. The agent-executable blueprint is designed, and the remaining work is evidence-based verification of the exact `main` head.
+The repository has completed the Foundation Gate on the exact pre-state-synchronization `main` head. The foundation is technically verified; the state-synchronization commit now requires its own exact-head Foundation Gate run before the project advances to `AGENT_IMPLEMENTATION_READY`.
 
 ### Readiness state
 
-`FOUNDATION_DESIGNED` → **verification in progress** → `FOUNDATION_VERIFIED` → `AGENT_IMPLEMENTATION_READY`.
+`FOUNDATION_DESIGNED` → **`FOUNDATION_VERIFIED`** → `AGENT_IMPLEMENTATION_READY`.
 
-The project must not be treated as `AGENT_IMPLEMENTATION_READY` until the exact `main` head has current green CI and an uploaded `foundation-gate-evidence-<commit-sha>` artifact.
+The Foundation Gate is authoritative for the exact `main` head. The last completed evidence run was Foundation Gate Evidence #79 on commit `8f5cdfe9e96c7a2fab5d4afaeef36f3bc1499098`, with an uploaded exact-head evidence artifact.
 
 ### Architecture decisions
 - Desktop: Tauri 2 + Rust.
@@ -26,9 +26,11 @@ The project must not be treated as `AGENT_IMPLEMENTATION_READY` until the exact 
 
 ## Foundation verification history
 
+Foundation Gate Evidence #79 completed successfully on the exact `main` head `8f5cdfe9e96c7a2fab5d4afaeef36f3bc1499098`. The run verified exact-head identity, frontend build, production dependency audit, Tauri Linux dependencies/icon generation, Rust formatting/check/Clippy/tests, foundation specification validation, secret scanning, and uploaded authoritative exact-head evidence.
+
 A prior CI run proved the frontend build but the Rust job failed during Tauri context generation because the expected application icon was absent. The foundation now includes a deterministic SVG icon source and CI generates the required Tauri icon set before Rust verification. This is a foundation-build repair, not an excuse to mark the previous failure as passed.
 
-The migration-test PR also added real SQLite migration, repeatability, exact-money-column and rollback tests. Those passed on the PR head; the resulting post-merge `main` commit still requires its own exact-head CI/evidence run.
+The migration-test PR also added real SQLite migration, repeatability, exact-money-column and rollback tests. Those passed on the PR head; the post-merge exact-head run above independently verified the resulting main state.
 
 ## Reference implementation boundary
 
