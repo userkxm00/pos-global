@@ -4,14 +4,16 @@ This roadmap reduces startup overhead without weakening repository contracts.
 
 ## Tier 1 — Startup core (read before every implementation task)
 
-1. `AGENT_SYSTEM.md`
-2. `PROJECT_STATUS.md`
-3. `ARCHITECTURE.md`
-4. `FOUNDATION_READINESS_STATES.md` when readiness/gate state matters
-5. `EXECUTION_PLAN.md`
-6. `TASK_SPEC.md`
-7. `DEFINITION_OF_READY.md`
-8. Inspect the actual repository state, branch, recent commits, and affected implementation.
+1. `V2_RULES.md` — mandatory agent boundaries from the previous POS audit
+2. `AGENT_SYSTEM.md`
+3. `PROJECT_STATUS.md`
+4. `ARCHITECTURE.md`
+5. `PRODUCT_STRATEGY.md` when scope, MVP, market, pricing, onboarding or product priority could be affected
+6. `FOUNDATION_READINESS_STATES.md` when readiness/gate state matters
+7. `EXECUTION_PLAN.md`
+8. `TASK_SPEC.md`
+9. `DEFINITION_OF_READY.md`
+10. Inspect the actual repository state, branch, recent commits, and affected implementation.
 
 ## Tier 2 — Task context (read only what the assigned task needs)
 
