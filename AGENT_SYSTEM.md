@@ -2,7 +2,7 @@
 
 > Status: **mandatory execution contract**
 > Audience: autonomous coding agents, coding assistants, reviewers, and future maintainers.
-> This file is the POS Global **agent operating system**: it governs *how* an agent works. `ARCHITECTURE.md` governs *what architecture is allowed*. `EXECUTION_PLAN.md` governs *what gets built and in what order*. `FOUNDATION_READINESS_STATES.md` defines readiness and execution authority, and `DEFINITION_OF_READY.md` defines the Definition of Ready for tasks.
+> This file is the POS Global **agent operating system**: it governs *how* an agent works. `V2_RULES.md` provides mandatory safety boundaries inherited from the prior POS audit. `ARCHITECTURE.md` governs *what architecture is allowed*. `EXECUTION_PLAN.md` governs *what gets built and in what order*. `FOUNDATION_READINESS_STATES.md` defines readiness and execution authority, and `DEFINITION_OF_READY.md` defines the Definition of Ready for tasks.
 
 ## 0. Readiness and execution control
 
@@ -13,7 +13,7 @@ Product implementation may begin only when:
 - the orchestrator/user explicitly assigns **one specific task**;
 - the task's hard dependencies and critical decisions are satisfied;
 - the affected contracts are stable enough for that task;
-- no unresolved critical security, financial, regulatory, schema, sync, licensing, or provider decision blocks the task.
+- no unresolved critical security, financial, regulatory, schema, sync, licensing, provider, or product decision blocks the task.
 
 `AGENT_IMPLEMENTATION_READY` is the preferred state for normal autonomous execution and is required for unattended multi-task execution. Before that state, a human/orchestrator may explicitly authorize **one bounded implementation task at a time** when its task-level prerequisites are satisfied.
 
@@ -27,12 +27,14 @@ When documents conflict, use this order:
 
 1. Security and financial invariants
 2. Approved ADRs
-3. `ARCHITECTURE.md`
-4. `SCHEMA.md` and database rules
-5. `EXECUTION_PLAN.md`
-6. Phase/feature/task specifications
-7. Existing implementation
-8. Agent preference
+3. `V2_RULES.md` for mandatory agent safety boundaries
+4. `ARCHITECTURE.md`
+5. `SCHEMA.md` and database rules
+6. `PRODUCT_STRATEGY.md` for approved product scope and commercial decisions
+7. `EXECUTION_PLAN.md`
+8. Phase/feature/task specifications
+9. Existing implementation
+10. Agent preference
 
 If a conflict cannot be resolved safely, **STOP and create an ADR proposal**. Do not silently choose.
 
@@ -44,16 +46,18 @@ Use `AGENT_READING_ROADMAP.md` to control reading depth. Do not read the entire 
 
 Before every task:
 
-1. Read `AGENT_SYSTEM.md`.
-2. Read `AGENT_READING_ROADMAP.md`.
-3. Read `PROJECT_STATUS.md`.
-4. Read `ARCHITECTURE.md`.
-5. Read the relevant phase in `EXECUTION_PLAN.md`.
-6. Identify the **exact task ID explicitly assigned by the orchestrator/user**.
-7. Confirm dependencies, acceptance criteria, and files allowed to change.
-8. Read only the task-context specifications required by the assigned task.
-9. Inspect git status, current branch, recent commits, and the existing implementation.
-10. Only then implement.
+1. Read `V2_RULES.md`.
+2. Read `AGENT_SYSTEM.md`.
+3. Read `AGENT_READING_ROADMAP.md`.
+4. Read `PROJECT_STATUS.md`.
+5. Read `ARCHITECTURE.md`.
+6. Read the relevant product scope in `PRODUCT_STRATEGY.md` when the task can affect MVP scope, industry behavior, onboarding, pricing, market assumptions, integrations, or product priority.
+7. Read the relevant phase in `EXECUTION_PLAN.md`.
+8. Identify the **exact task ID explicitly assigned by the orchestrator/user**.
+9. Confirm dependencies, acceptance criteria, and files allowed to change.
+10. Read only the task-context specifications required by the assigned task.
+11. Inspect git status, current branch, recent commits, and the existing implementation.
+12. Only then implement.
 
 When checking readiness/gates, also read `FOUNDATION_READINESS_STATES.md` and the relevant evidence files.
 
@@ -94,11 +98,11 @@ Existing code from a later phase may be intentionally retained as a **seed/refer
 
 In particular, a partially complete sales reference implementation may exist during Foundation work. Agents must not interpret its presence as permission to start Phase 3 early. Authentication and authorization must be established through the Phase 1 contracts before privileged sales behavior is considered production-ready.
 
-## 5. Documentation anti-drift rule
+## 5. Documentation anti-drift and execution-velocity rule
 
 Implementation has priority over documentation.
 
-Do not create or materially expand planning, architecture, research, strategy, or process documents unless:
+Do not create or materially expand planning, architecture, research, strategy, process, timeline, or competitive documents unless:
 
 - the assigned task explicitly requires the document;
 - an approved ADR requires it;
@@ -108,6 +112,10 @@ Do not create or materially expand planning, architecture, research, strategy, o
 This restriction applies to **all documentation formats**, not only Markdown.
 
 If executable acceptance criteria for the assigned task remain incomplete, creating additional planning/specification/research content is **not progress** and the task remains `PARTIAL`.
+
+Once a task is Ready and its critical decisions are resolved, the agent must prefer **implementation, verification, and evidence** over additional planning. A new document must never be used to avoid starting an already-Ready implementation task.
+
+The full industry roadmap is global product scope. The approved first validation vertical is only sequencing for the MVP; it must never be used to rewrite the shared core into an industry-specific architecture.
 
 ## 6. Non-negotiable prohibitions
 
@@ -183,7 +191,7 @@ Do not make unrelated refactors while repairing a failing gate.
 
 ## 10. Change control
 
-Architectural, security, financial, schema, sync, licensing, update-signing, or dependency changes require an ADR or explicit approval recorded in the task.
+Architectural, security, financial, schema, sync, licensing, update-signing, dependency, or product-scope changes require an ADR or explicit approval recorded in the task.
 
 ## 11. Completion language
 
