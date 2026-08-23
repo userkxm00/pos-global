@@ -6,6 +6,7 @@
 mod commands;
 mod db;
 mod licence;
+mod organization;
 #[cfg(test)]
 mod tests;
 
@@ -38,6 +39,10 @@ fn main() {
             commands::sales::get_sales_report,
             commands::inventory::list_products,
             commands::inventory::upsert_product,
+            commands::organization::create_organization,
+            commands::organization::get_organization,
+            commands::organization::update_organization,
+            commands::organization::list_organizations,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
