@@ -32,6 +32,10 @@ Exit: launch markets are explicitly approved; provider choices have an evidence/
 ## Phase 0.65 — Product Strategy & MVP Gate
 Deliver: approved initial launch market, ICP, first industry/bounded industry scope, primary reason-to-buy, MVP capability list, explicit non-goals, business model hypothesis, pricing hypothesis, competitive positioning, onboarding journey, initial migration/import scope, integration boundaries and milestone definitions. See `PRODUCT_STRATEGY.md`.
 
+Approved first validation vertical: **Fashion / Clothing / Footwear / Accessories**.
+
+This is a validation scope, not a permanent product restriction. POS Global remains global and multi-industry. The implementation agent must keep the shared product model generic and use `industry preset + capabilities + domain module`; it must not hard-code fashion-only business rules into the core.
+
 Rules:
 - Phase 7 industry families are roadmap scope, not automatic MVP scope.
 - Mobile remains future-compatible but is not automatically MVP scope; promote it only by explicit product decision.
