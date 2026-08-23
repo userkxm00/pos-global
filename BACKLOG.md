@@ -49,6 +49,17 @@ Tasks are intentionally granular. An agent must not skip a gate to reach a later
 - F0.6.11 document regulatory evidence and review policy
 - F0.6.12 Commercial & Regulatory Gate review
 
+## Phase 0.65 — Product Strategy & MVP
+
+- F0.65.01 record the approved global-product boundary and Fashion/Clothing/Footwear/Accessories MVP validation scope
+- F0.65.02 resolve and approve initial launch market, ICP, primary reason-to-buy, business model and pricing hypothesis
+- F0.65.03 define the MVP capability set and explicit non-goals using existing backlog/acceptance artifacts
+- F0.65.04 define the MVP onboarding and first-success workflow acceptance criteria
+- F0.65.05 define the MVP legacy-data import scope, validation rules and safe-failure behavior
+- F0.65.06 define MVP integration boundaries and provider-selection checkpoints
+- F0.65.07 define measurable MVP Ready / Pilot Ready / Commercial Ready evidence requirements
+- F0.65.08 Product Strategy & MVP Gate review
+
 ## Phase 0.7 — Agent Readiness
 
 - F0.7.01 verify AGENT_SYSTEM
@@ -209,6 +220,8 @@ Tasks are intentionally granular. An agent must not skip a gate to reach a later
 ## Phase 7 — Industry modules
 
 Industry work is decomposed in `INDUSTRY_EXECUTION_PLAN.md`. Each family follows capability → workflow → UI/commands → transaction invariants → tests → acceptance evidence.
+
+MVP rule: only the approved MVP scope in `PRODUCT_STRATEGY.md` may be implemented for the first commercial release. The full list below remains the long-term Global product roadmap and must not be treated as permission to implement all families now.
 
 ### Retail
 - F7.01.01 general retail preset
@@ -423,34 +436,46 @@ Industry work is decomposed in `INDUSTRY_EXECUTION_PLAN.md`. Each family follows
 
 - F12.01 Windows packaging/signing
 - F12.02 macOS packaging/signing
-- F12.03 Linux packaging
-- F12.04 updater signing
-- F12.05 update UI/safe install
-- F12.06 staged releases
-- F12.07 rollback/recovery
+- F12.03 Linux packaging/signing
+- F12.04 staged releases
+- F12.05 signed updater artifacts
+- F12.06 update availability UI
+- F12.07 safe install / rollback
 - F12.08 release notes
-- F12.09 commit production package lockfiles and enforce locked CI installs
+- F12.09 release evidence
 
-## Phase 13 — Hardening
+## Phase 13 — Production hardening
 
-- F13.01 performance profiling
+- F13.01 performance
 - F13.02 crash/error monitoring
-- F13.03 backup/restore drills
-- F13.04 migration upgrade tests
-- F13.05 dependency/security audit
-- F13.06 accessibility
-- F13.07 RTL/i18n verification
-- F13.08 E2E golden flows
-- F13.09 pilot readiness
+- F13.03 backups
+- F13.04 restore drills
+- F13.05 migration recovery
+- F13.06 security review
+- F13.07 accessibility/i18n/RTL
+- F13.08 E2E/pilot validation
+- F13.09 production hardening evidence
 
 ## Phase 14 — Launch
 
 - F14.01 private beta
-- F14.02 pilot stores
+- F14.02 monitored pilot
 - F14.03 paid beta
-- F14.04 production launch
-- F14.05 incident/support process
+- F14.04 production readiness
+- F14.05 launch evidence
 
-## Backlog invariants
+## Phase 15 — Mobile Companion & Unified Distribution
 
-Every implementation task must link to its detailed contract, dependency prerequisites, acceptance criteria and evidence requirements. A large feature family is never represented by one vague task when it contains independent domain/UI/cloud workflows.
+- F15.01 shared mobile contract compatibility
+- F15.02 Android client foundation
+- F15.03 iOS client foundation
+- F15.04 authenticated organization/branch access
+- F15.05 mobile inventory/products workflows
+- F15.06 mobile sales/customer workflows where approved
+- F15.07 notifications
+- F15.08 mobile offline-safe read/write workflows
+- F15.09 cross-client sync/idempotency tests
+- F15.10 app-store/build/release pipeline
+- F15.11 unified website distribution lifecycle
+- F15.12 mobile licensing/version compatibility
+- F15.13 mobile acceptance/evidence
