@@ -206,9 +206,7 @@ pub fn update_organization(
 }
 
 /// Lists all organizations ordered by creation date.
-pub fn list_organizations(
-    conn: &Connection,
-) -> Result<Vec<Organization>, OrganizationError> {
+pub fn list_organizations(conn: &Connection) -> Result<Vec<Organization>, OrganizationError> {
     let mut stmt = conn.prepare(
         "SELECT id, name, default_currency, default_language, created_at
          FROM organizations

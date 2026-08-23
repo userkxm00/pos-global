@@ -2,9 +2,7 @@
 // The frontend must access organization data strictly through these commands.
 
 use crate::db::DbState;
-use crate::organization::{
-    CreateOrganizationInput, Organization, UpdateOrganizationInput,
-};
+use crate::organization::{CreateOrganizationInput, Organization, UpdateOrganizationInput};
 
 #[tauri::command]
 pub fn create_organization(
@@ -15,8 +13,7 @@ pub fn create_organization(
         .0
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
-    crate::organization::create_organization(&conn, request)
-        .map_err(|e| e.to_string())
+    crate::organization::create_organization(&conn, request).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -47,14 +44,11 @@ pub fn update_organization(
         .0
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
-    crate::organization::update_organization(&conn, request)
-        .map_err(|e| e.to_string())
+    crate::organization::update_organization(&conn, request).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn list_organizations(
-    state: tauri::State<DbState>,
-) -> Result<Vec<Organization>, String> {
+pub fn list_organizations(state: tauri::State<DbState>) -> Result<Vec<Organization>, String> {
     let conn = state
         .0
         .lock()
