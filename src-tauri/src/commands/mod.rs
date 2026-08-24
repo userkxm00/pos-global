@@ -2,6 +2,7 @@
 // The frontend must not access SQLite/files directly.
 
 pub mod auth;
+pub mod branch;
 pub mod inventory;
 pub mod licence;
 pub mod organization;
