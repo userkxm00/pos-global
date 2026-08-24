@@ -2,9 +2,9 @@ use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_hierarchy, setup_test_db,
 };
 use crate::user::{
-    create_user, get_auth_rate_limiter, get_user_by_supabase_id, hash_secret, update_user,
-    verify_secret, verify_user_password, verify_user_pin, CreateUserInput, UpdateUserInput,
-    UserError,
+    create_user, get_user_by_supabase_id, hash_secret, update_user, verify_secret,
+    verify_user_password_with_limiter, verify_user_pin_with_limiter, CreateUserInput, RateLimiter,
+    UpdateUserInput, UserError,
 };
 
 #[test]
@@ -36,7 +36,6 @@ fn valid_user_creation_and_argon2_hashing() {
     assert_eq!(user.branch_id, branch_id);
     assert_eq!(user.auth_provider, "local");
 
-    // Verify stored hashes are in standard Argon2id PHC format
     let (raw_pw_hash, raw_pin_hash): (Option<String>, Option<String>) = conn
         .query_row(
             "SELECT password_hash, pin_hash FROM users WHERE id = ?1",
@@ -218,7 +217,8 @@ fn verify_user_password_authenticates_and_defeats_timing_enumeration() {
     let conn = setup_test_db();
     let (_, branch_id) = create_test_org_and_branch(&conn);
     let dynamic_pw = ["dynamic", "secure", "pass"].join("_");
-    get_auth_rate_limiter().reset_all();
+    let test_limiter = RateLimiter::new(5, 30, 100);
+    let client_id = uuid::Uuid::new_v4().to_string();
 
     create_user(
         &conn,
@@ -236,11 +236,20 @@ fn verify_user_password_authenticates_and_defeats_timing_enumeration() {
     .expect("user created");
 
     // Correct password succeeds
-    let auth_user = verify_user_password(&conn, "frank", &dynamic_pw).expect("login succeeds");
+    let auth_user =
+        verify_user_password_with_limiter(&conn, &test_limiter, &client_id, "frank", &dynamic_pw)
+            .expect("login succeeds");
     assert_eq!(auth_user.username.as_deref(), Some("frank"));
 
     // Wrong password returns generic error
-    let wrong_err = verify_user_password(&conn, "frank", "wrong_candidate_pw").unwrap_err();
+    let wrong_err = verify_user_password_with_limiter(
+        &conn,
+        &test_limiter,
+        &client_id,
+        "frank",
+        "wrong_candidate_pw",
+    )
+    .unwrap_err();
     assert!(matches!(wrong_err, UserError::InvalidCredentials(_)));
     assert_eq!(
         wrong_err.to_string(),
@@ -248,8 +257,14 @@ fn verify_user_password_authenticates_and_defeats_timing_enumeration() {
     );
 
     // Nonexistent username executes decoy Argon2 verification and returns identical error
-    let nonexistent_err =
-        verify_user_password(&conn, "nonexistent_operator", &dynamic_pw).unwrap_err();
+    let nonexistent_err = verify_user_password_with_limiter(
+        &conn,
+        &test_limiter,
+        &client_id,
+        "nonexistent_operator",
+        &dynamic_pw,
+    )
+    .unwrap_err();
     assert!(matches!(nonexistent_err, UserError::InvalidCredentials(_)));
     assert_eq!(
         nonexistent_err.to_string(),
@@ -262,7 +277,8 @@ fn verify_user_pin_authenticates_correctly() {
     let conn = setup_test_db();
     let (_, branch_id) = create_test_org_and_branch(&conn);
     let dynamic_pin = ["9", "8", "7", "6"].join("");
-    get_auth_rate_limiter().reset_all();
+    let test_limiter = RateLimiter::new(5, 30, 100);
+    let client_id = uuid::Uuid::new_v4().to_string();
 
     let user = create_user(
         &conn,
@@ -280,11 +296,15 @@ fn verify_user_pin_authenticates_correctly() {
     .expect("user created");
 
     // Correct PIN succeeds
-    let auth_user = verify_user_pin(&conn, &user.id, &dynamic_pin).expect("PIN succeeds");
+    let auth_user =
+        verify_user_pin_with_limiter(&conn, &test_limiter, &client_id, &user.id, &dynamic_pin)
+            .expect("PIN succeeds");
     assert_eq!(auth_user.id, user.id);
 
     // Wrong PIN returns generic error
-    let wrong_pin_err = verify_user_pin(&conn, &user.id, "0000").unwrap_err();
+    let wrong_pin_err =
+        verify_user_pin_with_limiter(&conn, &test_limiter, &client_id, &user.id, "0000")
+            .unwrap_err();
     assert!(matches!(wrong_pin_err, UserError::InvalidCredentials(_)));
     assert_eq!(
         wrong_pin_err.to_string(),
@@ -292,7 +312,14 @@ fn verify_user_pin_authenticates_correctly() {
     );
 
     // Nonexistent user ID executes decoy Argon2 verification and returns identical error
-    let nonexistent_pin_err = verify_user_pin(&conn, "nonexistent-user-id", "0000").unwrap_err();
+    let nonexistent_pin_err = verify_user_pin_with_limiter(
+        &conn,
+        &test_limiter,
+        &client_id,
+        "nonexistent-user-id",
+        "0000",
+    )
+    .unwrap_err();
     assert!(matches!(
         nonexistent_pin_err,
         UserError::InvalidCredentials(_)
@@ -309,7 +336,8 @@ fn inactive_user_returns_generic_error() {
     let (_, _, user) = create_test_user_hierarchy(&conn);
     let test_pw = ["fixture", "pass", "123"].join("_");
     let test_pin = ["4", "3", "2", "1"].join("");
-    get_auth_rate_limiter().reset_all();
+    let test_limiter = RateLimiter::new(5, 30, 100);
+    let client_id = uuid::Uuid::new_v4().to_string();
 
     // Deactivate user
     update_user(
@@ -327,32 +355,37 @@ fn inactive_user_returns_generic_error() {
     )
     .expect("user deactivated");
 
-    let pw_err = verify_user_password(&conn, "test_staff", &test_pw).unwrap_err();
+    let pw_err =
+        verify_user_password_with_limiter(&conn, &test_limiter, &client_id, "test_staff", &test_pw)
+            .unwrap_err();
     assert!(matches!(pw_err, UserError::InvalidCredentials(_)));
     assert_eq!(
         pw_err.to_string(),
         "Invalid credentials: Invalid username or password"
     );
 
-    let pin_err = verify_user_pin(&conn, &user.id, &test_pin).unwrap_err();
+    let pin_err =
+        verify_user_pin_with_limiter(&conn, &test_limiter, &client_id, &user.id, &test_pin)
+            .unwrap_err();
     assert!(matches!(pin_err, UserError::InvalidCredentials(_)));
     assert_eq!(pin_err.to_string(), "Invalid credentials: Invalid PIN");
 }
 
 #[test]
-fn rate_limiter_enforces_lockout_and_resets_on_success() {
+fn rate_limiter_client_scoping_prevents_victim_lockout() {
     let conn = setup_test_db();
     let (_, branch_id) = create_test_org_and_branch(&conn);
-    let user_name = "rate_limit_user";
+    let user_name = "shared_target_user";
     let valid_pw = ["valid", "pass", "99"].join("_");
-    let limiter = get_auth_rate_limiter();
-    limiter.reset_all();
+    let test_limiter = RateLimiter::new(3, 30, 100);
+    let attacker_client = "attacker_terminal_01";
+    let victim_client = "cashier_terminal_02";
 
     create_user(
         &conn,
         CreateUserInput {
             branch_id,
-            full_name: "Rate Limit Subject".into(),
+            full_name: "Target User".into(),
             username: Some(user_name.into()),
             password: Some(valid_pw.clone()),
             pin: None,
@@ -363,18 +396,52 @@ fn rate_limiter_enforces_lockout_and_resets_on_success() {
     )
     .expect("user created");
 
-    // Perform 5 failed attempts to trigger lockout
-    for _ in 0..5 {
-        let _ = verify_user_password(&conn, user_name, "wrong_password");
+    // Attacker exhausts attempts from their terminal
+    for _ in 0..3 {
+        let _ = verify_user_password_with_limiter(
+            &conn,
+            &test_limiter,
+            attacker_client,
+            user_name,
+            "wrong_guess",
+        );
     }
 
-    // 6th attempt must be rejected immediately by rate limiter
-    let lockout_err = verify_user_password(&conn, user_name, &valid_pw).unwrap_err();
-    assert!(matches!(lockout_err, UserError::InvalidCredentials(_)));
-    assert!(lockout_err.to_string().contains("locked"));
+    // Attacker is now locked out on their terminal
+    let attacker_err = verify_user_password_with_limiter(
+        &conn,
+        &test_limiter,
+        attacker_client,
+        user_name,
+        &valid_pw,
+    )
+    .unwrap_err();
+    assert!(matches!(attacker_err, UserError::InvalidCredentials(_)));
+    assert!(attacker_err.to_string().contains("locked"));
 
-    // Reset rate limiter and verify that valid credentials now succeed
-    limiter.reset_all();
-    let success = verify_user_password(&conn, user_name, &valid_pw);
-    assert!(success.is_ok(), "Successful auth after rate limit reset");
+    // Victim on legitimate cashier terminal is NOT locked out and logs in successfully
+    let victim_auth = verify_user_password_with_limiter(
+        &conn,
+        &test_limiter,
+        victim_client,
+        user_name,
+        &valid_pw,
+    );
+    assert!(
+        victim_auth.is_ok(),
+        "Legitimate client must not be locked out by attacker on another client"
+    );
+}
+
+#[test]
+fn rate_limiter_evicts_old_entries_when_capacity_reached() {
+    let limiter = RateLimiter::new(3, 1, 2); // max 2 entries
+
+    limiter.record_failure("client1:user:alice");
+    limiter.record_failure("client2:user:bob");
+    limiter.record_failure("client3:user:charlie"); // triggers eviction
+
+    // Capacity must not grow unbounded
+    let count = limiter.check("client1:user:alice").is_ok();
+    assert!(count);
 }

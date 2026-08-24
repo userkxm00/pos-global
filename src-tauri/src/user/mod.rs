@@ -4,13 +4,13 @@
 pub mod session;
 
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -49,29 +49,34 @@ pub struct UpdateUserInput {
     pub supabase_user_id: Option<String>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum UserError {
-    #[error("Validation error: {0}")]
     Validation(String),
-
-    #[error("User not found: {0}")]
     NotFound(String),
-
-    #[error("Branch not found: {0}")]
     BranchNotFound(String),
-
-    #[error("Username already exists: {0}")]
     DuplicateUsername(String),
-
-    #[error("Supabase user ID already mapped: {0}")]
     DuplicateSupabaseId(String),
-
-    #[error("Invalid credentials: {0}")]
     InvalidCredentials(String),
-
-    #[error("Database error: {0}")]
     Database(String),
 }
+
+impl std::fmt::Display for UserError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UserError::Validation(msg) => write!(f, "Validation error: {msg}"),
+            UserError::NotFound(msg) => write!(f, "User not found: {msg}"),
+            UserError::BranchNotFound(msg) => write!(f, "Branch not found: {msg}"),
+            UserError::DuplicateUsername(msg) => write!(f, "Username already exists: {msg}"),
+            UserError::DuplicateSupabaseId(msg) => {
+                write!(f, "Supabase user ID already mapped: {msg}")
+            }
+            UserError::InvalidCredentials(msg) => write!(f, "Invalid credentials: {msg}"),
+            UserError::Database(msg) => write!(f, "Database error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for UserError {}
 
 /// Precomputed valid Argon2id hash for constant-time decoy verification to defeat timing-based user enumeration.
 pub const DECOY_ARGON2_HASH: &str =
@@ -79,7 +84,9 @@ pub const DECOY_ARGON2_HASH: &str =
 
 /// Generates a cryptographically secure Argon2id hash in standard PHC format.
 pub fn hash_secret(secret: &str) -> Result<String, UserError> {
-    let salt = SaltString::generate(&mut OsRng);
+    let salt_bytes = uuid::Uuid::new_v4();
+    let salt = SaltString::encode_b64(salt_bytes.as_bytes())
+        .map_err(|e| UserError::Database(format!("Salt encoding error: {e}")))?;
     let argon2 = Argon2::default();
     argon2
         .hash_password(secret.as_bytes(), &salt)
@@ -98,22 +105,25 @@ pub fn verify_secret(candidate: &str, stored_hash: &str) -> bool {
         .is_ok()
 }
 
-/// Thread-safe in-memory rate limiter for login and PIN verification.
+/// Thread-safe in-memory rate limiter with bounded memory growth and composite client scoping.
 pub struct RateLimiter {
     attempts: Mutex<HashMap<String, (u32, Instant)>>,
     max_attempts: u32,
     lockout_duration: Duration,
+    max_entries: usize,
 }
 
 impl RateLimiter {
-    pub const fn new(max_attempts: u32, lockout_secs: u64) -> Self {
+    pub fn new(max_attempts: u32, lockout_secs: u64, max_entries: usize) -> Self {
         Self {
             attempts: Mutex::new(HashMap::new()),
             max_attempts,
             lockout_duration: Duration::from_secs(lockout_secs),
+            max_entries,
         }
     }
 
+    /// Checks if a client-identity key is currently locked out.
     pub fn check(&self, key: &str) -> Result<(), UserError> {
         let mut map = self
             .attempts
@@ -133,8 +143,26 @@ impl RateLimiter {
         Ok(())
     }
 
+    /// Records a failure and applies memory eviction if capacity is reached.
     pub fn record_failure(&self, key: &str) {
         if let Ok(mut map) = self.attempts.lock() {
+            // Evict stale entries when approaching capacity
+            if map.len() >= self.max_entries {
+                let stale_timeout = self.lockout_duration * 2;
+                map.retain(|_, (_, last_failed)| last_failed.elapsed() < stale_timeout);
+
+                // If still above capacity, remove the oldest entry
+                if map.len() >= self.max_entries {
+                    if let Some(oldest_key) = map
+                        .iter()
+                        .min_by_key(|(_, (_, time))| *time)
+                        .map(|(k, _)| k.clone())
+                    {
+                        map.remove(&oldest_key);
+                    }
+                }
+            }
+
             let entry = map.entry(key.to_string()).or_insert((0, Instant::now()));
             if entry.0 >= self.max_attempts && entry.1.elapsed() >= self.lockout_duration {
                 *entry = (1, Instant::now());
@@ -145,12 +173,14 @@ impl RateLimiter {
         }
     }
 
+    /// Clears the failure record on successful authentication.
     pub fn record_success(&self, key: &str) {
         if let Ok(mut map) = self.attempts.lock() {
             map.remove(key);
         }
     }
 
+    /// Clears all entries (useful in testing).
     pub fn reset_all(&self) {
         if let Ok(mut map) = self.attempts.lock() {
             map.clear();
@@ -158,12 +188,12 @@ impl RateLimiter {
     }
 }
 
-/// Global rate limiter enforcing max 5 failed attempts with 30-second lockout window.
-static GLOBAL_AUTH_RATE_LIMITER: RateLimiter = RateLimiter::new(5, 30);
+/// Global rate limiter enforcing max 5 failed attempts per client identity with 30-second lockout.
+static GLOBAL_AUTH_RATE_LIMITER: OnceLock<RateLimiter> = OnceLock::new();
 
-/// Exposes the global rate limiter for testing and operations.
+/// Exposes the global rate limiter for production operations.
 pub fn get_auth_rate_limiter() -> &'static RateLimiter {
-    &GLOBAL_AUTH_RATE_LIMITER
+    GLOBAL_AUTH_RATE_LIMITER.get_or_init(|| RateLimiter::new(5, 30, 10_000))
 }
 
 /// Creates a new user record in the local database.
@@ -540,14 +570,16 @@ pub fn list_users(conn: &Connection, branch_id: &str) -> Result<Vec<User>, UserE
     Ok(users)
 }
 
-/// Verifies user password against rate-limiting, timing-attack decoy, and Argon2id verification.
-pub fn verify_user_password(
+/// Verifies user password with injectable rate limiter and client scoping.
+pub fn verify_user_password_with_limiter(
     conn: &Connection,
+    limiter: &RateLimiter,
+    client_id: &str,
     username: &str,
     password: &str,
 ) -> Result<User, UserError> {
-    let rate_key = format!("user:{}", username.trim().to_lowercase());
-    GLOBAL_AUTH_RATE_LIMITER.check(&rate_key)?;
+    let rate_key = format!("{client_id}:user:{}", username.trim().to_lowercase());
+    limiter.check(&rate_key)?;
 
     let user_opt: Option<(User, Option<String>)> = conn
         .query_row(
@@ -577,25 +609,23 @@ pub fn verify_user_password(
     match user_opt {
         Some((user, Some(stored_hash))) => {
             if !verify_secret(password, &stored_hash) {
-                GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
+                limiter.record_failure(&rate_key);
                 return Err(UserError::InvalidCredentials(
                     "Invalid username or password".into(),
                 ));
             }
             if !user.is_active {
-                GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
-                // Safe generic credential failure: does not reveal inactive account status
+                limiter.record_failure(&rate_key);
                 return Err(UserError::InvalidCredentials(
                     "Invalid username or password".into(),
                 ));
             }
-            GLOBAL_AUTH_RATE_LIMITER.record_success(&rate_key);
+            limiter.record_success(&rate_key);
             Ok(user)
         }
         _ => {
-            // Decoy verification to defeat user enumeration timing attacks
             let _ = verify_secret(password, DECOY_ARGON2_HASH);
-            GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
+            limiter.record_failure(&rate_key);
             Err(UserError::InvalidCredentials(
                 "Invalid username or password".into(),
             ))
@@ -603,10 +633,31 @@ pub fn verify_user_password(
     }
 }
 
-/// Verifies user cashier PIN against rate-limiting, timing-attack decoy, and Argon2id verification.
-pub fn verify_user_pin(conn: &Connection, user_id: &str, pin: &str) -> Result<User, UserError> {
-    let rate_key = format!("pin:{}", user_id.trim());
-    GLOBAL_AUTH_RATE_LIMITER.check(&rate_key)?;
+/// Verifies user password using the global rate limiter and standard client context.
+pub fn verify_user_password(
+    conn: &Connection,
+    username: &str,
+    password: &str,
+) -> Result<User, UserError> {
+    verify_user_password_with_limiter(
+        conn,
+        get_auth_rate_limiter(),
+        "local_terminal",
+        username,
+        password,
+    )
+}
+
+/// Verifies user cashier PIN with injectable rate limiter and client scoping.
+pub fn verify_user_pin_with_limiter(
+    conn: &Connection,
+    limiter: &RateLimiter,
+    client_id: &str,
+    user_id: &str,
+    pin: &str,
+) -> Result<User, UserError> {
+    let rate_key = format!("{client_id}:pin:{}", user_id.trim());
+    limiter.check(&rate_key)?;
 
     let user_opt: Option<(User, Option<String>)> = conn
         .query_row(
@@ -636,22 +687,31 @@ pub fn verify_user_pin(conn: &Connection, user_id: &str, pin: &str) -> Result<Us
     match user_opt {
         Some((user, Some(stored_hash))) => {
             if !verify_secret(pin, &stored_hash) {
-                GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
+                limiter.record_failure(&rate_key);
                 return Err(UserError::InvalidCredentials("Invalid PIN".into()));
             }
             if !user.is_active {
-                GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
-                // Safe generic credential failure: does not reveal inactive account status
+                limiter.record_failure(&rate_key);
                 return Err(UserError::InvalidCredentials("Invalid PIN".into()));
             }
-            GLOBAL_AUTH_RATE_LIMITER.record_success(&rate_key);
+            limiter.record_success(&rate_key);
             Ok(user)
         }
         _ => {
-            // Decoy verification to defeat timing attacks
             let _ = verify_secret(pin, DECOY_ARGON2_HASH);
-            GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
+            limiter.record_failure(&rate_key);
             Err(UserError::InvalidCredentials("Invalid PIN".into()))
         }
     }
+}
+
+/// Verifies user cashier PIN using the global rate limiter and standard client context.
+pub fn verify_user_pin(conn: &Connection, user_id: &str, pin: &str) -> Result<User, UserError> {
+    verify_user_pin_with_limiter(
+        conn,
+        get_auth_rate_limiter(),
+        "local_terminal",
+        user_id,
+        pin,
+    )
 }
