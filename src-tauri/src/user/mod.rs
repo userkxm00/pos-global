@@ -105,9 +105,16 @@ pub fn verify_secret(candidate: &str, stored_hash: &str) -> bool {
         .is_ok()
 }
 
-/// Thread-safe in-memory rate limiter with bounded memory growth, strict active-lockout preservation, and composite client scoping.
+struct RateLimiterState {
+    map: HashMap<String, (u32, Instant)>,
+    saturated_until: Option<Instant>,
+    overflow_failures: u32,
+}
+
+/// Thread-safe in-memory rate limiter with bounded memory growth, strict active-lockout preservation,
+/// admission throttling under saturation, and composite client scoping.
 pub struct RateLimiter {
-    attempts: Mutex<HashMap<String, (u32, Instant)>>,
+    state: Mutex<RateLimiterState>,
     max_attempts: u32,
     lockout_duration: Duration,
     max_entries: usize,
@@ -116,7 +123,11 @@ pub struct RateLimiter {
 impl RateLimiter {
     pub fn new(max_attempts: u32, lockout_secs: u64, max_entries: usize) -> Self {
         Self {
-            attempts: Mutex::new(HashMap::new()),
+            state: Mutex::new(RateLimiterState {
+                map: HashMap::new(),
+                saturated_until: None,
+                overflow_failures: 0,
+            }),
             max_attempts,
             lockout_duration: Duration::from_secs(lockout_secs),
             max_entries,
@@ -125,7 +136,7 @@ impl RateLimiter {
 
     /// Returns the number of currently tracked entries (useful for test assertions).
     pub fn len(&self) -> usize {
-        self.attempts.lock().map(|m| m.len()).unwrap_or(0)
+        self.state.lock().map(|s| s.map.len()).unwrap_or(0)
     }
 
     /// Checks if the limiter has no tracked entries.
@@ -133,31 +144,42 @@ impl RateLimiter {
         self.len() == 0
     }
 
-    /// Checks if a client-identity key is currently locked out.
+    /// Checks if a client-identity key is currently locked out or subject to admission throttle.
     pub fn check(&self, key: &str) -> Result<(), UserError> {
-        let mut map = self
-            .attempts
+        let mut state = self
+            .state
             .lock()
             .map_err(|e| UserError::Database(e.to_string()))?;
-        if let Some((count, last_failed)) = map.get(key) {
+
+        if let Some((count, last_failed)) = state.map.get(key) {
             if *count >= self.max_attempts {
                 if last_failed.elapsed() < self.lockout_duration {
                     return Err(UserError::InvalidCredentials(
                         "Too many failed attempts. Account is temporarily locked. Please try again later.".into(),
                     ));
                 } else {
-                    map.remove(key);
+                    state.map.remove(key);
                 }
+            }
+        } else if let Some(until) = state.saturated_until {
+            if Instant::now() < until {
+                return Err(UserError::InvalidCredentials(
+                    "Too many failed attempts. Authentication service is temporarily throttling requests. Please try again later.".into(),
+                ));
+            } else {
+                state.saturated_until = None;
+                state.overflow_failures = 0;
             }
         }
         Ok(())
     }
 
     /// Records a failure. Active lockouts are strictly preserved and never evicted.
+    /// Under total saturation of active lockouts, admission throttling prevents unthrottled bypass.
     pub fn record_failure(&self, key: &str) {
-        if let Ok(mut map) = self.attempts.lock() {
+        if let Ok(mut state) = self.state.lock() {
             // Update existing entry directly
-            if let Some(entry) = map.get_mut(key) {
+            if let Some(entry) = state.map.get_mut(key) {
                 if entry.0 >= self.max_attempts && entry.1.elapsed() >= self.lockout_duration {
                     *entry = (1, Instant::now());
                 } else {
@@ -167,47 +189,52 @@ impl RateLimiter {
                 return;
             }
 
-            // 1. Evict expired entries where last failure is beyond the lockout window
+            // 1. Purge expired entries using a single predicate
             let lockout = self.lockout_duration;
-            map.retain(|_, (count, last_failed)| {
-                if *count >= self.max_attempts {
-                    last_failed.elapsed() < lockout
-                } else {
-                    last_failed.elapsed() < lockout
-                }
-            });
+            state
+                .map
+                .retain(|_, (_, last_failed)| last_failed.elapsed() < lockout);
 
             // 2. If at capacity, evict the oldest non-locked entry only
-            if map.len() >= self.max_entries {
-                let oldest_non_locked = map
+            if state.map.len() >= self.max_entries {
+                let oldest_non_locked = state
+                    .map
                     .iter()
                     .filter(|(_, (count, _))| *count < self.max_attempts)
                     .min_by_key(|(_, (_, time))| *time)
                     .map(|(k, _)| k.clone());
 
                 if let Some(non_locked_key) = oldest_non_locked {
-                    map.remove(&non_locked_key);
+                    state.map.remove(&non_locked_key);
                 }
             }
 
             // 3. Insert new entry if space is available (never evicting an active lockout)
-            if map.len() < self.max_entries {
-                map.insert(key.to_string(), (1, Instant::now()));
+            if state.map.len() < self.max_entries {
+                state.map.insert(key.to_string(), (1, Instant::now()));
+            } else {
+                // Capacity fully saturated by active lockouts: apply admission throttling for overflow attempts
+                state.overflow_failures += 1;
+                if state.overflow_failures >= self.max_attempts {
+                    state.saturated_until = Some(Instant::now() + self.lockout_duration);
+                }
             }
         }
     }
 
     /// Clears the failure record on successful authentication.
     pub fn record_success(&self, key: &str) {
-        if let Ok(mut map) = self.attempts.lock() {
-            map.remove(key);
+        if let Ok(mut state) = self.state.lock() {
+            state.map.remove(key);
         }
     }
 
     /// Clears all entries (useful in testing).
     pub fn reset_all(&self) {
-        if let Ok(mut map) = self.attempts.lock() {
-            map.clear();
+        if let Ok(mut state) = self.state.lock() {
+            state.map.clear();
+            state.saturated_until = None;
+            state.overflow_failures = 0;
         }
     }
 }

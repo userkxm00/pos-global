@@ -445,6 +445,35 @@ fn rate_limiter_never_evicts_active_lockouts_when_all_entries_locked() {
 }
 
 #[test]
+fn rate_limiter_saturated_lockouts_trigger_admission_throttle_for_new_keys() {
+    let limiter = RateLimiter::new(2, 30, 2); // capacity = 2 entries, 2 attempts to lock
+
+    // Lock all available slots
+    limiter.record_failure("slot1:user:target_1");
+    limiter.record_failure("slot1:user:target_1");
+    limiter.record_failure("slot2:user:target_2");
+    limiter.record_failure("slot2:user:target_2");
+
+    assert_eq!(limiter.len(), 2);
+
+    // Overflow attempts with new keys exceed threshold
+    limiter.record_failure("slot3:user:overflow_1");
+    limiter.record_failure("slot4:user:overflow_2");
+
+    // Admission throttle is active: new keys cannot bypass rate limiting
+    let throttle_err = limiter.check("slot5:user:new_key");
+    assert!(
+        throttle_err.is_err(),
+        "New keys must be throttled when capacity is saturated with active lockouts"
+    );
+
+    // Original lockouts remain strictly preserved
+    assert!(limiter.check("slot1:user:target_1").is_err());
+    assert!(limiter.check("slot2:user:target_2").is_err());
+    assert_eq!(limiter.len(), 2);
+}
+
+#[test]
 fn rate_limiter_eviction_preserves_active_lockouts_under_flooding() {
     let limiter = RateLimiter::new(3, 30, 5); // capacity = 5 entries, 3 attempts to lock
 
