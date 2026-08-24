@@ -14,6 +14,7 @@ serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 sha2 = "0.10"
+argon2 = "0.5"
 uuid = { version = "1.10.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.12", features = ["json"] }
@@ -27,5 +28,7 @@ custom-protocol = ["tauri/custom-protocol"]
 # Dependency policy:
 # Do not add dependencies casually. Every new dependency requires a documented
 # reason, alternatives, security/license review, and build/test impact review.
-# SHA-256 is a hash, not a digital signature. License signing uses a separately
-# reviewed public-key signature design. Update signing keys are separate again.
+# - argon2 (0.5): Memory-hard Argon2id KDF for password & cashier PIN hashing (F1.05).
+#   License: Apache-2.0 / MIT. Replaces fast salted SHA-256 with standard PHC Argon2id format.
+# - SHA-256 is a hash, not a digital signature. License signing uses a separately
+#   reviewed public-key signature design. Update signing keys are separate again.
