@@ -1,3 +1,5 @@
+#[path = "auth_tests.rs"]
+mod auth_tests;
 #[path = "branch_tests.rs"]
 mod branch_tests;
 #[path = "organization_tests.rs"]

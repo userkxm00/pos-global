@@ -3,6 +3,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod auth;
 mod branch;
 mod commands;
 mod db;
@@ -35,6 +36,7 @@ fn main() {
             commands::auth::auth_state,
             commands::auth::login,
             commands::auth::verify_pin,
+            commands::auth::online_login,
             commands::licence::activate_licence,
             commands::licence::check_licence_status,
             commands::sales::create_sale,
