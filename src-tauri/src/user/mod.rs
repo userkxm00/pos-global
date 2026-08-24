@@ -105,7 +105,7 @@ pub fn verify_secret(candidate: &str, stored_hash: &str) -> bool {
         .is_ok()
 }
 
-/// Thread-safe in-memory rate limiter with bounded memory growth and composite client scoping.
+/// Thread-safe in-memory rate limiter with bounded memory growth, priority eviction, and composite client scoping.
 pub struct RateLimiter {
     attempts: Mutex<HashMap<String, (u32, Instant)>>,
     max_attempts: u32,
@@ -121,6 +121,16 @@ impl RateLimiter {
             lockout_duration: Duration::from_secs(lockout_secs),
             max_entries,
         }
+    }
+
+    /// Returns the number of currently tracked entries (useful for test assertions).
+    pub fn len(&self) -> usize {
+        self.attempts.lock().map(|m| m.len()).unwrap_or(0)
+    }
+
+    /// Checks if the limiter has no tracked entries.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Checks if a client-identity key is currently locked out.
@@ -143,22 +153,42 @@ impl RateLimiter {
         Ok(())
     }
 
-    /// Records a failure and applies memory eviction if capacity is reached.
+    /// Records a failure and applies memory eviction ensuring active lockouts are protected.
     pub fn record_failure(&self, key: &str) {
         if let Ok(mut map) = self.attempts.lock() {
-            // Evict stale entries when approaching capacity
-            if map.len() >= self.max_entries {
-                let stale_timeout = self.lockout_duration * 2;
-                map.retain(|_, (_, last_failed)| last_failed.elapsed() < stale_timeout);
+            // Evict expired / stale entries first when approaching capacity
+            if map.len() >= self.max_entries && !map.contains_key(key) {
+                // 1. Remove expired entries (where last failure was beyond lockout duration)
+                let lockout = self.lockout_duration;
+                map.retain(|_, (count, last_failed)| {
+                    if *count >= self.max_attempts {
+                        // Actively locked: preserve as long as within lockout window
+                        last_failed.elapsed() < lockout
+                    } else {
+                        // Non-locked failure: expire after lockout window
+                        last_failed.elapsed() < lockout
+                    }
+                });
 
-                // If still above capacity, remove the oldest entry
+                // 2. If still at capacity, evict non-locked entries first by oldest timestamp
                 if map.len() >= self.max_entries {
-                    if let Some(oldest_key) = map
+                    let oldest_non_locked = map
                         .iter()
+                        .filter(|(_, (count, _))| *count < self.max_attempts)
                         .min_by_key(|(_, (_, time))| *time)
-                        .map(|(k, _)| k.clone())
-                    {
-                        map.remove(&oldest_key);
+                        .map(|(k, _)| k.clone());
+
+                    if let Some(k) = oldest_non_locked {
+                        map.remove(&k);
+                    } else {
+                        // 3. If ALL entries are actively locked, evict the one closest to expiring
+                        if let Some(oldest_locked) = map
+                            .iter()
+                            .min_by_key(|(_, (_, time))| *time)
+                            .map(|(k, _)| k.clone())
+                        {
+                            map.remove(&oldest_locked);
+                        }
                     }
                 }
             }

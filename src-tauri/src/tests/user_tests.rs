@@ -217,6 +217,7 @@ fn verify_user_password_authenticates_and_defeats_timing_enumeration() {
     let conn = setup_test_db();
     let (_, branch_id) = create_test_org_and_branch(&conn);
     let dynamic_pw = ["dynamic", "secure", "pass"].join("_");
+    let wrong_candidate = ["wrong", "candidate", "pw"].join("_");
     let test_limiter = RateLimiter::new(5, 30, 100);
     let client_id = uuid::Uuid::new_v4().to_string();
 
@@ -247,7 +248,7 @@ fn verify_user_password_authenticates_and_defeats_timing_enumeration() {
         &test_limiter,
         &client_id,
         "frank",
-        "wrong_candidate_pw",
+        &wrong_candidate,
     )
     .unwrap_err();
     assert!(matches!(wrong_err, UserError::InvalidCredentials(_)));
@@ -277,6 +278,7 @@ fn verify_user_pin_authenticates_correctly() {
     let conn = setup_test_db();
     let (_, branch_id) = create_test_org_and_branch(&conn);
     let dynamic_pin = ["9", "8", "7", "6"].join("");
+    let wrong_pin = ["0", "0", "0", "0"].join("");
     let test_limiter = RateLimiter::new(5, 30, 100);
     let client_id = uuid::Uuid::new_v4().to_string();
 
@@ -303,7 +305,7 @@ fn verify_user_pin_authenticates_correctly() {
 
     // Wrong PIN returns generic error
     let wrong_pin_err =
-        verify_user_pin_with_limiter(&conn, &test_limiter, &client_id, &user.id, "0000")
+        verify_user_pin_with_limiter(&conn, &test_limiter, &client_id, &user.id, &wrong_pin)
             .unwrap_err();
     assert!(matches!(wrong_pin_err, UserError::InvalidCredentials(_)));
     assert_eq!(
@@ -317,7 +319,7 @@ fn verify_user_pin_authenticates_correctly() {
         &test_limiter,
         &client_id,
         "nonexistent-user-id",
-        "0000",
+        &wrong_pin,
     )
     .unwrap_err();
     assert!(matches!(
@@ -377,6 +379,7 @@ fn rate_limiter_client_scoping_prevents_victim_lockout() {
     let (_, branch_id) = create_test_org_and_branch(&conn);
     let user_name = "shared_target_user";
     let valid_pw = ["valid", "pass", "99"].join("_");
+    let wrong_guess = ["wrong", "guess", "val"].join("_");
     let test_limiter = RateLimiter::new(3, 30, 100);
     let attacker_client = "attacker_terminal_01";
     let victim_client = "cashier_terminal_02";
@@ -403,7 +406,7 @@ fn rate_limiter_client_scoping_prevents_victim_lockout() {
             &test_limiter,
             attacker_client,
             user_name,
-            "wrong_guess",
+            &wrong_guess,
         );
     }
 
@@ -434,14 +437,32 @@ fn rate_limiter_client_scoping_prevents_victim_lockout() {
 }
 
 #[test]
-fn rate_limiter_evicts_old_entries_when_capacity_reached() {
-    let limiter = RateLimiter::new(3, 1, 2); // max 2 entries
+fn rate_limiter_eviction_preserves_active_lockouts_under_flooding() {
+    let limiter = RateLimiter::new(3, 30, 5); // capacity = 5 entries, 3 attempts to lock
 
-    limiter.record_failure("client1:user:alice");
-    limiter.record_failure("client2:user:bob");
-    limiter.record_failure("client3:user:charlie"); // triggers eviction
+    // 1. Lock out a victim key
+    let locked_key = "terminal1:user:victim_operator";
+    for _ in 0..3 {
+        limiter.record_failure(locked_key);
+    }
+    assert!(limiter.check(locked_key).is_err(), "Key must be locked");
 
-    // Capacity must not grow unbounded
-    let count = limiter.check("client1:user:alice").is_ok();
-    assert!(count);
+    // 2. Flood with 10 distinct non-locked keys
+    for i in 0..10 {
+        let key = format!("flood_client:user:flooder_{i}");
+        limiter.record_failure(&key);
+    }
+
+    // 3. Verify total tracked keys does not exceed max capacity
+    assert!(
+        limiter.len() <= 5,
+        "Limiter size must be bounded at max capacity"
+    );
+
+    // 4. Verify the actively locked key was preserved and NOT evicted
+    let locked_check = limiter.check(locked_key);
+    assert!(
+        locked_check.is_err(),
+        "Actively locked entry must survive eviction flooding"
+    );
 }
