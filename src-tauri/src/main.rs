@@ -8,6 +8,7 @@ mod commands;
 mod db;
 mod licence;
 mod organization;
+mod register;
 #[cfg(test)]
 mod tests;
 
@@ -48,6 +49,10 @@ fn main() {
             commands::branch::get_branch,
             commands::branch::update_branch,
             commands::branch::list_branches,
+            commands::register::create_register,
+            commands::register::get_register,
+            commands::register::update_register,
+            commands::register::list_registers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
