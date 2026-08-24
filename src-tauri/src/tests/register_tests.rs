@@ -457,17 +457,28 @@ fn strict_multi_tenant_isolation() {
 
 #[test]
 fn legacy_null_foreign_key_returns_database_error() {
-    let conn = setup_db();
-    let (org_id, branch_id) = create_test_org_and_branch(&conn, "Org", "Branch");
+    let conn = Connection::open_in_memory().expect("open in-memory database");
 
-    // Insert invalid row with empty/corrupt foreign key reference
-    conn.execute(
-        "INSERT INTO registers (id, organization_id, branch_id, name, code, is_active, created_at)
-         VALUES ('corrupt-reg', ?1, '', 'Corrupt Register', NULL, 1, datetime('now'))",
-        [&org_id],
+    // Temporarily disable foreign keys and create legacy table structure to simulate corrupt NULL foreign key
+    conn.execute_batch(
+        "PRAGMA foreign_keys = OFF;
+         CREATE TABLE registers (
+             id TEXT PRIMARY KEY,
+             organization_id TEXT,
+             branch_id TEXT,
+             name TEXT,
+             code TEXT,
+             is_active INTEGER,
+             created_at TEXT
+         );
+         INSERT INTO registers (id, organization_id, branch_id, name, code, is_active, created_at)
+         VALUES ('corrupt-reg', 'org-1', NULL, 'Corrupt Register', NULL, 1, datetime('now'));
+         PRAGMA foreign_keys = ON;",
     )
     .unwrap();
 
     let get_result = get_register(&conn, "corrupt-reg");
-    assert!(matches!(get_result, Err(RegisterError::Database(_))));
+    assert!(
+        matches!(get_result, Err(RegisterError::Database(ref msg)) if msg.contains("corrupt or NULL branch_id"))
+    );
 }
