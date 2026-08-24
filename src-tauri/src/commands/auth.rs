@@ -1,36 +1,76 @@
 // Authentication command boundary.
 // Security-sensitive authentication belongs in the auth/domain layer.
-// F1.04 — Supabase Auth adapter
+// F1.04 — Supabase Auth adapter & F1.05 — Local user/session model
 
 use crate::auth::{
     self, parse_error_response, parse_token_response, validate_config, validate_credentials,
     OnlineSession, SignInInput, SupabaseAuthConfig,
 };
+use crate::db::DbState;
+use crate::user;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuthState {
     pub authenticated: bool,
+    pub session_id: Option<String>,
     pub user_id: Option<String>,
+    pub branch_id: Option<String>,
+    pub role: Option<String>,
+    pub organization_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LoginResult {
+    pub success: bool,
+    pub session_id: Option<String>,
+    pub user_id: Option<String>,
+    pub role: Option<String>,
     pub branch_id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LoginResult {
-    pub success: bool,
-    pub user_id: Option<String>,
-    pub role: Option<String>,
-    pub session_id: Option<String>,
-}
-
-/// Status query only. Privileged commands must enforce authorization again
-/// in the Rust/domain layer.
+/// Status query. Validates an active local session against SQLite database state.
 #[tauri::command]
-pub fn auth_state() -> AuthState {
-    AuthState {
-        authenticated: false,
-        user_id: None,
-        branch_id: None,
+pub fn auth_state(
+    state: tauri::State<DbState>,
+    session_id: Option<String>,
+) -> Result<AuthState, String> {
+    let sid = match session_id {
+        Some(s) if !s.trim().is_empty() => s.trim().to_string(),
+        _ => {
+            return Ok(AuthState {
+                authenticated: false,
+                session_id: None,
+                user_id: None,
+                branch_id: None,
+                role: None,
+                organization_id: None,
+            });
+        }
+    };
+
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("Database lock failed: {e}"))?;
+
+    match user::session::validate_local_session(&conn, &sid) {
+        Ok(ctx) => Ok(AuthState {
+            authenticated: true,
+            session_id: Some(ctx.session_id),
+            user_id: Some(ctx.user_id),
+            branch_id: Some(ctx.branch_id),
+            role: Some(ctx.role),
+            organization_id: ctx.organization_id,
+        }),
+        Err(_) => Ok(AuthState {
+            authenticated: false,
+            session_id: None,
+            user_id: None,
+            branch_id: None,
+            role: None,
+            organization_id: None,
+        }),
     }
 }
 
@@ -88,14 +128,68 @@ pub async fn online_login(
     }
 }
 
-/// Placeholder for local user PIN/password authentication (implemented in F1.05).
+/// Local POS user login with username and password.
 #[tauri::command]
-pub fn login(_username: String, _password: String) -> Result<LoginResult, String> {
-    Err("Local POS login is handled by the local session model in F1.05".into())
+pub fn login(
+    state: tauri::State<DbState>,
+    username: String,
+    password: String,
+) -> Result<LoginResult, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("Database lock failed: {e}"))?;
+
+    let user =
+        user::verify_user_password(&conn, &username, &password).map_err(|e| e.to_string())?;
+
+    let session =
+        user::session::create_local_session(&conn, &user.id, &user.branch_id, "password", None)
+            .map_err(|e| e.to_string())?;
+
+    Ok(LoginResult {
+        success: true,
+        session_id: Some(session.id),
+        user_id: Some(user.id),
+        role: Some(user.role),
+        branch_id: Some(user.branch_id),
+    })
 }
 
-/// Placeholder for fast cashier PIN verification (implemented in F1.05).
+/// Fast cashier PIN verification for POS terminal operations.
 #[tauri::command]
-pub fn verify_pin(_user_id: String, _pin: String) -> Result<bool, String> {
-    Err("PIN verification is handled by the local session model in F1.05".into())
+pub fn verify_pin(
+    state: tauri::State<DbState>,
+    user_id: String,
+    pin: String,
+) -> Result<LoginResult, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("Database lock failed: {e}"))?;
+
+    let user = user::verify_user_pin(&conn, &user_id, &pin).map_err(|e| e.to_string())?;
+
+    let session =
+        user::session::create_local_session(&conn, &user.id, &user.branch_id, "pin", None)
+            .map_err(|e| e.to_string())?;
+
+    Ok(LoginResult {
+        success: true,
+        session_id: Some(session.id),
+        user_id: Some(user.id),
+        role: Some(user.role),
+        branch_id: Some(user.branch_id),
+    })
+}
+
+/// Explicit logout / session revocation.
+#[tauri::command]
+pub fn logout(state: tauri::State<DbState>, session_id: String) -> Result<(), String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("Database lock failed: {e}"))?;
+
+    user::session::revoke_local_session(&conn, &session_id).map_err(|e| e.to_string())
 }

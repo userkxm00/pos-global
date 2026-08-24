@@ -12,6 +12,7 @@ mod organization;
 mod register;
 #[cfg(test)]
 mod tests;
+mod user;
 
 use tauri::Manager;
 
@@ -36,6 +37,7 @@ fn main() {
             commands::auth::auth_state,
             commands::auth::login,
             commands::auth::verify_pin,
+            commands::auth::logout,
             commands::auth::online_login,
             commands::licence::activate_licence,
             commands::licence::check_licence_status,
