@@ -76,7 +76,7 @@ pub fn decode_base64url(s: &str) -> Result<Vec<u8>, &'static str> {
             _ => return Err("invalid base64url character"),
         }
     }
-    while clean.len() % 4 != 0 {
+    while !clean.len().is_multiple_of(4) {
         clean.push(b'=');
     }
 
@@ -121,6 +121,36 @@ pub fn extract_jwt_role(jwt: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Checks whether an HTTP URL points strictly to a local development loopback host.
+pub fn is_allowed_localhost_http(url: &str) -> bool {
+    let rest = match url.strip_prefix("http://") {
+        Some(r) => r,
+        None => return false,
+    };
+
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("").trim();
+
+    if authority.is_empty() || authority.contains('@') {
+        return false;
+    }
+
+    let host = if authority.starts_with('[') {
+        if let Some(end_bracket) = authority.find(']') {
+            let after_bracket = &authority[end_bracket + 1..];
+            if !after_bracket.is_empty() && !after_bracket.starts_with(':') {
+                return false;
+            }
+            &authority[..=end_bracket]
+        } else {
+            return false;
+        }
+    } else {
+        authority.split(':').next().unwrap_or("")
+    };
+
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]")
+}
+
 /// Validates that configuration contains only public client parameters and no private secrets.
 pub fn validate_config(config: &SupabaseAuthConfig) -> Result<(), AuthError> {
     let trimmed_url = config.url.trim();
@@ -131,17 +161,14 @@ pub fn validate_config(config: &SupabaseAuthConfig) -> Result<(), AuthError> {
     }
 
     // HTTPS is required for all remote/production endpoints to protect credentials in transit.
-    // Insecure HTTP is permitted only for local development on localhost/127.0.0.1.
+    // Insecure HTTP is strictly restricted to local development loopback hosts (localhost, 127.0.0.1, [::1]).
     if trimmed_url.starts_with("https://") {
         // Valid secure HTTPS URL
-    } else if trimmed_url.starts_with("http://localhost")
-        || trimmed_url.starts_with("http://127.0.0.1")
-        || trimmed_url.starts_with("http://[::1]")
-    {
+    } else if is_allowed_localhost_http(trimmed_url) {
         // Valid local development URL
     } else if trimmed_url.starts_with("http://") {
         return Err(AuthError::SecurityViolation(
-            "Insecure HTTP Supabase URL is forbidden. Production and remote environments must use HTTPS (HTTP is restricted to localhost development)".into(),
+            "Insecure HTTP Supabase URL is forbidden. Production and remote environments must use HTTPS (HTTP is restricted to localhost)".into(),
         ));
     } else {
         return Err(AuthError::Unconfigured(

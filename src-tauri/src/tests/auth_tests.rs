@@ -1,6 +1,6 @@
 use crate::auth::{
-    extract_jwt_role, parse_error_response, parse_token_response, validate_config,
-    validate_credentials, AuthError, SupabaseAuthConfig,
+    extract_jwt_role, is_allowed_localhost_http, parse_error_response, parse_token_response,
+    validate_config, validate_credentials, AuthError, SupabaseAuthConfig,
 };
 
 #[test]
@@ -14,30 +14,63 @@ fn validate_config_accepts_valid_https_url_and_publishable_key() {
 }
 
 #[test]
-fn validate_config_accepts_localhost_http_for_development() {
-    let local_config = SupabaseAuthConfig {
-        url: "http://localhost:54321".into(),
-        publishable_key: "sb_publishable_local_key".into(),
-    };
-    assert!(validate_config(&local_config).is_ok());
+fn validate_config_accepts_valid_localhost_development_urls() {
+    let accepted_urls = [
+        "http://localhost",
+        "http://localhost:54321",
+        "http://localhost/supabase",
+        "http://127.0.0.1",
+        "http://127.0.0.1:54321",
+        "http://[::1]",
+        "http://[::1]:54321",
+    ];
 
-    let loopback_config = SupabaseAuthConfig {
-        url: "http://127.0.0.1:54321".into(),
-        publishable_key: "sb_publishable_local_key".into(),
-    };
-    assert!(validate_config(&loopback_config).is_ok());
+    for url in accepted_urls {
+        assert!(
+            is_allowed_localhost_http(url),
+            "Expected {url} to be recognized as allowed localhost HTTP"
+        );
+
+        let config = SupabaseAuthConfig {
+            url: url.into(),
+            publishable_key: "sb_publishable_local_key".into(),
+        };
+        assert!(
+            validate_config(&config).is_ok(),
+            "Expected config with {url} to be valid"
+        );
+    }
 }
 
 #[test]
-fn validate_config_rejects_insecure_remote_http() {
-    let insecure_config = SupabaseAuthConfig {
-        url: "http://remote-supabase.example.com".into(),
-        publishable_key: "sb_publishable_token".into(),
-    };
-    assert!(matches!(
-        validate_config(&insecure_config),
-        Err(AuthError::SecurityViolation(_))
-    ));
+fn validate_config_rejects_attacker_controlled_and_insecure_http_hosts() {
+    let rejected_urls = [
+        "http://localhost.attacker.com",
+        "http://localhost.evil",
+        "http://127.0.0.1.evil.com",
+        "http://[::1].evil.com",
+        "http://remote-supabase.example.com",
+        "http://insecure-backend.com:8080",
+    ];
+
+    for url in rejected_urls {
+        assert!(
+            !is_allowed_localhost_http(url),
+            "Expected {url} to be rejected as forbidden HTTP host"
+        );
+
+        let config = SupabaseAuthConfig {
+            url: url.into(),
+            publishable_key: "sb_publishable_token".into(),
+        };
+        assert!(
+            matches!(
+                validate_config(&config),
+                Err(AuthError::SecurityViolation(_))
+            ),
+            "Expected config with {url} to return SecurityViolation"
+        );
+    }
 }
 
 #[test]
@@ -75,10 +108,6 @@ fn validate_config_rejects_sb_secret_key() {
 
 #[test]
 fn validate_config_rejects_legacy_service_role_jwt() {
-    // Construct a realistic legacy JWT with role: "service_role"
-    // Header: {"alg":"HS256","typ":"JWT"} -> eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
-    // Payload: {"role":"service_role","iss":"supabase","exp":1900000000}
-    // Base64URL payload: eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJleHAiOjE5MDAwMDAwMDB9
     let service_role_jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJleHAiOjE5MDAwMDAwMDB9.signature";
 
     assert_eq!(
@@ -99,10 +128,7 @@ fn validate_config_rejects_legacy_service_role_jwt() {
 
 #[test]
 fn validate_config_accepts_legacy_anon_jwt() {
-    // Header: {"alg":"HS256","typ":"JWT"} -> eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
-    // Payload: {"role":"anon","iss":"supabase","exp":1900000000}
-    // Base64URL payload: eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiZXhwIjoxOTAwMDAwMDAwfQ
-    let anon_jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiZXhwIjoxOTAwMDAwMDAwfQ.signature";
+    let anon_jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9hbm9uX2tleSIsImlzcyI6InN1cGFiYXNlIiwicm9sZSI6ImFub24iLCJleHAiOjE5MDAwMDAwMDB9.signature";
 
     assert_eq!(extract_jwt_role(anon_jwt), Some("anon".to_string()));
 
