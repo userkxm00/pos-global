@@ -62,8 +62,8 @@ pub fn create_test_org_and_branch(conn: &Connection) -> (String, String) {
         conn,
         CreateOrganizationInput {
             name: "Acme Retailers".into(),
-            default_currency: "USD".into(),
-            default_language: "en".into(),
+            default_currency: Some("USD".into()),
+            default_language: Some("en".into()),
         },
     )
     .expect("test org created");
@@ -73,9 +73,9 @@ pub fn create_test_org_and_branch(conn: &Connection) -> (String, String) {
         CreateBranchInput {
             organization_id: org.id.clone(),
             name: "Main Downtown Store".into(),
-            code: Some("STORE-01".into()),
             address: Some("123 Main St".into()),
-            currency: "USD".into(),
+            currency: Some("USD".into()),
+            is_active: Some(true),
         },
     )
     .expect("test branch created");

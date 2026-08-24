@@ -131,9 +131,9 @@ fn tenant_and_branch_isolation_prevents_cross_branch_sessions() {
         CreateBranchInput {
             organization_id: org_id,
             name: "Airport Terminal Branch".into(),
-            code: Some("AIR-02".into()),
             address: Some("Terminal 3 Gate 12".into()),
-            currency: "USD".into(),
+            currency: Some("USD".into()),
+            is_active: Some(true),
         },
     )
     .expect("second branch created");

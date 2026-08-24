@@ -1,7 +1,7 @@
 // Local session domain model and repository operations.
 // F1.05 — Local user/session model
 
-use crate::user::{User, UserError};
+use crate::user::UserError;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 

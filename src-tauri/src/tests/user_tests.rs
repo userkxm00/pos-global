@@ -445,8 +445,10 @@ fn rate_limiter_never_evicts_active_lockouts_when_all_entries_locked() {
 }
 
 #[test]
-fn rate_limiter_saturated_lockouts_trigger_admission_throttle_for_new_keys() {
+fn rate_limiter_saturated_lockouts_trigger_client_admission_throttle() {
     let limiter = RateLimiter::new(2, 30, 2); // capacity = 2 entries, 2 attempts to lock
+    let attacker_client = "attacker_term_09";
+    let innocent_client = "cashier_term_01";
 
     // Lock all available slots
     limiter.record_failure("slot1:user:target_1");
@@ -456,15 +458,22 @@ fn rate_limiter_saturated_lockouts_trigger_admission_throttle_for_new_keys() {
 
     assert_eq!(limiter.len(), 2);
 
-    // Overflow attempts with new keys exceed threshold
-    limiter.record_failure("slot3:user:overflow_1");
-    limiter.record_failure("slot4:user:overflow_2");
+    // Attacker floods overflow attempts with new keys
+    limiter.record_failure(&format!("{attacker_client}:user:overflow_1"));
+    limiter.record_failure(&format!("{attacker_client}:user:overflow_2"));
 
-    // Admission throttle is active: new keys cannot bypass rate limiting
-    let throttle_err = limiter.check("slot5:user:new_key");
+    // Admission throttle is active for the attacker client
+    let throttle_err = limiter.check(&format!("{attacker_client}:user:new_key"));
     assert!(
         throttle_err.is_err(),
-        "New keys must be throttled when capacity is saturated with active lockouts"
+        "Attacker client must be throttled when attempting overflow floods"
+    );
+
+    // Innocent client is NOT throttled by attacker's flooding
+    let innocent_check = limiter.check(&format!("{innocent_client}:user:new_key"));
+    assert!(
+        innocent_check.is_ok(),
+        "Innocent client must not be throttled by another client's overflow flood"
     );
 
     // Original lockouts remain strictly preserved

@@ -107,12 +107,12 @@ pub fn verify_secret(candidate: &str, stored_hash: &str) -> bool {
 
 struct RateLimiterState {
     map: HashMap<String, (u32, Instant)>,
-    saturated_until: Option<Instant>,
-    overflow_failures: u32,
+    client_saturated_until: HashMap<String, Instant>,
+    client_overflow_failures: HashMap<String, u32>,
 }
 
 /// Thread-safe in-memory rate limiter with bounded memory growth, strict active-lockout preservation,
-/// admission throttling under saturation, and composite client scoping.
+/// client-scoped admission throttling under saturation, and composite client scoping.
 pub struct RateLimiter {
     state: Mutex<RateLimiterState>,
     max_attempts: u32,
@@ -125,8 +125,8 @@ impl RateLimiter {
         Self {
             state: Mutex::new(RateLimiterState {
                 map: HashMap::new(),
-                saturated_until: None,
-                overflow_failures: 0,
+                client_saturated_until: HashMap::new(),
+                client_overflow_failures: HashMap::new(),
             }),
             max_attempts,
             lockout_duration: Duration::from_secs(lockout_secs),
@@ -135,51 +135,57 @@ impl RateLimiter {
     }
 
     /// Returns the number of currently tracked entries (useful for test assertions).
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.state.lock().map(|s| s.map.len()).unwrap_or(0)
     }
 
     /// Checks if the limiter has no tracked entries.
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Checks if a client-identity key is currently locked out or subject to admission throttle.
-    pub fn check(&self, key: &str) -> Result<(), UserError> {
+    /// Checks if a client-identity key is currently locked out or subject to client admission throttle.
+    pub fn check(&self, rate_key: &str) -> Result<(), UserError> {
         let mut state = self
             .state
             .lock()
             .map_err(|e| UserError::Database(e.to_string()))?;
 
-        if let Some((count, last_failed)) = state.map.get(key) {
+        let client_id = rate_key.split(':').next().unwrap_or(rate_key);
+
+        if let Some((count, last_failed)) = state.map.get(rate_key) {
             if *count >= self.max_attempts {
                 if last_failed.elapsed() < self.lockout_duration {
                     return Err(UserError::InvalidCredentials(
                         "Too many failed attempts. Account is temporarily locked. Please try again later.".into(),
                     ));
                 } else {
-                    state.map.remove(key);
+                    state.map.remove(rate_key);
                 }
             }
-        } else if let Some(until) = state.saturated_until {
-            if Instant::now() < until {
+        } else if let Some(until) = state.client_saturated_until.get(client_id) {
+            if Instant::now() < *until {
                 return Err(UserError::InvalidCredentials(
-                    "Too many failed attempts. Authentication service is temporarily throttling requests. Please try again later.".into(),
+                    "Too many failed attempts. Authentication service is temporarily throttling requests from this client. Please try again later.".into(),
                 ));
             } else {
-                state.saturated_until = None;
-                state.overflow_failures = 0;
+                state.client_saturated_until.remove(client_id);
+                state.client_overflow_failures.remove(client_id);
             }
         }
         Ok(())
     }
 
     /// Records a failure. Active lockouts are strictly preserved and never evicted.
-    /// Under total saturation of active lockouts, admission throttling prevents unthrottled bypass.
-    pub fn record_failure(&self, key: &str) {
+    /// Under total saturation of active lockouts, client-scoped admission throttling prevents unthrottled bypass.
+    pub fn record_failure(&self, rate_key: &str) {
         if let Ok(mut state) = self.state.lock() {
+            let client_id = rate_key.split(':').next().unwrap_or(rate_key).to_string();
+
             // Update existing entry directly
-            if let Some(entry) = state.map.get_mut(key) {
+            if let Some(entry) = state.map.get_mut(rate_key) {
                 if entry.0 >= self.max_attempts && entry.1.elapsed() >= self.lockout_duration {
                     *entry = (1, Instant::now());
                 } else {
@@ -194,6 +200,11 @@ impl RateLimiter {
             state
                 .map
                 .retain(|_, (_, last_failed)| last_failed.elapsed() < lockout);
+
+            // Purge expired client saturation throttle records
+            state
+                .client_saturated_until
+                .retain(|_, until| Instant::now() < *until);
 
             // 2. If at capacity, evict the oldest non-locked entry only
             if state.map.len() >= self.max_entries {
@@ -211,30 +222,39 @@ impl RateLimiter {
 
             // 3. Insert new entry if space is available (never evicting an active lockout)
             if state.map.len() < self.max_entries {
-                state.map.insert(key.to_string(), (1, Instant::now()));
+                state.map.insert(rate_key.to_string(), (1, Instant::now()));
             } else {
-                // Capacity fully saturated by active lockouts: apply admission throttling for overflow attempts
-                state.overflow_failures += 1;
-                if state.overflow_failures >= self.max_attempts {
-                    state.saturated_until = Some(Instant::now() + self.lockout_duration);
+                // Capacity fully saturated by active lockouts: apply client-scoped admission throttling
+                let count = state
+                    .client_overflow_failures
+                    .entry(client_id.clone())
+                    .or_insert(0);
+                *count += 1;
+                if *count >= self.max_attempts {
+                    state
+                        .client_saturated_until
+                        .insert(client_id, Instant::now() + self.lockout_duration);
                 }
             }
         }
     }
 
     /// Clears the failure record on successful authentication.
-    pub fn record_success(&self, key: &str) {
+    pub fn record_success(&self, rate_key: &str) {
         if let Ok(mut state) = self.state.lock() {
-            state.map.remove(key);
+            state.map.remove(rate_key);
+            let client_id = rate_key.split(':').next().unwrap_or(rate_key);
+            state.client_overflow_failures.remove(client_id);
         }
     }
 
     /// Clears all entries (useful in testing).
+    #[cfg(test)]
     pub fn reset_all(&self) {
         if let Ok(mut state) = self.state.lock() {
             state.map.clear();
-            state.saturated_until = None;
-            state.overflow_failures = 0;
+            state.client_saturated_until.clear();
+            state.client_overflow_failures.clear();
         }
     }
 }
