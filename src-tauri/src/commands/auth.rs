@@ -3,7 +3,7 @@
 // F1.04 — Supabase Auth adapter & F1.05 — Local user/session model
 
 use crate::auth::{
-    self, parse_error_response, parse_token_response, validate_config, validate_credentials,
+    parse_error_response, parse_token_response, validate_config, validate_credentials, AuthError,
     OnlineSession, SignInInput, SupabaseAuthConfig,
 };
 use crate::db::DbState;
@@ -109,7 +109,7 @@ pub async fn online_login(
         .send()
         .await
         .map_err(|e| {
-            auth::AuthError::Network(format!(
+            AuthError::Network(format!(
                 "Unable to reach Supabase authentication service: {e}"
             ))
             .to_string()
