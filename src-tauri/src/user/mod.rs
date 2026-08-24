@@ -26,6 +26,7 @@ pub struct User {
     pub created_at: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateUserInput {
     pub branch_id: String,
@@ -38,6 +39,7 @@ pub struct CreateUserInput {
     pub auth_provider: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateUserInput {
     pub full_name: Option<String>,
@@ -83,6 +85,7 @@ pub const DECOY_ARGON2_HASH: &str =
     "$argon2id$v=19$m=19456,t=2,p=1$ZGVjb3lzYWx0MTIzNDU2Nw$DecoyHashToPreventUserEnumerationTimingAttack123";
 
 /// Generates a cryptographically secure Argon2id hash in standard PHC format.
+#[allow(dead_code)]
 pub fn hash_secret(secret: &str) -> Result<String, UserError> {
     let salt_bytes = uuid::Uuid::new_v4();
     let salt = SaltString::encode_b64(salt_bytes.as_bytes())
@@ -281,6 +284,7 @@ pub fn map_user_row(row: &Row<'_>) -> rusqlite::Result<User> {
 }
 
 /// Creates a new user record in the local database.
+#[allow(dead_code)]
 pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, UserError> {
     let full_name = input.full_name.trim();
     if full_name.is_empty() {
@@ -408,6 +412,7 @@ pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, Us
 }
 
 /// Retrieves a user by ID.
+#[allow(dead_code)]
 pub fn get_user(conn: &Connection, id: &str) -> Result<User, UserError> {
     conn.query_row(
         "SELECT id, branch_id, full_name, username, role, is_active, supabase_user_id, auth_provider, created_at
@@ -421,6 +426,7 @@ pub fn get_user(conn: &Connection, id: &str) -> Result<User, UserError> {
 }
 
 /// Retrieves a user by username.
+#[allow(dead_code)]
 pub fn get_user_by_username(conn: &Connection, username: &str) -> Result<User, UserError> {
     conn.query_row(
         "SELECT id, branch_id, full_name, username, role, is_active, supabase_user_id, auth_provider, created_at
@@ -434,6 +440,7 @@ pub fn get_user_by_username(conn: &Connection, username: &str) -> Result<User, U
 }
 
 /// Retrieves a user by linked Supabase user ID.
+#[allow(dead_code)]
 pub fn get_user_by_supabase_id(
     conn: &Connection,
     supabase_user_id: &str,
@@ -450,6 +457,7 @@ pub fn get_user_by_supabase_id(
 }
 
 /// Updates user fields safely.
+#[allow(dead_code)]
 pub fn update_user(conn: &Connection, id: &str, input: UpdateUserInput) -> Result<User, UserError> {
     let existing = get_user(conn, id)?;
 
@@ -583,6 +591,7 @@ pub fn update_user(conn: &Connection, id: &str, input: UpdateUserInput) -> Resul
 }
 
 /// Lists all users for a given branch.
+#[allow(dead_code)]
 pub fn list_users(conn: &Connection, branch_id: &str) -> Result<Vec<User>, UserError> {
     let mut stmt = conn
         .prepare(

@@ -219,6 +219,7 @@ pub fn revoke_local_session(conn: &Connection, session_id: &str) -> Result<(), U
 }
 
 /// Retrieves the most recent active (unrevoked, unexpired) session for a user.
+#[allow(dead_code)]
 pub fn get_active_session(
     conn: &Connection,
     user_id: &str,
