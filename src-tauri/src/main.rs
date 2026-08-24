@@ -3,6 +3,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod branch;
 mod commands;
 mod db;
 mod licence;
@@ -43,6 +44,10 @@ fn main() {
             commands::organization::get_organization,
             commands::organization::update_organization,
             commands::organization::list_organizations,
+            commands::branch::create_branch,
+            commands::branch::get_branch,
+            commands::branch::update_branch,
+            commands::branch::list_branches,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
