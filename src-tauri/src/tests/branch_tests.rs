@@ -1,5 +1,6 @@
 use crate::branch::{
-    create_branch, get_branch, list_branches, update_branch, CreateBranchInput, UpdateBranchInput,
+    create_branch, get_branch, list_branches, update_branch, BranchError, CreateBranchInput,
+    UpdateBranchInput,
 };
 use crate::organization::{create_organization, CreateOrganizationInput};
 use rusqlite::Connection;
@@ -57,6 +58,46 @@ fn rejects_overlong_name() {
         name: "a".repeat(256),
         address: None,
         currency: Some("USD".into()),
+        is_active: Some(true),
+    };
+    assert!(create_branch(&conn, input).is_err());
+}
+
+#[test]
+fn accepts_unicode_name_255_chars() {
+    let conn = setup_db();
+    let org_id = create_test_org(&conn, "Org Name", "DZD");
+
+    // "ق" is 2 bytes in UTF-8, so 255 chars = 510 bytes. Character count must be <= 255.
+    let unicode_255 = "ق".repeat(255);
+    assert_eq!(unicode_255.chars().count(), 255);
+    assert!(unicode_255.len() > 255);
+
+    let input = CreateBranchInput {
+        organization_id: org_id,
+        name: unicode_255.clone(),
+        address: None,
+        currency: Some("DZD".into()),
+        is_active: Some(true),
+    };
+    let branch =
+        create_branch(&conn, input).expect("255-character unicode name should be accepted");
+    assert_eq!(branch.name, unicode_255);
+}
+
+#[test]
+fn rejects_unicode_name_256_chars() {
+    let conn = setup_db();
+    let org_id = create_test_org(&conn, "Org Name", "DZD");
+
+    let unicode_256 = "ق".repeat(256);
+    assert_eq!(unicode_256.chars().count(), 256);
+
+    let input = CreateBranchInput {
+        organization_id: org_id,
+        name: unicode_256,
+        address: None,
+        currency: Some("DZD".into()),
         is_active: Some(true),
     };
     assert!(create_branch(&conn, input).is_err());
@@ -325,34 +366,49 @@ fn list_branches_returns_deterministic_ordering() {
     let conn = setup_db();
     let org_id = create_test_org(&conn, "Listing Org", "USD");
 
-    let b1 = create_branch(
-        &conn,
-        CreateBranchInput {
-            organization_id: org_id.clone(),
-            name: "Branch Alpha".into(),
-            address: None,
-            currency: Some("USD".into()),
-            is_active: Some(true),
-        },
+    // Insert with explicit distinct timestamps to verify created_at ASC ordering
+    conn.execute(
+        "INSERT INTO branches (id, organization_id, name, address, currency, is_active, created_at)
+         VALUES ('branch-earlier', ?1, 'Earlier Branch', NULL, 'USD', 1, '2026-01-01 10:00:00')",
+        [&org_id],
     )
     .unwrap();
 
-    let b2 = create_branch(
-        &conn,
-        CreateBranchInput {
-            organization_id: org_id.clone(),
-            name: "Branch Beta".into(),
-            address: None,
-            currency: Some("USD".into()),
-            is_active: Some(true),
-        },
+    conn.execute(
+        "INSERT INTO branches (id, organization_id, name, address, currency, is_active, created_at)
+         VALUES ('branch-later', ?1, 'Later Branch', NULL, 'USD', 1, '2026-01-02 10:00:00')",
+        [&org_id],
+    )
+    .unwrap();
+
+    // Also insert two branches sharing the exact same timestamp to verify id ASC tie-breaking
+    conn.execute(
+        "INSERT INTO branches (id, organization_id, name, address, currency, is_active, created_at)
+         VALUES ('branch-same-z', ?1, 'Same Z', NULL, 'USD', 1, '2026-01-03 12:00:00')",
+        [&org_id],
+    )
+    .unwrap();
+
+    conn.execute(
+        "INSERT INTO branches (id, organization_id, name, address, currency, is_active, created_at)
+         VALUES ('branch-same-a', ?1, 'Same A', NULL, 'USD', 1, '2026-01-03 12:00:00')",
+        [&org_id],
     )
     .unwrap();
 
     let list = list_branches(&conn, &org_id).expect("listing should succeed");
-    assert_eq!(list.len(), 2);
-    assert_eq!(list[0].id, b1.id);
-    assert_eq!(list[1].id, b2.id);
+    assert_eq!(list.len(), 4);
+
+    let ids: Vec<String> = list.into_iter().map(|b| b.id).collect();
+    assert_eq!(
+        ids,
+        vec![
+            "branch-earlier".to_string(),
+            "branch-later".to_string(),
+            "branch-same-a".to_string(),
+            "branch-same-z".to_string(),
+        ]
+    );
 }
 
 #[test]
@@ -406,7 +462,27 @@ fn strict_multi_tenant_isolation() {
     let ids_a: Vec<String> = list_a.into_iter().map(|b| b.id).collect();
     let ids_b: Vec<String> = list_b.into_iter().map(|b| b.id).collect();
 
-    assert_eq!(ids_a, vec![branch_a1.id, branch_a2.id]);
-    assert_eq!(ids_b, vec![branch_b1.id]);
+    assert_eq!(ids_a.len(), 2);
+    assert!(ids_a.contains(&branch_a1.id));
+    assert!(ids_a.contains(&branch_a2.id));
     assert!(!ids_a.contains(&branch_b1.id));
+
+    assert_eq!(ids_b.len(), 1);
+    assert_eq!(ids_b, vec![branch_b1.id]);
+}
+
+#[test]
+fn legacy_null_organization_id_returns_database_error() {
+    let conn = setup_db();
+
+    // Insert legacy row with NULL organization_id directly into SQLite
+    conn.execute(
+        "INSERT INTO branches (id, organization_id, name, address, currency, is_active, created_at)
+         VALUES ('legacy-branch', NULL, 'Legacy Branch', NULL, 'USD', 1, datetime('now'))",
+        [],
+    )
+    .unwrap();
+
+    let get_result = get_branch(&conn, "legacy-branch");
+    assert!(matches!(get_result, Err(BranchError::Database(_))));
 }

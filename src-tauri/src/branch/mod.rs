@@ -68,7 +68,7 @@ impl From<rusqlite::Error> for BranchError {
     }
 }
 
-/// Validates branch name. Must be non-empty and within length bounds.
+/// Validates branch name. Must be non-empty and maximum 255 characters.
 pub fn validate_name(name: &str) -> Result<String, BranchError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -76,7 +76,7 @@ pub fn validate_name(name: &str) -> Result<String, BranchError> {
             "Branch name cannot be empty".into(),
         ));
     }
-    if trimmed.len() > 255 {
+    if trimmed.chars().count() > 255 {
         return Err(BranchError::Validation(
             "Branch name exceeds maximum length of 255 characters".into(),
         ));
@@ -188,28 +188,39 @@ pub fn create_branch(conn: &Connection, input: CreateBranchInput) -> Result<Bran
 pub fn get_branch(conn: &Connection, id: &str) -> Result<Option<Branch>, BranchError> {
     let id = validate_id(id)?;
 
-    let branch = conn
-        .query_row(
-            "SELECT id, organization_id, name, address, currency, is_active, created_at
-             FROM branches
-             WHERE id = ?1",
-            params![id],
-            |row| {
-                let is_active_int: i32 = row.get(5)?;
-                Ok(Branch {
-                    id: row.get(0)?,
-                    organization_id: row.get(1)?,
-                    name: row.get(2)?,
-                    address: row.get(3)?,
-                    currency: row.get(4)?,
-                    is_active: is_active_int != 0,
-                    created_at: row.get(6)?,
-                })
-            },
-        )
-        .optional()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, organization_id, name, address, currency, is_active, created_at
+         FROM branches
+         WHERE id = ?1",
+    )?;
 
-    Ok(branch)
+    let mut rows = stmt.query(params![id])?;
+    if let Some(row) = rows.next()? {
+        let branch_id: String = row.get(0)?;
+        let org_id_opt: Option<String> = row.get(1)?;
+        let organization_id = org_id_opt.ok_or_else(|| {
+            BranchError::Database(format!(
+                "Branch '{branch_id}' has corrupt or NULL organization_id"
+            ))
+        })?;
+        let name: String = row.get(2)?;
+        let address: Option<String> = row.get(3)?;
+        let currency: String = row.get(4)?;
+        let is_active_int: i32 = row.get(5)?;
+        let created_at: String = row.get(6)?;
+
+        Ok(Some(Branch {
+            id: branch_id,
+            organization_id,
+            name,
+            address,
+            currency,
+            is_active: is_active_int != 0,
+            created_at,
+        }))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Updates an existing branch.
@@ -261,22 +272,31 @@ pub fn list_branches(conn: &Connection, organization_id: &str) -> Result<Vec<Bra
          ORDER BY created_at ASC, id ASC",
     )?;
 
-    let branch_iter = stmt.query_map(params![org_id], |row| {
-        let is_active_int: i32 = row.get(5)?;
-        Ok(Branch {
-            id: row.get(0)?,
-            organization_id: row.get(1)?,
-            name: row.get(2)?,
-            address: row.get(3)?,
-            currency: row.get(4)?,
-            is_active: is_active_int != 0,
-            created_at: row.get(6)?,
-        })
-    })?;
-
+    let mut rows = stmt.query(params![org_id])?;
     let mut branches = Vec::new();
-    for branch in branch_iter {
-        branches.push(branch?);
+    while let Some(row) = rows.next()? {
+        let branch_id: String = row.get(0)?;
+        let org_id_opt: Option<String> = row.get(1)?;
+        let branch_org_id = org_id_opt.ok_or_else(|| {
+            BranchError::Database(format!(
+                "Branch '{branch_id}' has corrupt or NULL organization_id"
+            ))
+        })?;
+        let name: String = row.get(2)?;
+        let address: Option<String> = row.get(3)?;
+        let currency: String = row.get(4)?;
+        let is_active_int: i32 = row.get(5)?;
+        let created_at: String = row.get(6)?;
+
+        branches.push(Branch {
+            id: branch_id,
+            organization_id: branch_org_id,
+            name,
+            address,
+            currency,
+            is_active: is_active_int != 0,
+            created_at,
+        });
     }
 
     Ok(branches)
