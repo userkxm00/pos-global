@@ -161,19 +161,17 @@ impl RateLimiter {
                     return Err(UserError::InvalidCredentials(
                         "Too many failed attempts. Account is temporarily locked. Please try again later.".into(),
                     ));
-                } else {
-                    state.map.remove(rate_key);
                 }
+                state.map.remove(rate_key);
             }
         } else if let Some(until) = state.client_saturated_until.get(client_id) {
             if Instant::now() < *until {
                 return Err(UserError::InvalidCredentials(
                     "Too many failed attempts. Authentication service is temporarily throttling requests from this client. Please try again later.".into(),
                 ));
-            } else {
-                state.client_saturated_until.remove(client_id);
-                state.client_overflow_failures.remove(client_id);
             }
+            state.client_saturated_until.remove(client_id);
+            state.client_overflow_failures.remove(client_id);
         }
         Ok(())
     }
@@ -576,7 +574,7 @@ pub fn update_user(conn: &Connection, id: &str, input: UpdateUserInput) -> Resul
     query.push_str(" WHERE id = ?");
     param_values.push(Box::new(id.to_string()));
 
-    let params_ref: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+    let params_ref: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(Box::as_ref).collect();
 
     conn.execute(&query, params_ref.as_slice())
         .map_err(|e| UserError::Database(format!("Failed to update user: {e}")))?;

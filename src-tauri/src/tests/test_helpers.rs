@@ -98,9 +98,9 @@ pub fn create_test_user_with_creds(
         CreateUserInput {
             branch_id: branch_id.to_string(),
             full_name: name.to_string(),
-            username: username.map(|s| s.to_string()),
-            password: password.map(|s| s.to_string()),
-            pin: pin.map(|s| s.to_string()),
+            username: username.map(ToString::to_string),
+            password: password.map(ToString::to_string),
+            pin: pin.map(ToString::to_string),
             role: role.to_string(),
             supabase_user_id: None,
             auth_provider: None,
