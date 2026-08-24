@@ -9,6 +9,7 @@ mod commands;
 mod db;
 mod licence;
 mod organization;
+mod permission;
 mod register;
 #[cfg(test)]
 mod tests;
