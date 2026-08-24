@@ -3,7 +3,7 @@
 
 use crate::branch::{create_branch, CreateBranchInput};
 use crate::organization::{create_organization, CreateOrganizationInput};
-use crate::user::{create_user, CreateUserInput, User};
+use crate::user::{create_user, CreateUserInput, User, UserError};
 use rusqlite::Connection;
 
 /// Sets up an isolated in-memory test database with full foreign key constraints and schema.
@@ -83,24 +83,45 @@ pub fn create_test_org_and_branch(conn: &Connection) -> (String, String) {
     (org.id, branch.id)
 }
 
+/// Creates a test user with specified credentials without boilerplate.
+pub fn create_test_user_with_creds(
+    conn: &Connection,
+    branch_id: &str,
+    name: &str,
+    username: Option<&str>,
+    password: Option<&str>,
+    pin: Option<&str>,
+    role: &str,
+) -> Result<User, UserError> {
+    create_user(
+        conn,
+        CreateUserInput {
+            branch_id: branch_id.to_string(),
+            full_name: name.to_string(),
+            username: username.map(|s| s.to_string()),
+            password: password.map(|s| s.to_string()),
+            pin: pin.map(|s| s.to_string()),
+            role: role.to_string(),
+            supabase_user_id: None,
+            auth_provider: None,
+        },
+    )
+}
+
 /// Creates a full sample hierarchy: Organization -> Branch -> User.
 pub fn create_test_user_hierarchy(conn: &Connection) -> (String, String, User) {
     let (org_id, branch_id) = create_test_org_and_branch(conn);
     let dynamic_pw = ["fixture", "pass", "123"].join("_");
     let dynamic_pin = ["4", "3", "2", "1"].join("");
 
-    let user = create_user(
+    let user = create_test_user_with_creds(
         conn,
-        CreateUserInput {
-            branch_id: branch_id.clone(),
-            full_name: "Test Staff Member".into(),
-            username: Some("test_staff".into()),
-            password: Some(dynamic_pw),
-            pin: Some(dynamic_pin),
-            role: "cashier".into(),
-            supabase_user_id: None,
-            auth_provider: None,
-        },
+        &branch_id,
+        "Test Staff Member",
+        Some("test_staff"),
+        Some(&dynamic_pw),
+        Some(&dynamic_pin),
+        "cashier",
     )
     .expect("test user created");
 

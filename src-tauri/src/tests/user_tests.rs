@@ -1,5 +1,6 @@
 use crate::tests::test_helpers::{
-    create_test_org_and_branch, create_test_user_hierarchy, setup_test_db,
+    create_test_org_and_branch, create_test_user_hierarchy, create_test_user_with_creds,
+    setup_test_db,
 };
 use crate::user::{
     create_user, get_user_by_supabase_id, hash_secret, update_user, verify_secret,
@@ -14,18 +15,14 @@ fn valid_user_creation_and_argon2_hashing() {
     let dynamic_pw = ["alpha", "beta", "pass"].join("-");
     let dynamic_pin = ["8", "7", "6", "5"].join("");
 
-    let user = create_user(
+    let user = create_test_user_with_creds(
         &conn,
-        CreateUserInput {
-            branch_id: branch_id.clone(),
-            full_name: "Alice Johnson".into(),
-            username: Some("alice_pos".into()),
-            password: Some(dynamic_pw.clone()),
-            pin: Some(dynamic_pin.clone()),
-            role: "cashier".into(),
-            supabase_user_id: None,
-            auth_provider: None,
-        },
+        &branch_id,
+        "Alice Johnson",
+        Some("alice_pos"),
+        Some(&dynamic_pw),
+        Some(&dynamic_pin),
+        "cashier",
     )
     .expect("user should be created");
 
@@ -90,20 +87,9 @@ fn create_user_rejects_empty_name() {
     let conn = setup_test_db();
     let (_, branch_id) = create_test_org_and_branch(&conn);
 
-    let err = create_user(
-        &conn,
-        CreateUserInput {
-            branch_id,
-            full_name: "   ".into(),
-            username: Some("bob".into()),
-            password: None,
-            pin: None,
-            role: "cashier".into(),
-            supabase_user_id: None,
-            auth_provider: None,
-        },
-    )
-    .unwrap_err();
+    let err =
+        create_test_user_with_creds(&conn, &branch_id, "   ", Some("bob"), None, None, "cashier")
+            .unwrap_err();
 
     assert!(matches!(err, UserError::Validation(_)));
 }
@@ -112,18 +98,14 @@ fn create_user_rejects_empty_name() {
 fn create_user_rejects_invalid_branch() {
     let conn = setup_test_db();
 
-    let err = create_user(
+    let err = create_test_user_with_creds(
         &conn,
-        CreateUserInput {
-            branch_id: "non-existent-branch".into(),
-            full_name: "Charlie Brown".into(),
-            username: Some("charlie".into()),
-            password: None,
-            pin: None,
-            role: "cashier".into(),
-            supabase_user_id: None,
-            auth_provider: None,
-        },
+        "non-existent-branch",
+        "Charlie Brown",
+        Some("charlie"),
+        None,
+        None,
+        "cashier",
     )
     .unwrap_err();
 
@@ -135,33 +117,25 @@ fn create_user_enforces_unique_username() {
     let conn = setup_test_db();
     let (_, branch_id) = create_test_org_and_branch(&conn);
 
-    create_user(
+    create_test_user_with_creds(
         &conn,
-        CreateUserInput {
-            branch_id: branch_id.clone(),
-            full_name: "David Cashier 1".into(),
-            username: Some("david_unique".into()),
-            password: None,
-            pin: None,
-            role: "cashier".into(),
-            supabase_user_id: None,
-            auth_provider: None,
-        },
+        &branch_id,
+        "David Cashier 1",
+        Some("david_unique"),
+        None,
+        None,
+        "cashier",
     )
     .expect("first user created");
 
-    let err = create_user(
+    let err = create_test_user_with_creds(
         &conn,
-        CreateUserInput {
-            branch_id,
-            full_name: "David Cashier 2".into(),
-            username: Some("david_unique".into()),
-            password: None,
-            pin: None,
-            role: "cashier".into(),
-            supabase_user_id: None,
-            auth_provider: None,
-        },
+        &branch_id,
+        "David Cashier 2",
+        Some("david_unique"),
+        None,
+        None,
+        "cashier",
     )
     .unwrap_err();
 
@@ -221,18 +195,14 @@ fn verify_user_password_authenticates_and_defeats_timing_enumeration() {
     let test_limiter = RateLimiter::new(5, 30, 100);
     let client_id = uuid::Uuid::new_v4().to_string();
 
-    create_user(
+    create_test_user_with_creds(
         &conn,
-        CreateUserInput {
-            branch_id,
-            full_name: "Frank Staff".into(),
-            username: Some("frank".into()),
-            password: Some(dynamic_pw.clone()),
-            pin: None,
-            role: "cashier".into(),
-            supabase_user_id: None,
-            auth_provider: None,
-        },
+        &branch_id,
+        "Frank Staff",
+        Some("frank"),
+        Some(&dynamic_pw),
+        None,
+        "cashier",
     )
     .expect("user created");
 
@@ -282,18 +252,14 @@ fn verify_user_pin_authenticates_correctly() {
     let test_limiter = RateLimiter::new(5, 30, 100);
     let client_id = uuid::Uuid::new_v4().to_string();
 
-    let user = create_user(
+    let user = create_test_user_with_creds(
         &conn,
-        CreateUserInput {
-            branch_id,
-            full_name: "Grace Cashier".into(),
-            username: Some("grace".into()),
-            password: None,
-            pin: Some(dynamic_pin.clone()),
-            role: "cashier".into(),
-            supabase_user_id: None,
-            auth_provider: None,
-        },
+        &branch_id,
+        "Grace Cashier",
+        Some("grace"),
+        None,
+        Some(&dynamic_pin),
+        "cashier",
     )
     .expect("user created");
 
@@ -384,18 +350,14 @@ fn rate_limiter_client_scoping_prevents_victim_lockout() {
     let attacker_client = "attacker_terminal_01";
     let victim_client = "cashier_terminal_02";
 
-    create_user(
+    create_test_user_with_creds(
         &conn,
-        CreateUserInput {
-            branch_id,
-            full_name: "Target User".into(),
-            username: Some(user_name.into()),
-            password: Some(valid_pw.clone()),
-            pin: None,
-            role: "cashier".into(),
-            supabase_user_id: None,
-            auth_provider: None,
-        },
+        &branch_id,
+        "Target User",
+        Some(user_name),
+        Some(&valid_pw),
+        None,
+        "cashier",
     )
     .expect("user created");
 
@@ -433,6 +395,52 @@ fn rate_limiter_client_scoping_prevents_victim_lockout() {
     assert!(
         victim_auth.is_ok(),
         "Legitimate client must not be locked out by attacker on another client"
+    );
+}
+
+#[test]
+fn rate_limiter_evicts_oldest_non_locked_entry_when_capacity_reached() {
+    let limiter = RateLimiter::new(3, 30, 2); // capacity = 2 entries, 3 attempts to lock
+
+    limiter.record_failure("clientA:user:first_attempt");
+    limiter.record_failure("clientB:user:second_attempt");
+    assert_eq!(limiter.len(), 2);
+
+    // Record a 3rd distinct entry; capacity is 2 so oldest non-locked (first_attempt) is evicted
+    limiter.record_failure("clientC:user:third_attempt");
+    assert_eq!(limiter.len(), 2);
+
+    // first_attempt is now evicted and starts clean
+    assert!(limiter.check("clientA:user:first_attempt").is_ok());
+}
+
+#[test]
+fn rate_limiter_never_evicts_active_lockouts_when_all_entries_locked() {
+    let limiter = RateLimiter::new(2, 30, 2); // capacity = 2 entries, 2 attempts to lock
+
+    // Lock both entries to fill capacity with 100% active lockouts
+    limiter.record_failure("client1:user:locked_a");
+    limiter.record_failure("client1:user:locked_a");
+    assert!(limiter.check("client1:user:locked_a").is_err());
+
+    limiter.record_failure("client2:user:locked_b");
+    limiter.record_failure("client2:user:locked_b");
+    assert!(limiter.check("client2:user:locked_b").is_err());
+
+    assert_eq!(limiter.len(), 2);
+
+    // Attempt to flood with new keys; neither active lockout may be evicted
+    limiter.record_failure("client3:user:flooder_1");
+    limiter.record_failure("client4:user:flooder_2");
+
+    assert_eq!(limiter.len(), 2);
+    assert!(
+        limiter.check("client1:user:locked_a").is_err(),
+        "locked_a must remain locked"
+    );
+    assert!(
+        limiter.check("client2:user:locked_b").is_err(),
+        "locked_b must remain locked"
     );
 }
 

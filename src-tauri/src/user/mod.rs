@@ -7,7 +7,7 @@ use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -105,7 +105,7 @@ pub fn verify_secret(candidate: &str, stored_hash: &str) -> bool {
         .is_ok()
 }
 
-/// Thread-safe in-memory rate limiter with bounded memory growth, priority eviction, and composite client scoping.
+/// Thread-safe in-memory rate limiter with bounded memory growth, strict active-lockout preservation, and composite client scoping.
 pub struct RateLimiter {
     attempts: Mutex<HashMap<String, (u32, Instant)>>,
     max_attempts: u32,
@@ -153,52 +153,46 @@ impl RateLimiter {
         Ok(())
     }
 
-    /// Records a failure and applies memory eviction ensuring active lockouts are protected.
+    /// Records a failure. Active lockouts are strictly preserved and never evicted.
     pub fn record_failure(&self, key: &str) {
         if let Ok(mut map) = self.attempts.lock() {
-            // Evict expired / stale entries first when approaching capacity
-            if map.len() >= self.max_entries && !map.contains_key(key) {
-                // 1. Remove expired entries (where last failure was beyond lockout duration)
-                let lockout = self.lockout_duration;
-                map.retain(|_, (count, last_failed)| {
-                    if *count >= self.max_attempts {
-                        // Actively locked: preserve as long as within lockout window
-                        last_failed.elapsed() < lockout
-                    } else {
-                        // Non-locked failure: expire after lockout window
-                        last_failed.elapsed() < lockout
-                    }
-                });
+            // Update existing entry directly
+            if let Some(entry) = map.get_mut(key) {
+                if entry.0 >= self.max_attempts && entry.1.elapsed() >= self.lockout_duration {
+                    *entry = (1, Instant::now());
+                } else {
+                    entry.0 += 1;
+                    entry.1 = Instant::now();
+                }
+                return;
+            }
 
-                // 2. If still at capacity, evict non-locked entries first by oldest timestamp
-                if map.len() >= self.max_entries {
-                    let oldest_non_locked = map
-                        .iter()
-                        .filter(|(_, (count, _))| *count < self.max_attempts)
-                        .min_by_key(|(_, (_, time))| *time)
-                        .map(|(k, _)| k.clone());
+            // 1. Evict expired entries where last failure is beyond the lockout window
+            let lockout = self.lockout_duration;
+            map.retain(|_, (count, last_failed)| {
+                if *count >= self.max_attempts {
+                    last_failed.elapsed() < lockout
+                } else {
+                    last_failed.elapsed() < lockout
+                }
+            });
 
-                    if let Some(k) = oldest_non_locked {
-                        map.remove(&k);
-                    } else {
-                        // 3. If ALL entries are actively locked, evict the one closest to expiring
-                        if let Some(oldest_locked) = map
-                            .iter()
-                            .min_by_key(|(_, (_, time))| *time)
-                            .map(|(k, _)| k.clone())
-                        {
-                            map.remove(&oldest_locked);
-                        }
-                    }
+            // 2. If at capacity, evict the oldest non-locked entry only
+            if map.len() >= self.max_entries {
+                let oldest_non_locked = map
+                    .iter()
+                    .filter(|(_, (count, _))| *count < self.max_attempts)
+                    .min_by_key(|(_, (_, time))| *time)
+                    .map(|(k, _)| k.clone());
+
+                if let Some(non_locked_key) = oldest_non_locked {
+                    map.remove(&non_locked_key);
                 }
             }
 
-            let entry = map.entry(key.to_string()).or_insert((0, Instant::now()));
-            if entry.0 >= self.max_attempts && entry.1.elapsed() >= self.lockout_duration {
-                *entry = (1, Instant::now());
-            } else {
-                entry.0 += 1;
-                entry.1 = Instant::now();
+            // 3. Insert new entry if space is available (never evicting an active lockout)
+            if map.len() < self.max_entries {
+                map.insert(key.to_string(), (1, Instant::now()));
             }
         }
     }
@@ -226,6 +220,21 @@ pub fn get_auth_rate_limiter() -> &'static RateLimiter {
     GLOBAL_AUTH_RATE_LIMITER.get_or_init(|| RateLimiter::new(5, 30, 10_000))
 }
 
+/// Maps a database row to a User entity.
+pub fn map_user_row(row: &Row<'_>) -> rusqlite::Result<User> {
+    Ok(User {
+        id: row.get(0)?,
+        branch_id: row.get(1)?,
+        full_name: row.get(2)?,
+        username: row.get(3)?,
+        role: row.get(4)?,
+        is_active: row.get::<_, i64>(5)? == 1,
+        supabase_user_id: row.get(6)?,
+        auth_provider: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}
+
 /// Creates a new user record in the local database.
 pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, UserError> {
     let full_name = input.full_name.trim();
@@ -250,7 +259,6 @@ pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, Us
         return Err(UserError::Validation("Branch ID cannot be empty".into()));
     }
 
-    // Verify branch exists
     let branch_exists: bool = conn
         .query_row(
             "SELECT 1 FROM branches WHERE id = ?1",
@@ -267,7 +275,6 @@ pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, Us
         )));
     }
 
-    // Process username
     let username = match input.username {
         Some(u) => {
             let trimmed = u.trim().to_string();
@@ -295,7 +302,6 @@ pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, Us
         None => None,
     };
 
-    // Process Supabase User ID uniqueness if provided
     let supabase_user_id = match input.supabase_user_id {
         Some(s) => {
             let trimmed = s.trim().to_string();
@@ -362,19 +368,7 @@ pub fn get_user(conn: &Connection, id: &str) -> Result<User, UserError> {
         "SELECT id, branch_id, full_name, username, role, is_active, supabase_user_id, auth_provider, created_at
          FROM users WHERE id = ?1",
         params![id],
-        |row| {
-            Ok(User {
-                id: row.get(0)?,
-                branch_id: row.get(1)?,
-                full_name: row.get(2)?,
-                username: row.get(3)?,
-                role: row.get(4)?,
-                is_active: row.get::<_, i64>(5)? == 1,
-                supabase_user_id: row.get(6)?,
-                auth_provider: row.get(7)?,
-                created_at: row.get(8)?,
-            })
-        },
+        map_user_row,
     )
     .optional()
     .map_err(|e| UserError::Database(e.to_string()))?
@@ -387,19 +381,7 @@ pub fn get_user_by_username(conn: &Connection, username: &str) -> Result<User, U
         "SELECT id, branch_id, full_name, username, role, is_active, supabase_user_id, auth_provider, created_at
          FROM users WHERE username = ?1",
         params![username.trim()],
-        |row| {
-            Ok(User {
-                id: row.get(0)?,
-                branch_id: row.get(1)?,
-                full_name: row.get(2)?,
-                username: row.get(3)?,
-                role: row.get(4)?,
-                is_active: row.get::<_, i64>(5)? == 1,
-                supabase_user_id: row.get(6)?,
-                auth_provider: row.get(7)?,
-                created_at: row.get(8)?,
-            })
-        },
+        map_user_row,
     )
     .optional()
     .map_err(|e| UserError::Database(e.to_string()))?
@@ -415,19 +397,7 @@ pub fn get_user_by_supabase_id(
         "SELECT id, branch_id, full_name, username, role, is_active, supabase_user_id, auth_provider, created_at
          FROM users WHERE supabase_user_id = ?1",
         params![supabase_user_id.trim()],
-        |row| {
-            Ok(User {
-                id: row.get(0)?,
-                branch_id: row.get(1)?,
-                full_name: row.get(2)?,
-                username: row.get(3)?,
-                role: row.get(4)?,
-                is_active: row.get::<_, i64>(5)? == 1,
-                supabase_user_id: row.get(6)?,
-                auth_provider: row.get(7)?,
-                created_at: row.get(8)?,
-            })
-        },
+        map_user_row,
     )
     .optional()
     .map_err(|e| UserError::Database(e.to_string()))?
@@ -578,19 +548,7 @@ pub fn list_users(conn: &Connection, branch_id: &str) -> Result<Vec<User>, UserE
         .map_err(|e| UserError::Database(e.to_string()))?;
 
     let rows = stmt
-        .query_map(params![branch_id], |row| {
-            Ok(User {
-                id: row.get(0)?,
-                branch_id: row.get(1)?,
-                full_name: row.get(2)?,
-                username: row.get(3)?,
-                role: row.get(4)?,
-                is_active: row.get::<_, i64>(5)? == 1,
-                supabase_user_id: row.get(6)?,
-                auth_provider: row.get(7)?,
-                created_at: row.get(8)?,
-            })
-        })
+        .query_map(params![branch_id], map_user_row)
         .map_err(|e| UserError::Database(e.to_string()))?;
 
     let mut users = Vec::new();
@@ -598,6 +556,35 @@ pub fn list_users(conn: &Connection, branch_id: &str) -> Result<Vec<User>, UserE
         users.push(row.map_err(|e| UserError::Database(e.to_string()))?);
     }
     Ok(users)
+}
+
+/// Shared internal credential verification with timing decoy defense and rate limiting.
+fn verify_credential_internal(
+    limiter: &RateLimiter,
+    rate_key: &str,
+    user_and_hash: Option<(User, Option<String>)>,
+    candidate: &str,
+    error_msg: &'static str,
+) -> Result<User, UserError> {
+    match user_and_hash {
+        Some((user, Some(stored_hash))) => {
+            if !verify_secret(candidate, &stored_hash) {
+                limiter.record_failure(rate_key);
+                return Err(UserError::InvalidCredentials(error_msg.into()));
+            }
+            if !user.is_active {
+                limiter.record_failure(rate_key);
+                return Err(UserError::InvalidCredentials(error_msg.into()));
+            }
+            limiter.record_success(rate_key);
+            Ok(user)
+        }
+        _ => {
+            let _ = verify_secret(candidate, DECOY_ARGON2_HASH);
+            limiter.record_failure(rate_key);
+            Err(UserError::InvalidCredentials(error_msg.into()))
+        }
+    }
 }
 
 /// Verifies user password with injectable rate limiter and client scoping.
@@ -616,51 +603,18 @@ pub fn verify_user_password_with_limiter(
             "SELECT id, branch_id, full_name, username, role, is_active, supabase_user_id, auth_provider, created_at, password_hash
              FROM users WHERE username = ?1",
             params![username.trim()],
-            |row| {
-                Ok((
-                    User {
-                        id: row.get(0)?,
-                        branch_id: row.get(1)?,
-                        full_name: row.get(2)?,
-                        username: row.get(3)?,
-                        role: row.get(4)?,
-                        is_active: row.get::<_, i64>(5)? == 1,
-                        supabase_user_id: row.get(6)?,
-                        auth_provider: row.get(7)?,
-                        created_at: row.get(8)?,
-                    },
-                    row.get::<_, Option<String>>(9)?,
-                ))
-            },
+            |row| Ok((map_user_row(row)?, row.get::<_, Option<String>>(9)?)),
         )
         .optional()
         .map_err(|e| UserError::Database(e.to_string()))?;
 
-    match user_opt {
-        Some((user, Some(stored_hash))) => {
-            if !verify_secret(password, &stored_hash) {
-                limiter.record_failure(&rate_key);
-                return Err(UserError::InvalidCredentials(
-                    "Invalid username or password".into(),
-                ));
-            }
-            if !user.is_active {
-                limiter.record_failure(&rate_key);
-                return Err(UserError::InvalidCredentials(
-                    "Invalid username or password".into(),
-                ));
-            }
-            limiter.record_success(&rate_key);
-            Ok(user)
-        }
-        _ => {
-            let _ = verify_secret(password, DECOY_ARGON2_HASH);
-            limiter.record_failure(&rate_key);
-            Err(UserError::InvalidCredentials(
-                "Invalid username or password".into(),
-            ))
-        }
-    }
+    verify_credential_internal(
+        limiter,
+        &rate_key,
+        user_opt,
+        password,
+        "Invalid username or password",
+    )
 }
 
 /// Verifies user password using the global rate limiter and standard client context.
@@ -694,45 +648,12 @@ pub fn verify_user_pin_with_limiter(
             "SELECT id, branch_id, full_name, username, role, is_active, supabase_user_id, auth_provider, created_at, pin_hash
              FROM users WHERE id = ?1",
             params![user_id.trim()],
-            |row| {
-                Ok((
-                    User {
-                        id: row.get(0)?,
-                        branch_id: row.get(1)?,
-                        full_name: row.get(2)?,
-                        username: row.get(3)?,
-                        role: row.get(4)?,
-                        is_active: row.get::<_, i64>(5)? == 1,
-                        supabase_user_id: row.get(6)?,
-                        auth_provider: row.get(7)?,
-                        created_at: row.get(8)?,
-                    },
-                    row.get::<_, Option<String>>(9)?,
-                ))
-            },
+            |row| Ok((map_user_row(row)?, row.get::<_, Option<String>>(9)?)),
         )
         .optional()
         .map_err(|e| UserError::Database(e.to_string()))?;
 
-    match user_opt {
-        Some((user, Some(stored_hash))) => {
-            if !verify_secret(pin, &stored_hash) {
-                limiter.record_failure(&rate_key);
-                return Err(UserError::InvalidCredentials("Invalid PIN".into()));
-            }
-            if !user.is_active {
-                limiter.record_failure(&rate_key);
-                return Err(UserError::InvalidCredentials("Invalid PIN".into()));
-            }
-            limiter.record_success(&rate_key);
-            Ok(user)
-        }
-        _ => {
-            let _ = verify_secret(pin, DECOY_ARGON2_HASH);
-            limiter.record_failure(&rate_key);
-            Err(UserError::InvalidCredentials("Invalid PIN".into()))
-        }
-    }
+    verify_credential_internal(limiter, &rate_key, user_opt, pin, "Invalid PIN")
 }
 
 /// Verifies user cashier PIN using the global rate limiter and standard client context.
