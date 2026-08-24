@@ -512,3 +512,13 @@ fn rate_limiter_eviction_preserves_active_lockouts_under_flooding() {
         "Actively locked entry must survive eviction flooding"
     );
 }
+
+#[test]
+fn rate_limiter_is_empty_and_reset_all() {
+    let limiter = RateLimiter::new(3, 30, 10);
+    assert!(limiter.is_empty());
+    limiter.record_failure("test_client:user:reset_check");
+    assert!(!limiter.is_empty());
+    limiter.reset_all();
+    assert!(limiter.is_empty());
+}

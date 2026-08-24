@@ -145,6 +145,7 @@ impl RateLimiter {
 
     /// Checks if the limiter has no tracked entries.
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -251,6 +252,7 @@ impl RateLimiter {
 
     /// Clears all entries (useful in testing).
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn reset_all(&self) {
         if let Ok(mut state) = self.state.lock() {
             state.map.clear();
