@@ -114,6 +114,65 @@ struct RateLimiterState {
     client_overflow_failures: HashMap<String, u32>,
 }
 
+impl RateLimiterState {
+    fn update_existing(&mut self, rate_key: &str, max_attempts: u32, lockout: Duration) -> bool {
+        if let Some(entry) = self.map.get_mut(rate_key) {
+            if entry.0 >= max_attempts && entry.1.elapsed() >= lockout {
+                *entry = (1, Instant::now());
+            } else {
+                entry.0 += 1;
+                entry.1 = Instant::now();
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    fn purge_expired(&mut self, lockout: Duration) {
+        self.map
+            .retain(|_, (_, last_failed)| last_failed.elapsed() < lockout);
+        self.client_saturated_until
+            .retain(|_, until| Instant::now() < *until);
+    }
+
+    fn evict_oldest_non_locked(&mut self, max_attempts: u32) {
+        let oldest_non_locked = self
+            .map
+            .iter()
+            .filter(|(_, (count, _))| *count < max_attempts)
+            .min_by_key(|(_, (_, time))| *time)
+            .map(|(k, _)| k.clone());
+
+        if let Some(non_locked_key) = oldest_non_locked {
+            self.map.remove(&non_locked_key);
+        }
+    }
+
+    fn insert_or_throttle(
+        &mut self,
+        rate_key: &str,
+        client_id: &str,
+        max_attempts: u32,
+        max_entries: usize,
+        lockout: Duration,
+    ) {
+        if self.map.len() < max_entries {
+            self.map.insert(rate_key.to_string(), (1, Instant::now()));
+        } else {
+            let count = self
+                .client_overflow_failures
+                .entry(client_id.to_string())
+                .or_insert(0);
+            *count += 1;
+            if *count >= max_attempts {
+                self.client_saturated_until
+                    .insert(client_id.to_string(), Instant::now() + lockout);
+            }
+        }
+    }
+}
+
 /// Thread-safe in-memory rate limiter with bounded memory growth, strict active-lockout preservation,
 /// client-scoped admission throttling under saturation, and composite client scoping.
 pub struct RateLimiter {
@@ -184,60 +243,24 @@ impl RateLimiter {
     /// Under total saturation of active lockouts, client-scoped admission throttling prevents unthrottled bypass.
     pub fn record_failure(&self, rate_key: &str) {
         if let Ok(mut state) = self.state.lock() {
-            let client_id = rate_key.split(':').next().unwrap_or(rate_key).to_string();
-
-            // Update existing entry directly
-            if let Some(entry) = state.map.get_mut(rate_key) {
-                if entry.0 >= self.max_attempts && entry.1.elapsed() >= self.lockout_duration {
-                    *entry = (1, Instant::now());
-                } else {
-                    entry.0 += 1;
-                    entry.1 = Instant::now();
-                }
+            if state.update_existing(rate_key, self.max_attempts, self.lockout_duration) {
                 return;
             }
 
-            // 1. Purge expired entries using a single predicate
-            let lockout = self.lockout_duration;
-            state
-                .map
-                .retain(|_, (_, last_failed)| last_failed.elapsed() < lockout);
+            let client_id = rate_key.split(':').next().unwrap_or(rate_key);
+            state.purge_expired(self.lockout_duration);
 
-            // Purge expired client saturation throttle records
-            state
-                .client_saturated_until
-                .retain(|_, until| Instant::now() < *until);
-
-            // 2. If at capacity, evict the oldest non-locked entry only
             if state.map.len() >= self.max_entries {
-                let oldest_non_locked = state
-                    .map
-                    .iter()
-                    .filter(|(_, (count, _))| *count < self.max_attempts)
-                    .min_by_key(|(_, (_, time))| *time)
-                    .map(|(k, _)| k.clone());
-
-                if let Some(non_locked_key) = oldest_non_locked {
-                    state.map.remove(&non_locked_key);
-                }
+                state.evict_oldest_non_locked(self.max_attempts);
             }
 
-            // 3. Insert new entry if space is available (never evicting an active lockout)
-            if state.map.len() < self.max_entries {
-                state.map.insert(rate_key.to_string(), (1, Instant::now()));
-            } else {
-                // Capacity fully saturated by active lockouts: apply client-scoped admission throttling
-                let count = state
-                    .client_overflow_failures
-                    .entry(client_id.clone())
-                    .or_insert(0);
-                *count += 1;
-                if *count >= self.max_attempts {
-                    state
-                        .client_saturated_until
-                        .insert(client_id, Instant::now() + self.lockout_duration);
-                }
-            }
+            state.insert_or_throttle(
+                rate_key,
+                client_id,
+                self.max_attempts,
+                self.max_entries,
+                self.lockout_duration,
+            );
         }
     }
 
@@ -285,9 +308,7 @@ pub fn map_user_row(row: &Row<'_>) -> rusqlite::Result<User> {
     })
 }
 
-/// Creates a new user record in the local database.
-#[allow(dead_code)]
-pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, UserError> {
+fn validate_create_user_input(input: &CreateUserInput) -> Result<(), UserError> {
     let full_name = input.full_name.trim();
     if full_name.is_empty() {
         return Err(UserError::Validation(
@@ -299,18 +320,17 @@ pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, Us
             "User full name cannot exceed 255 characters".into(),
         ));
     }
-
-    let role = input.role.trim();
-    if role.is_empty() {
+    if input.role.trim().is_empty() {
         return Err(UserError::Validation("User role cannot be empty".into()));
     }
-
-    let branch_id = input.branch_id.trim();
-    if branch_id.is_empty() {
+    if input.branch_id.trim().is_empty() {
         return Err(UserError::Validation("Branch ID cannot be empty".into()));
     }
+    Ok(())
+}
 
-    let branch_exists: bool = conn
+fn verify_branch_exists(conn: &Connection, branch_id: &str) -> Result<(), UserError> {
+    let exists: bool = conn
         .query_row(
             "SELECT 1 FROM branches WHERE id = ?1",
             params![branch_id],
@@ -320,76 +340,89 @@ pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, Us
         .map_err(|e| UserError::Database(e.to_string()))?
         .unwrap_or(false);
 
-    if !branch_exists {
-        return Err(UserError::BranchNotFound(format!(
+    if !exists {
+        Err(UserError::BranchNotFound(format!(
             "Branch '{branch_id}' does not exist"
-        )));
+        )))
+    } else {
+        Ok(())
     }
+}
 
-    let username = match input.username {
-        Some(u) => {
-            let trimmed = u.trim().to_string();
-            if trimmed.is_empty() {
-                None
-            } else {
-                let existing: bool = conn
-                    .query_row(
-                        "SELECT 1 FROM users WHERE username = ?1",
-                        params![trimmed],
-                        |_| Ok(true),
-                    )
-                    .optional()
-                    .map_err(|e| UserError::Database(e.to_string()))?
-                    .unwrap_or(false);
-
-                if existing {
-                    return Err(UserError::DuplicateUsername(format!(
-                        "Username '{trimmed}' already exists"
-                    )));
-                }
-                Some(trimmed)
-            }
-        }
-        None => None,
+fn validate_new_username(
+    conn: &Connection,
+    username: Option<&str>,
+) -> Result<Option<String>, UserError> {
+    let raw = match username {
+        Some(u) if !u.trim().is_empty() => u.trim(),
+        _ => return Ok(None),
     };
 
-    let supabase_user_id = match input.supabase_user_id {
-        Some(s) => {
-            let trimmed = s.trim().to_string();
-            if trimmed.is_empty() {
-                None
-            } else {
-                let existing: bool = conn
-                    .query_row(
-                        "SELECT 1 FROM users WHERE supabase_user_id = ?1",
-                        params![trimmed],
-                        |_| Ok(true),
-                    )
-                    .optional()
-                    .map_err(|e| UserError::Database(e.to_string()))?
-                    .unwrap_or(false);
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM users WHERE username = ?1",
+            params![raw],
+            |_| Ok(true),
+        )
+        .optional()
+        .map_err(|e| UserError::Database(e.to_string()))?
+        .unwrap_or(false);
 
-                if existing {
-                    return Err(UserError::DuplicateSupabaseId(format!(
-                        "Supabase user ID '{trimmed}' is already linked to a user"
-                    )));
-                }
-                Some(trimmed)
-            }
-        }
-        None => None,
+    if exists {
+        Err(UserError::DuplicateUsername(format!(
+            "Username '{raw}' already exists"
+        )))
+    } else {
+        Ok(Some(raw.to_string()))
+    }
+}
+
+fn validate_new_supabase_id(
+    conn: &Connection,
+    supabase_id: Option<&str>,
+) -> Result<Option<String>, UserError> {
+    let raw = match supabase_id {
+        Some(s) if !s.trim().is_empty() => s.trim(),
+        _ => return Ok(None),
     };
 
-    let password_hash = match input.password.as_deref().filter(|p| !p.trim().is_empty()) {
-        Some(p) => Some(hash_secret(p)?),
-        None => None,
-    };
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM users WHERE supabase_user_id = ?1",
+            params![raw],
+            |_| Ok(true),
+        )
+        .optional()
+        .map_err(|e| UserError::Database(e.to_string()))?
+        .unwrap_or(false);
 
-    let pin_hash = match input.pin.as_deref().filter(|p| !p.trim().is_empty()) {
-        Some(p) => Some(hash_secret(p)?),
-        None => None,
-    };
+    if exists {
+        Err(UserError::DuplicateSupabaseId(format!(
+            "Supabase user ID '{raw}' is already linked to a user"
+        )))
+    } else {
+        Ok(Some(raw.to_string()))
+    }
+}
 
+fn hash_credential_field(secret: Option<&str>) -> Result<Option<String>, UserError> {
+    match secret {
+        Some(s) if !s.trim().is_empty() => Ok(Some(hash_secret(s)?)),
+        _ => Ok(None),
+    }
+}
+
+/// Creates a new user record in the local database.
+#[allow(dead_code)]
+pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, UserError> {
+    validate_create_user_input(&input)?;
+    let branch_id = input.branch_id.trim();
+    verify_branch_exists(conn, branch_id)?;
+
+    let username = validate_new_username(conn, input.username.as_deref())?;
+    let supabase_user_id = validate_new_supabase_id(conn, input.supabase_user_id.as_deref())?;
+    let password_hash = hash_credential_field(input.password.as_deref())?;
+    let pin_hash = hash_credential_field(input.pin.as_deref())?;
     let auth_provider = input.auth_provider.unwrap_or_else(|| "local".into());
     let user_id = uuid::Uuid::new_v4().to_string();
 
@@ -399,11 +432,11 @@ pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, Us
         params![
             user_id,
             branch_id,
-            full_name,
+            input.full_name.trim(),
             username,
             password_hash,
             pin_hash,
-            role,
+            input.role.trim(),
             supabase_user_id,
             auth_provider,
         ],
@@ -458,11 +491,7 @@ pub fn get_user_by_supabase_id(
     .ok_or_else(|| UserError::NotFound(format!("User with Supabase ID '{supabase_user_id}' not found")))
 }
 
-/// Updates user fields safely.
-#[allow(dead_code)]
-pub fn update_user(conn: &Connection, id: &str, input: UpdateUserInput) -> Result<User, UserError> {
-    let existing = get_user(conn, id)?;
-
+fn validate_update_name_and_role(input: &UpdateUserInput) -> Result<(), UserError> {
     if let Some(ref name) = input.full_name {
         let trimmed = name.trim();
         if trimmed.is_empty() {
@@ -474,122 +503,189 @@ pub fn update_user(conn: &Connection, id: &str, input: UpdateUserInput) -> Resul
             ));
         }
     }
-
     if let Some(ref role) = input.role {
         if role.trim().is_empty() {
             return Err(UserError::Validation("Role cannot be empty".into()));
         }
     }
+    Ok(())
+}
 
-    if let Some(ref u) = input.username {
-        let trimmed = u.trim();
-        if !trimmed.is_empty() && Some(trimmed) != existing.username.as_deref() {
-            let conflict: bool = conn
-                .query_row(
-                    "SELECT 1 FROM users WHERE username = ?1 AND id != ?2",
-                    params![trimmed, id],
-                    |_| Ok(true),
-                )
-                .optional()
-                .map_err(|e| UserError::Database(e.to_string()))?
-                .unwrap_or(false);
+fn validate_update_username(
+    conn: &Connection,
+    user_id: &str,
+    current_username: Option<&str>,
+    new_username: Option<&str>,
+) -> Result<Option<Option<String>>, UserError> {
+    let raw = match new_username {
+        Some(u) => u.trim(),
+        None => return Ok(None),
+    };
 
-            if conflict {
-                return Err(UserError::DuplicateUsername(format!(
-                    "Username '{trimmed}' already exists"
-                )));
-            }
+    if raw.is_empty() {
+        return Ok(Some(None));
+    }
+
+    if Some(raw) == current_username {
+        return Ok(Some(Some(raw.to_string())));
+    }
+
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM users WHERE username = ?1 AND id != ?2",
+            params![raw, user_id],
+            |_| Ok(true),
+        )
+        .optional()
+        .map_err(|e| UserError::Database(e.to_string()))?
+        .unwrap_or(false);
+
+    if exists {
+        Err(UserError::DuplicateUsername(format!(
+            "Username '{raw}' already exists"
+        )))
+    } else {
+        Ok(Some(Some(raw.to_string())))
+    }
+}
+
+fn validate_update_supabase_id(
+    conn: &Connection,
+    user_id: &str,
+    current_supabase_id: Option<&str>,
+    new_supabase_id: Option<&str>,
+) -> Result<Option<Option<String>>, UserError> {
+    let raw = match new_supabase_id {
+        Some(s) => s.trim(),
+        None => return Ok(None),
+    };
+
+    if raw.is_empty() {
+        return Ok(Some(None));
+    }
+
+    if Some(raw) == current_supabase_id {
+        return Ok(Some(Some(raw.to_string())));
+    }
+
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM users WHERE supabase_user_id = ?1 AND id != ?2",
+            params![raw, user_id],
+            |_| Ok(true),
+        )
+        .optional()
+        .map_err(|e| UserError::Database(e.to_string()))?
+        .unwrap_or(false);
+
+    if exists {
+        Err(UserError::DuplicateSupabaseId(format!(
+            "Supabase ID '{raw}' already mapped"
+        )))
+    } else {
+        Ok(Some(Some(raw.to_string())))
+    }
+}
+
+struct UserUpdateBuilder {
+    clauses: Vec<&'static str>,
+    params: Vec<Box<dyn rusqlite::ToSql>>,
+}
+
+impl UserUpdateBuilder {
+    fn new() -> Self {
+        Self {
+            clauses: Vec::new(),
+            params: Vec::new(),
         }
     }
 
-    if let Some(ref s) = input.supabase_user_id {
-        let trimmed = s.trim();
-        if !trimmed.is_empty() && Some(trimmed) != existing.supabase_user_id.as_deref() {
-            let conflict: bool = conn
-                .query_row(
-                    "SELECT 1 FROM users WHERE supabase_user_id = ?1 AND id != ?2",
-                    params![trimmed, id],
-                    |_| Ok(true),
-                )
-                .optional()
-                .map_err(|e| UserError::Database(e.to_string()))?
-                .unwrap_or(false);
-
-            if conflict {
-                return Err(UserError::DuplicateSupabaseId(format!(
-                    "Supabase ID '{trimmed}' already mapped"
-                )));
-            }
+    fn push_text_field(&mut self, clause: &'static str, val: Option<&str>) {
+        if let Some(s) = val {
+            self.clauses.push(clause);
+            self.params.push(Box::new(s.trim().to_string()));
         }
     }
 
-    let mut query = String::from("UPDATE users SET ");
-    let mut clauses = Vec::new();
-    let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-    if let Some(ref name) = input.full_name {
-        clauses.push("full_name = ?");
-        param_values.push(Box::new(name.trim().to_string()));
-    }
-    if let Some(ref username) = input.username {
-        let val = if username.trim().is_empty() {
-            None
-        } else {
-            Some(username.trim().to_string())
-        };
-        clauses.push("username = ?");
-        param_values.push(Box::new(val));
-    }
-    if let Some(ref pw) = input.password {
-        let hash = if pw.trim().is_empty() {
-            None
-        } else {
-            Some(hash_secret(pw)?)
-        };
-        clauses.push("password_hash = ?");
-        param_values.push(Box::new(hash));
-    }
-    if let Some(ref pin) = input.pin {
-        let hash = if pin.trim().is_empty() {
-            None
-        } else {
-            Some(hash_secret(pin)?)
-        };
-        clauses.push("pin_hash = ?");
-        param_values.push(Box::new(hash));
-    }
-    if let Some(ref role) = input.role {
-        clauses.push("role = ?");
-        param_values.push(Box::new(role.trim().to_string()));
-    }
-    if let Some(is_active) = input.is_active {
-        clauses.push("is_active = ?");
-        param_values.push(Box::new(if is_active { 1i64 } else { 0i64 }));
-    }
-    if let Some(ref s) = input.supabase_user_id {
-        let val = if s.trim().is_empty() {
-            None
-        } else {
-            Some(s.trim().to_string())
-        };
-        clauses.push("supabase_user_id = ?");
-        param_values.push(Box::new(val));
+    fn push_nullable_field(&mut self, clause: &'static str, val: Option<Option<String>>) {
+        if let Some(opt) = val {
+            self.clauses.push(clause);
+            self.params.push(Box::new(opt));
+        }
     }
 
-    if clauses.is_empty() {
-        return Ok(existing);
+    fn push_hash_field(
+        &mut self,
+        clause: &'static str,
+        raw: Option<&str>,
+    ) -> Result<(), UserError> {
+        if let Some(secret) = raw {
+            let hash = if secret.trim().is_empty() {
+                None
+            } else {
+                Some(hash_secret(secret)?)
+            };
+            self.clauses.push(clause);
+            self.params.push(Box::new(hash));
+        }
+        Ok(())
     }
 
-    query.push_str(&clauses.join(", "));
-    query.push_str(" WHERE id = ?");
-    param_values.push(Box::new(id.to_string()));
+    fn push_bool_field(&mut self, clause: &'static str, val: Option<bool>) {
+        if let Some(b) = val {
+            self.clauses.push(clause);
+            self.params.push(Box::new(if b { 1i64 } else { 0i64 }));
+        }
+    }
 
-    let params_ref: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(Box::as_ref).collect();
+    fn execute(self, conn: &Connection, user_id: &str) -> Result<bool, UserError> {
+        if self.clauses.is_empty() {
+            return Ok(false);
+        }
+        let query = format!("UPDATE users SET {} WHERE id = ?", self.clauses.join(", "));
+        let mut params = self.params;
+        params.push(Box::new(user_id.to_string()));
+        let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(Box::as_ref).collect();
+        conn.execute(&query, params_ref.as_slice())
+            .map_err(|e| UserError::Database(format!("Failed to update user: {e}")))?;
+        Ok(true)
+    }
+}
 
-    conn.execute(&query, params_ref.as_slice())
-        .map_err(|e| UserError::Database(format!("Failed to update user: {e}")))?;
+/// Updates user fields safely.
+#[allow(dead_code)]
+pub fn update_user(conn: &Connection, id: &str, input: UpdateUserInput) -> Result<User, UserError> {
+    let existing = get_user(conn, id)?;
+    validate_update_name_and_role(&input)?;
 
-    get_user(conn, id)
+    let validated_username = validate_update_username(
+        conn,
+        id,
+        existing.username.as_deref(),
+        input.username.as_deref(),
+    )?;
+    let validated_supabase_id = validate_update_supabase_id(
+        conn,
+        id,
+        existing.supabase_user_id.as_deref(),
+        input.supabase_user_id.as_deref(),
+    )?;
+
+    let mut builder = UserUpdateBuilder::new();
+    builder.push_text_field("full_name = ?", input.full_name.as_deref());
+    builder.push_nullable_field("username = ?", validated_username);
+    builder.push_hash_field("password_hash = ?", input.password.as_deref())?;
+    builder.push_hash_field("pin_hash = ?", input.pin.as_deref())?;
+    builder.push_text_field("role = ?", input.role.as_deref());
+    builder.push_bool_field("is_active = ?", input.is_active);
+    builder.push_nullable_field("supabase_user_id = ?", validated_supabase_id);
+
+    let updated = builder.execute(conn, id)?;
+    if updated {
+        get_user(conn, id)
+    } else {
+        Ok(existing)
+    }
 }
 
 /// Lists all users for a given branch.
