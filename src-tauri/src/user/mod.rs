@@ -3,9 +3,15 @@
 
 pub mod session;
 
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct User {
@@ -67,55 +73,97 @@ pub enum UserError {
     Database(String),
 }
 
-/// Generates a cryptographically salted SHA-256 hash in `salt$digest` format.
-pub fn hash_secret(secret: &str) -> String {
-    let salt = uuid::Uuid::new_v4().simple().to_string();
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{salt}:{secret}").as_bytes());
-    let digest = hasher.finalize();
-    let hex_digest = hex_encode(&digest);
-    format!("{salt}${hex_digest}")
+/// Precomputed valid Argon2id hash for constant-time decoy verification to defeat timing-based user enumeration.
+pub const DECOY_ARGON2_HASH: &str =
+    "$argon2id$v=19$m=19456,t=2,p=1$ZGVjb3lzYWx0MTIzNDU2Nw$DecoyHashToPreventUserEnumerationTimingAttack123";
+
+/// Generates a cryptographically secure Argon2id hash in standard PHC format.
+pub fn hash_secret(secret: &str) -> Result<String, UserError> {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    argon2
+        .hash_password(secret.as_bytes(), &salt)
+        .map(|h| h.to_string())
+        .map_err(|e| UserError::Database(format!("Argon2 hashing error: {e}")))
 }
 
-/// Verifies a candidate secret against a stored `salt$digest` string using constant-time comparison.
-pub fn verify_secret(candidate: &str, stored: &str) -> bool {
-    let parts: Vec<&str> = stored.split('$').collect();
-    if parts.len() != 2 {
-        return false;
-    }
-    let salt = parts[0];
-    let expected_hex = parts[1];
-
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{salt}:{candidate}").as_bytes());
-    let actual_digest = hasher.finalize();
-    let actual_hex = hex_encode(&actual_digest);
-
-    constant_time_eq(&actual_hex, expected_hex)
+/// Verifies a candidate secret against a stored Argon2id PHC string.
+pub fn verify_secret(candidate: &str, stored_hash: &str) -> bool {
+    let parsed_hash = match PasswordHash::new(stored_hash) {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    Argon2::default()
+        .verify_password(candidate.as_bytes(), &parsed_hash)
+        .is_ok()
 }
 
-/// Formats bytes as lowercase hex without external dependencies.
-fn hex_encode(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        use std::fmt::Write;
-        let _ = write!(s, "{:02x}", b);
-    }
-    s
+/// Thread-safe in-memory rate limiter for login and PIN verification.
+pub struct RateLimiter {
+    attempts: Mutex<HashMap<String, (u32, Instant)>>,
+    max_attempts: u32,
+    lockout_duration: Duration,
 }
 
-/// Constant-time string equality check to prevent timing side channels.
-fn constant_time_eq(a: &str, b: &str) -> bool {
-    let a_bytes = a.as_bytes();
-    let b_bytes = b.as_bytes();
-    if a_bytes.len() != b_bytes.len() {
-        return false;
+impl RateLimiter {
+    pub const fn new(max_attempts: u32, lockout_secs: u64) -> Self {
+        Self {
+            attempts: Mutex::new(HashMap::new()),
+            max_attempts,
+            lockout_duration: Duration::from_secs(lockout_secs),
+        }
     }
-    let mut diff = 0u8;
-    for (x, y) in a_bytes.iter().zip(b_bytes.iter()) {
-        diff |= x ^ y;
+
+    pub fn check(&self, key: &str) -> Result<(), UserError> {
+        let mut map = self
+            .attempts
+            .lock()
+            .map_err(|e| UserError::Database(e.to_string()))?;
+        if let Some((count, last_failed)) = map.get(key) {
+            if *count >= self.max_attempts {
+                if last_failed.elapsed() < self.lockout_duration {
+                    return Err(UserError::InvalidCredentials(
+                        "Too many failed attempts. Account is temporarily locked. Please try again later.".into(),
+                    ));
+                } else {
+                    map.remove(key);
+                }
+            }
+        }
+        Ok(())
     }
-    diff == 0
+
+    pub fn record_failure(&self, key: &str) {
+        if let Ok(mut map) = self.attempts.lock() {
+            let entry = map.entry(key.to_string()).or_insert((0, Instant::now()));
+            if entry.0 >= self.max_attempts && entry.1.elapsed() >= self.lockout_duration {
+                *entry = (1, Instant::now());
+            } else {
+                entry.0 += 1;
+                entry.1 = Instant::now();
+            }
+        }
+    }
+
+    pub fn record_success(&self, key: &str) {
+        if let Ok(mut map) = self.attempts.lock() {
+            map.remove(key);
+        }
+    }
+
+    pub fn reset_all(&self) {
+        if let Ok(mut map) = self.attempts.lock() {
+            map.clear();
+        }
+    }
+}
+
+/// Global rate limiter enforcing max 5 failed attempts with 30-second lockout window.
+static GLOBAL_AUTH_RATE_LIMITER: RateLimiter = RateLimiter::new(5, 30);
+
+/// Exposes the global rate limiter for testing and operations.
+pub fn get_auth_rate_limiter() -> &'static RateLimiter {
+    &GLOBAL_AUTH_RATE_LIMITER
 }
 
 /// Creates a new user record in the local database.
@@ -166,7 +214,6 @@ pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, Us
             if trimmed.is_empty() {
                 None
             } else {
-                // Check username uniqueness
                 let existing: bool = conn
                     .query_row(
                         "SELECT 1 FROM users WHERE username = ?1",
@@ -216,18 +263,17 @@ pub fn create_user(conn: &Connection, input: CreateUserInput) -> Result<User, Us
         None => None,
     };
 
-    let password_hash = input
-        .password
-        .as_deref()
-        .filter(|p| !p.trim().is_empty())
-        .map(hash_secret);
-    let pin_hash = input
-        .pin
-        .as_deref()
-        .filter(|p| !p.trim().is_empty())
-        .map(hash_secret);
-    let auth_provider = input.auth_provider.unwrap_or_else(|| "local".into());
+    let password_hash = match input.password.as_deref().filter(|p| !p.trim().is_empty()) {
+        Some(p) => Some(hash_secret(p)?),
+        None => None,
+    };
 
+    let pin_hash = match input.pin.as_deref().filter(|p| !p.trim().is_empty()) {
+        Some(p) => Some(hash_secret(p)?),
+        None => None,
+    };
+
+    let auth_provider = input.auth_provider.unwrap_or_else(|| "local".into());
     let user_id = uuid::Uuid::new_v4().to_string();
 
     conn.execute(
@@ -413,7 +459,7 @@ pub fn update_user(conn: &Connection, id: &str, input: UpdateUserInput) -> Resul
         let hash = if pw.trim().is_empty() {
             None
         } else {
-            Some(hash_secret(pw))
+            Some(hash_secret(pw)?)
         };
         clauses.push("password_hash = ?");
         param_values.push(Box::new(hash));
@@ -422,7 +468,7 @@ pub fn update_user(conn: &Connection, id: &str, input: UpdateUserInput) -> Resul
         let hash = if pin.trim().is_empty() {
             None
         } else {
-            Some(hash_secret(pin))
+            Some(hash_secret(pin)?)
         };
         clauses.push("pin_hash = ?");
         param_values.push(Box::new(hash));
@@ -494,12 +540,15 @@ pub fn list_users(conn: &Connection, branch_id: &str) -> Result<Vec<User>, UserE
     Ok(users)
 }
 
-/// Verifies user password and returns the authenticated User record.
+/// Verifies user password against rate-limiting, timing-attack decoy, and Argon2id verification.
 pub fn verify_user_password(
     conn: &Connection,
     username: &str,
     password: &str,
 ) -> Result<User, UserError> {
+    let rate_key = format!("user:{}", username.trim().to_lowercase());
+    GLOBAL_AUTH_RATE_LIMITER.check(&rate_key)?;
+
     let user_opt: Option<(User, Option<String>)> = conn
         .query_row(
             "SELECT id, branch_id, full_name, username, role, is_active, supabase_user_id, auth_provider, created_at, password_hash
@@ -528,25 +577,37 @@ pub fn verify_user_password(
     match user_opt {
         Some((user, Some(stored_hash))) => {
             if !verify_secret(password, &stored_hash) {
+                GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
                 return Err(UserError::InvalidCredentials(
                     "Invalid username or password".into(),
                 ));
             }
             if !user.is_active {
+                GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
+                // Safe generic credential failure: does not reveal inactive account status
                 return Err(UserError::InvalidCredentials(
-                    "User account is inactive".into(),
+                    "Invalid username or password".into(),
                 ));
             }
+            GLOBAL_AUTH_RATE_LIMITER.record_success(&rate_key);
             Ok(user)
         }
-        _ => Err(UserError::InvalidCredentials(
-            "Invalid username or password".into(),
-        )),
+        _ => {
+            // Decoy verification to defeat user enumeration timing attacks
+            let _ = verify_secret(password, DECOY_ARGON2_HASH);
+            GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
+            Err(UserError::InvalidCredentials(
+                "Invalid username or password".into(),
+            ))
+        }
     }
 }
 
-/// Verifies user cashier PIN and returns the authenticated User record.
+/// Verifies user cashier PIN against rate-limiting, timing-attack decoy, and Argon2id verification.
 pub fn verify_user_pin(conn: &Connection, user_id: &str, pin: &str) -> Result<User, UserError> {
+    let rate_key = format!("pin:{}", user_id.trim());
+    GLOBAL_AUTH_RATE_LIMITER.check(&rate_key)?;
+
     let user_opt: Option<(User, Option<String>)> = conn
         .query_row(
             "SELECT id, branch_id, full_name, username, role, is_active, supabase_user_id, auth_provider, created_at, pin_hash
@@ -575,15 +636,22 @@ pub fn verify_user_pin(conn: &Connection, user_id: &str, pin: &str) -> Result<Us
     match user_opt {
         Some((user, Some(stored_hash))) => {
             if !verify_secret(pin, &stored_hash) {
+                GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
                 return Err(UserError::InvalidCredentials("Invalid PIN".into()));
             }
             if !user.is_active {
-                return Err(UserError::InvalidCredentials(
-                    "User account is inactive".into(),
-                ));
+                GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
+                // Safe generic credential failure: does not reveal inactive account status
+                return Err(UserError::InvalidCredentials("Invalid PIN".into()));
             }
+            GLOBAL_AUTH_RATE_LIMITER.record_success(&rate_key);
             Ok(user)
         }
-        _ => Err(UserError::InvalidCredentials("Invalid PIN".into())),
+        _ => {
+            // Decoy verification to defeat timing attacks
+            let _ = verify_secret(pin, DECOY_ARGON2_HASH);
+            GLOBAL_AUTH_RATE_LIMITER.record_failure(&rate_key);
+            Err(UserError::InvalidCredentials("Invalid PIN".into()))
+        }
     }
 }

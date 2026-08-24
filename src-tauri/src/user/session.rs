@@ -126,14 +126,13 @@ pub fn validate_local_session(
 ) -> Result<SessionContext, UserError> {
     let result = conn
         .query_row(
-            "SELECT 
-                s.id, s.user_id, u.full_name, u.username, u.role, 
-                s.branch_id, b.organization_id, s.auth_level, s.expires_at,
-                s.revoked_at, u.is_active, b.is_active,
-                datetime('now') <= s.expires_at AS is_not_expired
-             FROM local_sessions s
-             JOIN users u ON s.user_id = u.id
-             JOIN branches b ON s.branch_id = b.id
+            "SELECT s.id, s.user_id, u.full_name, u.username, u.role, \
+             s.branch_id, b.organization_id, s.auth_level, s.expires_at, \
+             s.revoked_at, u.is_active, b.is_active, \
+             datetime('now') <= s.expires_at AS is_not_expired \
+             FROM local_sessions s \
+             JOIN users u ON s.user_id = u.id \
+             JOIN branches b ON s.branch_id = b.id \
              WHERE s.id = ?1",
             params![session_id],
             |row| {

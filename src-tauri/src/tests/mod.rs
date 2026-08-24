@@ -10,5 +10,7 @@ mod register_tests;
 mod sales_tests;
 #[path = "session_tests.rs"]
 mod session_tests;
+#[path = "test_helpers.rs"]
+mod test_helpers;
 #[path = "user_tests.rs"]
 mod user_tests;
