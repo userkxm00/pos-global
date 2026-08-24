@@ -59,8 +59,11 @@ pub async fn online_login(
 
     let res = client
         .post(&token_url)
-        .header("apikey", &config.anon_key)
-        .header("Authorization", format!("Bearer {}", config.anon_key))
+        .header("apikey", &config.publishable_key)
+        .header(
+            "Authorization",
+            format!("Bearer {}", config.publishable_key),
+        )
         .header("Content-Type", "application/json")
         .json(&payload)
         .send()

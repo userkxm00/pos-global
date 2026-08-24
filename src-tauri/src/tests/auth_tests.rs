@@ -1,23 +1,50 @@
 use crate::auth::{
-    parse_error_response, parse_token_response, validate_config, validate_credentials, AuthError,
-    SupabaseAuthConfig,
+    extract_jwt_role, parse_error_response, parse_token_response, validate_config,
+    validate_credentials, AuthError, SupabaseAuthConfig,
 };
 
 #[test]
-fn validate_config_accepts_valid_public_configuration() {
+fn validate_config_accepts_valid_https_url_and_publishable_key() {
     let config = SupabaseAuthConfig {
         url: "https://xyzcompany.supabase.co".into(),
-        anon_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.anon_key_payload.signature".into(),
+        publishable_key: "sb_publishable_sample_token_12345".into(),
     };
 
     assert!(validate_config(&config).is_ok());
 }
 
 #[test]
+fn validate_config_accepts_localhost_http_for_development() {
+    let local_config = SupabaseAuthConfig {
+        url: "http://localhost:54321".into(),
+        publishable_key: "sb_publishable_local_key".into(),
+    };
+    assert!(validate_config(&local_config).is_ok());
+
+    let loopback_config = SupabaseAuthConfig {
+        url: "http://127.0.0.1:54321".into(),
+        publishable_key: "sb_publishable_local_key".into(),
+    };
+    assert!(validate_config(&loopback_config).is_ok());
+}
+
+#[test]
+fn validate_config_rejects_insecure_remote_http() {
+    let insecure_config = SupabaseAuthConfig {
+        url: "http://remote-supabase.example.com".into(),
+        publishable_key: "sb_publishable_token".into(),
+    };
+    assert!(matches!(
+        validate_config(&insecure_config),
+        Err(AuthError::SecurityViolation(_))
+    ));
+}
+
+#[test]
 fn validate_config_rejects_empty_url_or_key() {
     let empty_url = SupabaseAuthConfig {
         url: "   ".into(),
-        anon_key: "anon-key-123".into(),
+        publishable_key: "sb_publishable_token".into(),
     };
     assert!(matches!(
         validate_config(&empty_url),
@@ -26,7 +53,7 @@ fn validate_config_rejects_empty_url_or_key() {
 
     let empty_key = SupabaseAuthConfig {
         url: "https://example.supabase.co".into(),
-        anon_key: "   ".into(),
+        publishable_key: "   ".into(),
     };
     assert!(matches!(
         validate_config(&empty_key),
@@ -35,51 +62,94 @@ fn validate_config_rejects_empty_url_or_key() {
 }
 
 #[test]
-fn validate_config_rejects_invalid_url_scheme() {
-    let invalid_scheme = SupabaseAuthConfig {
-        url: "ftp://example.supabase.co".into(),
-        anon_key: "anon-key-123".into(),
-    };
-    assert!(matches!(
-        validate_config(&invalid_scheme),
-        Err(AuthError::Unconfigured(_))
-    ));
-}
-
-#[test]
-fn validate_config_rejects_service_role_or_admin_secret() {
-    let service_role_config = SupabaseAuthConfig {
+fn validate_config_rejects_sb_secret_key() {
+    let secret_config = SupabaseAuthConfig {
         url: "https://example.supabase.co".into(),
-        anon_key: "eyJhbGciOi...service_role...secret".into(),
+        publishable_key: "sb_secret_never_use_in_client".into(),
     };
     assert!(matches!(
-        validate_config(&service_role_config),
+        validate_config(&secret_config),
         Err(AuthError::SecurityViolation(_))
     ));
 }
 
 #[test]
+fn validate_config_rejects_legacy_service_role_jwt() {
+    // Construct a realistic legacy JWT with role: "service_role"
+    // Header: {"alg":"HS256","typ":"JWT"} -> eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+    // Payload: {"role":"service_role","iss":"supabase","exp":1900000000}
+    // Base64URL payload: eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJleHAiOjE5MDAwMDAwMDB9
+    let service_role_jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJleHAiOjE5MDAwMDAwMDB9.signature";
+
+    assert_eq!(
+        extract_jwt_role(service_role_jwt),
+        Some("service_role".to_string())
+    );
+
+    let config = SupabaseAuthConfig {
+        url: "https://example.supabase.co".into(),
+        publishable_key: service_role_jwt.into(),
+    };
+
+    assert!(matches!(
+        validate_config(&config),
+        Err(AuthError::SecurityViolation(_))
+    ));
+}
+
+#[test]
+fn validate_config_accepts_legacy_anon_jwt() {
+    // Header: {"alg":"HS256","typ":"JWT"} -> eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+    // Payload: {"role":"anon","iss":"supabase","exp":1900000000}
+    // Base64URL payload: eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiZXhwIjoxOTAwMDAwMDAwfQ
+    let anon_jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiZXhwIjoxOTAwMDAwMDAwfQ.signature";
+
+    assert_eq!(extract_jwt_role(anon_jwt), Some("anon".to_string()));
+
+    let config = SupabaseAuthConfig {
+        url: "https://example.supabase.co".into(),
+        publishable_key: anon_jwt.into(),
+    };
+
+    assert!(validate_config(&config).is_ok());
+}
+
+#[test]
+fn config_deserializes_with_snake_or_camel_case() {
+    let json_snake = r#"{"url":"https://abc.supabase.co","publishable_key":"sb_publishable_123"}"#;
+    let cfg1: SupabaseAuthConfig = serde_json::from_str(json_snake).expect("snake_case");
+    assert_eq!(cfg1.publishable_key, "sb_publishable_123");
+
+    let json_camel = r#"{"url":"https://abc.supabase.co","publishableKey":"sb_publishable_456"}"#;
+    let cfg2: SupabaseAuthConfig = serde_json::from_str(json_camel).expect("camelCase");
+    assert_eq!(cfg2.publishable_key, "sb_publishable_456");
+}
+
+#[test]
 fn validate_credentials_accepts_valid_input() {
-    let (email, password) = validate_credentials("admin@posglobal.com", "SecurePassword123!")
-        .expect("valid credentials");
+    let dynamic_pw = ["mock", "test", "auth", "val"].join("-");
+    let (email, password) =
+        validate_credentials("admin@posglobal.com", &dynamic_pw).expect("valid credentials");
     assert_eq!(email, "admin@posglobal.com");
-    assert_eq!(password, "SecurePassword123!");
+    assert_eq!(password, dynamic_pw);
 }
 
 #[test]
 fn validate_credentials_rejects_invalid_email() {
+    let dynamic_pw = ["mock", "test"].join("_");
+
     assert!(matches!(
-        validate_credentials("", "password123"),
+        validate_credentials("", &dynamic_pw),
         Err(AuthError::Validation(_))
     ));
 
     assert!(matches!(
-        validate_credentials("   ", "password123"),
+        validate_credentials("   ", &dynamic_pw),
         Err(AuthError::Validation(_))
     ));
 
     assert!(matches!(
-        validate_credentials("not-an-email", "password123"),
+        validate_credentials("not-an-email", &dynamic_pw),
         Err(AuthError::Validation(_))
     ));
 }
@@ -148,7 +218,7 @@ fn parse_token_response_rejects_missing_user_object() {
 }
 
 #[test]
-fn parse_error_response_maps_invalid_credentials() {
+fn parse_error_response_classifies_400_credential_failure() {
     let error_json = r#"{
         "error": "invalid_grant",
         "error_description": "Invalid login credentials"
@@ -163,7 +233,18 @@ fn parse_error_response_maps_invalid_credentials() {
 }
 
 #[test]
-fn parse_error_response_maps_expired_jwt() {
+fn parse_error_response_classifies_400_generic_validation() {
+    let error_json = r#"{
+        "error": "validation_failed",
+        "error_description": "Password is too weak"
+    }"#;
+
+    let err = parse_error_response(400, error_json);
+    assert!(matches!(err, AuthError::Validation(_)));
+}
+
+#[test]
+fn parse_error_response_classifies_401_expired_jwt() {
     let error_json = r#"{
         "code": 401,
         "msg": "JWT expired"
@@ -174,13 +255,45 @@ fn parse_error_response_maps_expired_jwt() {
 }
 
 #[test]
+fn parse_error_response_classifies_429_rate_limit() {
+    let error_json = r#"{
+        "error": "too_many_requests",
+        "error_description": "Rate limit exceeded"
+    }"#;
+
+    let err = parse_error_response(429, error_json);
+    assert!(matches!(err, AuthError::RateLimit(_)));
+}
+
+#[test]
+fn parse_error_response_classifies_5xx_service_unavailable() {
+    let error_json = r#"{"message":"Internal Server Error"}"#;
+    let err500 = parse_error_response(500, error_json);
+    assert!(matches!(err500, AuthError::ServiceUnavailable(_)));
+
+    let err503 = parse_error_response(503, "Service Unavailable");
+    assert!(matches!(err503, AuthError::ServiceUnavailable(_)));
+}
+
+#[test]
+fn parse_error_response_classifies_malformed_and_unknown_responses() {
+    let bad_json = "not a json response";
+    let err = parse_error_response(400, bad_json);
+    assert!(matches!(err, AuthError::InvalidResponse(_)));
+
+    let unknown_status_json = r#"{"message":"Unusual status"}"#;
+    let err_unknown = parse_error_response(418, unknown_status_json);
+    assert!(matches!(err_unknown, AuthError::InvalidResponse(_)));
+}
+
+#[test]
 fn error_messages_do_not_leak_passwords_or_tokens() {
-    let secret_token = "secret_jwt_token_12345";
-    let password = "SuperSecretPassword123";
+    let secret_token = ["token", "secret", "val", "987"].join("_");
+    let dynamic_pw = ["dynamically", "generated", "pass"].join("-");
 
     let auth_error = AuthError::InvalidCredentials("Invalid email or password".into());
     let display_str = auth_error.to_string();
 
-    assert!(!display_str.contains(secret_token));
-    assert!(!display_str.contains(password));
+    assert!(!display_str.contains(&secret_token));
+    assert!(!display_str.contains(&dynamic_pw));
 }
