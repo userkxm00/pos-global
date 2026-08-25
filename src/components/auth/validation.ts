@@ -1,5 +1,5 @@
-// Validation and Fail-Closed Error Sanitization for Authentication
-// F1.13 — Authentication screens and session lifecycle
+// Validation and Fail-Closed Error Sanitization for Authentication & PIN/Lock
+// F1.13 — Authentication screens and session lifecycle & F1.14 — Local PIN and Lock screen
 
 import type { SignInInput, LocalSignInInput } from '../../types/auth'
 
@@ -7,6 +7,7 @@ export interface AuthValidationErrors {
   email?: string
   username?: string
   password?: string
+  pin?: string
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z0-9-]{2,}$/
@@ -45,12 +46,27 @@ export function validateLocalInput(input: Partial<LocalSignInInput>): AuthValida
   return errors
 }
 
+export function validatePinInput(pin: string): string | null {
+  const trimmed = pin.trim()
+  if (!trimmed) {
+    return 'pin.errors.required'
+  }
+  if (!/^\d+$/.test(trimmed)) {
+    return 'pin.errors.digitsOnly'
+  }
+  return null
+}
+
 interface ErrorPattern {
   token: string
   translationKey: string
 }
 
 const ERROR_PATTERNS: readonly ErrorPattern[] = [
+  { token: 'invalid pin', translationKey: 'auth.errors.invalidPin' },
+  { token: 'account is temporarily locked', translationKey: 'auth.errors.accountLocked' },
+  { token: 'temporarily locked', translationKey: 'auth.errors.accountLocked' },
+  { token: 'too many failed attempts', translationKey: 'auth.errors.accountLocked' },
   { token: 'invalid credentials', translationKey: 'auth.errors.invalidCredentials' },
   { token: 'credentials mismatch', translationKey: 'auth.errors.invalidCredentials' },
   { token: 'does not match', translationKey: 'auth.errors.invalidCredentials' },

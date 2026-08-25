@@ -1,0 +1,217 @@
+/* Terminal Lock Screen Styles */
+/* F1.14 — Local PIN and Lock screen */
+
+.lock-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--surface-secondary);
+  padding: var(--spacing-xl);
+  box-sizing: border-box;
+}
+
+.lock-card {
+  background-color: var(--surface-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-lg);
+  width: 100%;
+  max-width: 440px;
+  padding: var(--spacing-2xl);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-lg);
+}
+
+.lock-header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+  width: 100%;
+}
+
+.lock-icon-badge {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background-color: var(--surface-secondary);
+  border: 1px solid var(--border-secondary);
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--spacing-xs);
+}
+
+.lock-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.lock-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin: 0;
+  text-align: center;
+}
+
+.lock-context-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 4px var(--spacing-sm);
+  background-color: var(--surface-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  margin-top: var(--spacing-xs);
+}
+
+.lock-operator-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--spacing-xs) var(--spacing-md);
+  background-color: var(--surface-secondary);
+  border-radius: var(--radius-md);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.lock-operator-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.lock-operator-role {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+/* PIN Display Dots */
+.pin-display-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+  width: 100%;
+}
+
+.pin-dots {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+}
+
+.pin-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border-secondary);
+  background-color: transparent;
+  transition: all var(--transition-fast);
+}
+
+.pin-dot--filled {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  transform: scale(1.1);
+}
+
+/* Numeric Keypad */
+.pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-sm);
+  width: 100%;
+  max-width: 280px;
+}
+
+.pin-key {
+  height: 54px;
+  border-radius: var(--radius-md);
+  background-color: var(--surface-secondary);
+  border: 1px solid var(--border-secondary);
+  color: var(--text-primary);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.pin-key:hover:not(:disabled) {
+  background-color: var(--surface-hover);
+  border-color: var(--border-primary);
+}
+
+.pin-key:active:not(:disabled) {
+  background-color: var(--surface-active);
+  transform: translateY(1px);
+}
+
+.pin-key:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pin-key--action {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+
+.pin-key--action:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.pin-key:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Action Controls */
+.lock-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  width: 100%;
+  max-width: 280px;
+}
+
+.lock-error {
+  background-color: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  color: var(--color-error);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  text-align: center;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* RTL Support */
+[dir='rtl'] .lock-card {
+  text-align: right;
+}
+
+[dir='rtl'] .lock-context-badge {
+  flex-direction: row-reverse;
+}
