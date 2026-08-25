@@ -1,8 +1,13 @@
+import React from 'react'
+import { ShellProvider } from './context/ShellContext'
+import { AppShell } from './components/shell/AppShell'
+import './i18n'
+import './styles/global.css'
+
 export default function App() {
   return (
-    <main style={{ padding: 32, fontFamily: 'system-ui, sans-serif' }}>
-      <h1>POS Global</h1>
-      <p>Foundation build. Core POS modules are implemented phase by phase behind the Foundation Gate.</p>
-    </main>
+    <ShellProvider>
+      <AppShell />
+    </ShellProvider>
   )
 }
