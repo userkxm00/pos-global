@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { ShellProvider, useShell } from './context/ShellContext'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import { AppShell } from './components/shell/AppShell'
+import { LoginScreen } from './components/auth/LoginScreen'
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard'
 import { LoadingSkeleton } from './components/common/LoadingSkeleton'
 import { getOnboardingApi } from './services/onboardingApi'
@@ -21,13 +23,28 @@ export const AppContent: React.FC = () => {
     setActiveRoute,
   } = useShell()
 
-  const [isHydrating, setIsHydrating] = useState(true)
+  const { authStatus, activeUser } = useAuth()
+  const [isHydrating, setIsHydrating] = useState(false)
 
-  // Hydrate persisted context on initial mount before evaluating onboarding gate
+  // Clear stale shell context whenever authentication is lost or revoked
+  useEffect(() => {
+    if (authStatus === 'unauthenticated' || authStatus === 'expired') {
+      setOrganization(null)
+      setBranch(null)
+      setRegister(null)
+    }
+  }, [authStatus, setOrganization, setBranch, setRegister])
+
+  // Hydrate persisted context only after a user is authenticated
   useEffect(() => {
     let isMounted = true
 
     async function hydrateContext() {
+      if (authStatus !== 'authenticated') {
+        return
+      }
+
+      setIsHydrating(true)
       try {
         const api = getOnboardingApi()
         const orgs = await api.listOrganizations()
@@ -60,7 +77,7 @@ export const AppContent: React.FC = () => {
     return () => {
       isMounted = false
     }
-  }, [setOrganization, setBranch, setRegister])
+  }, [authStatus, activeUser?.id, setOrganization, setBranch, setRegister])
 
   const handleOnboardingComplete = useCallback(
     (createdOrg: Organization, createdBranch: Branch, createdRegister: Register) => {
@@ -72,12 +89,17 @@ export const AppContent: React.FC = () => {
     [setOrganization, setBranch, setRegister, setActiveRoute],
   )
 
-  if (isHydrating) {
+  if (authStatus === 'authenticating' || isHydrating) {
     return (
       <main className="onboarding-wrapper" data-testid="app-hydrating">
         <LoadingSkeleton cardsCount={3} />
       </main>
     )
+  }
+
+  // If user is unauthenticated or session has expired, display the LoginScreen
+  if (authStatus === 'unauthenticated' || authStatus === 'expired') {
+    return <LoginScreen />
   }
 
   const isConfigured = Boolean(organization && branch && register)
@@ -99,7 +121,9 @@ export const AppContent: React.FC = () => {
 export default function App() {
   return (
     <ShellProvider>
-      <AppContent />
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </ShellProvider>
   )
 }
