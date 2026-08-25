@@ -198,7 +198,7 @@ AS $$
     END;
 $$;
 
--- Trigger ensuring no deletion (even direct or cascading) can leave an organization with 0 owners
+-- Trigger ensuring no deletion can leave an organization with 0 owners
 CREATE OR REPLACE FUNCTION public.prevent_orphaned_organization()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -229,6 +229,29 @@ CREATE TRIGGER trg_prevent_orphaned_organization
     BEFORE DELETE ON public.organization_members
     FOR EACH ROW
     EXECUTE FUNCTION public.prevent_orphaned_organization();
+
+-- Trigger automatically establishing owner membership upon organization creation
+CREATE OR REPLACE FUNCTION public.handle_new_organization_owner()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    IF auth.uid() IS NOT NULL THEN
+        INSERT INTO public.organization_members (organization_id, user_id, role)
+        VALUES (NEW.id, auth.uid(), 'owner')
+        ON CONFLICT (organization_id, user_id) DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_handle_new_organization_owner ON public.organizations;
+CREATE TRIGGER trg_handle_new_organization_owner
+    AFTER INSERT ON public.organizations
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_new_organization_owner();
 
 -- 5. Enable Row Level Security (RLS) on All Cloud Tables
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
@@ -320,13 +343,25 @@ CREATE POLICY registers_select_policy ON public.registers
 DROP POLICY IF EXISTS registers_insert_policy ON public.registers;
 CREATE POLICY registers_insert_policy ON public.registers
     FOR INSERT
-    WITH CHECK (public.is_org_manager_or_above(organization_id));
+    WITH CHECK (
+        public.is_org_manager_or_above(organization_id)
+        AND EXISTS (
+            SELECT 1 FROM public.branches b
+            WHERE b.id = branch_id AND b.organization_id = organization_id
+        )
+    );
 
 DROP POLICY IF EXISTS registers_update_policy ON public.registers;
 CREATE POLICY registers_update_policy ON public.registers
     FOR UPDATE
     USING (public.is_org_manager_or_above(organization_id))
-    WITH CHECK (public.is_org_manager_or_above(organization_id));
+    WITH CHECK (
+        public.is_org_manager_or_above(organization_id)
+        AND EXISTS (
+            SELECT 1 FROM public.branches b
+            WHERE b.id = branch_id AND b.organization_id = organization_id
+        )
+    );
 
 DROP POLICY IF EXISTS registers_delete_policy ON public.registers;
 CREATE POLICY registers_delete_policy ON public.registers
@@ -342,13 +377,25 @@ CREATE POLICY users_select_policy ON public.users
 DROP POLICY IF EXISTS users_insert_policy ON public.users;
 CREATE POLICY users_insert_policy ON public.users
     FOR INSERT
-    WITH CHECK (public.is_org_admin_or_owner(organization_id));
+    WITH CHECK (
+        public.is_org_admin_or_owner(organization_id)
+        AND EXISTS (
+            SELECT 1 FROM public.branches b
+            WHERE b.id = branch_id AND b.organization_id = organization_id
+        )
+    );
 
 DROP POLICY IF EXISTS users_update_policy ON public.users;
 CREATE POLICY users_update_policy ON public.users
     FOR UPDATE
     USING (public.is_org_admin_or_owner(organization_id))
-    WITH CHECK (public.is_org_admin_or_owner(organization_id));
+    WITH CHECK (
+        public.is_org_admin_or_owner(organization_id)
+        AND EXISTS (
+            SELECT 1 FROM public.branches b
+            WHERE b.id = branch_id AND b.organization_id = organization_id
+        )
+    );
 
 DROP POLICY IF EXISTS users_delete_policy ON public.users;
 CREATE POLICY users_delete_policy ON public.users

@@ -38,6 +38,7 @@ fn rls_migration_defines_security_definer_functions_with_safe_search_path() {
         "is_org_manager_or_above",
         "can_delete_organization_member",
         "prevent_orphaned_organization",
+        "handle_new_organization_owner",
     ];
 
     for func in expected_functions {
@@ -58,7 +59,7 @@ fn rls_migration_defines_security_definer_functions_with_safe_search_path() {
 }
 
 #[test]
-fn rls_migration_enforces_sole_owner_protection() {
+fn rls_migration_enforces_sole_owner_and_branch_boundary_protection() {
     assert!(
         RLS_MIGRATION_SQL.contains("can_delete_organization_member"),
         "Expected can_delete_organization_member function to be used in delete policy"
@@ -70,6 +71,10 @@ fn rls_migration_enforces_sole_owner_protection() {
     assert!(
         RLS_MIGRATION_SQL.contains("trg_prevent_orphaned_organization"),
         "Expected trg_prevent_orphaned_organization trigger definition"
+    );
+    assert!(
+        RLS_MIGRATION_SQL.contains("b.id = branch_id AND b.organization_id = organization_id"),
+        "Expected branch tenant boundary check in registers/users mutation policies"
     );
 }
 
@@ -139,6 +144,10 @@ fn rls_test_suite_covers_authenticated_execution_and_sole_owner_cases() {
     assert!(
         RLS_TEST_SQL.contains("User A Owner must NOT see Organization B"),
         "Expected cross-organization negative assertion"
+    );
+    assert!(
+        RLS_TEST_SQL.contains("Manager A attached a register to Branch B across tenants"),
+        "Expected cross-tenant branch mismatch rejection assertion"
     );
     assert!(
         RLS_TEST_SQL.contains("Sole owner was able to delete their own membership"),

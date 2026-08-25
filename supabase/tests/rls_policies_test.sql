@@ -178,7 +178,30 @@ BEGIN
     END IF;
 END $$;
 
--- Test 4: sole_owner_cannot_delete_self
+-- Test 4: cross_tenant_branch_mismatch_is_rejected
+DO $$
+DECLARE
+    blocked BOOLEAN := false;
+BEGIN
+    SET LOCAL ROLE authenticated;
+    PERFORM set_config('request.jwt.claim.sub', '21212121-2121-2121-2121-212121212121', true); -- Manager A
+
+    -- Manager A attempts to create a register in Org A linked to Branch B (which belongs to Org B)
+    BEGIN
+        INSERT INTO public.registers (id, organization_id, branch_id, name, code)
+        VALUES ('a8a8a8a8-a8a8-a8a8-a8a8-a8a8a8a8a8a8', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'b1b1b1b1-b1b1-b1b1-b1b1-b1b1b1b1b1b1', 'Mismatched Reg', 'REG-BAD');
+    EXCEPTION WHEN OTHERS THEN
+        blocked := true;
+    END;
+
+    IF NOT blocked THEN
+        IF EXISTS (SELECT 1 FROM public.registers WHERE id = 'a8a8a8a8-a8a8-a8a8-a8a8-a8a8a8a8a8a8') THEN
+            RAISE EXCEPTION 'RLS SECURITY VIOLATION: Manager A attached a register to Branch B across tenants!';
+        END IF;
+    END IF;
+END $$;
+
+-- Test 5: sole_owner_cannot_delete_self
 DO $$
 DECLARE
     deleted_cnt INTEGER := 0;
@@ -212,7 +235,7 @@ BEGIN
     END IF;
 END $$;
 
--- Test 5: owner_can_leave_when_another_owner_remains
+-- Test 6: owner_can_leave_when_another_owner_remains
 DO $$
 DECLARE
     deleted_cnt INTEGER := 0;
@@ -247,7 +270,7 @@ BEGIN
     END IF;
 END $$;
 
--- Test 6: manager_and_cashier_policies_are_exercised_under_their_real_context
+-- Test 7: manager_and_cashier_policies_are_exercised_under_their_real_context
 DO $$
 DECLARE
     cnt INTEGER;
