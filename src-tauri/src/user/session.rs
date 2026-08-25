@@ -82,9 +82,12 @@ pub fn create_local_session(
         return Err(UserError::Validation("Branch is inactive".into()));
     }
 
-    let session_id = uuid::Uuid::new_v4().to_string();
     let hours = duration_hours.unwrap_or(DEFAULT_SESSION_DURATION_HOURS);
-    let duration_modifier = format!("+{hours} hours");
+    let duration_modifier = if hours >= 0 {
+        format!("+{hours} hours")
+    } else {
+        format!("{hours} hours")
+    };
 
     conn.execute(
         "INSERT INTO local_sessions (id, user_id, branch_id, auth_level, created_at, expires_at, revoked_at)
@@ -178,7 +181,7 @@ pub fn validate_local_session(
             "SELECT s.id, s.user_id, u.full_name, u.username, u.role, \
              s.branch_id, b.organization_id, s.auth_level, s.expires_at, \
              s.revoked_at, u.is_active, b.is_active, \
-             datetime('now') <= s.expires_at AS is_not_expired \
+             CASE WHEN s.expires_at IS NOT NULL AND datetime('now') <= s.expires_at THEN 1 ELSE 0 END AS is_not_expired \
              FROM local_sessions s \
              JOIN users u ON s.user_id = u.id \
              JOIN branches b ON s.branch_id = b.id \
