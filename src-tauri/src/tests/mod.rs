@@ -4,6 +4,8 @@ mod auth_tests;
 mod branch_tests;
 #[path = "organization_tests.rs"]
 mod organization_tests;
+#[path = "permission_tests.rs"]
+mod permission_tests;
 #[path = "register_tests.rs"]
 mod register_tests;
 #[path = "sales_tests.rs"]
