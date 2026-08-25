@@ -1,7 +1,8 @@
 use crate::permission::{
     check_role_all_permissions, check_role_any_permission, check_role_permission,
-    evaluate_user_permission, get_effective_user_permissions, list_user_permission_overrides,
-    remove_user_permission_override, set_user_permission_override, validate_scope, Permission,
+    evaluate_user_permission, get_effective_user_permissions, grant_role_permission,
+    list_role_permissions, list_user_permission_overrides, remove_user_permission_override,
+    revoke_role_permission, set_user_permission_override, validate_scope, Permission,
     PermissionError, Role,
 };
 use crate::tests::test_helpers::{
@@ -10,7 +11,6 @@ use crate::tests::test_helpers::{
 
 #[test]
 fn permission_catalog_exact_matching_and_fail_closed() {
-    // Verify all 17 authoritative catalog permissions parse exactly
     let all_codes = [
         "sales.create",
         "sales.refund",
@@ -254,6 +254,90 @@ fn database_user_override_allows_granular_elevation_and_restriction() {
         evaluate_user_permission(&conn, &admin.id, &admin.role, Permission::SalesVoid)
             .expect("eval admin after remove override")
     );
+}
+
+#[test]
+fn database_role_permission_revocation_is_strictly_authoritative() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+
+    let cashier = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Authoritative DB Cashier",
+        Some("cashier_db_auth"),
+        None,
+        None,
+        "cashier",
+    )
+    .expect("create cashier");
+
+    // Baseline: Cashier has sales.create in DB seed
+    assert!(
+        evaluate_user_permission(&conn, &cashier.id, &cashier.role, Permission::SalesCreate)
+            .expect("eval initial")
+    );
+
+    // Explicitly revoke sales.create from role cashier in DB
+    revoke_role_permission(&conn, Role::Cashier, Permission::SalesCreate)
+        .expect("revoke role perm");
+
+    // Crucial security check: Cashier MUST be denied sales.create now!
+    // It must NOT silently fall back to code defaults!
+    let allowed_after_revoke =
+        evaluate_user_permission(&conn, &cashier.id, &cashier.role, Permission::SalesCreate)
+            .expect("eval after role perm revocation");
+
+    assert!(
+        !allowed_after_revoke,
+        "Revoked role permission in DB must remain DENIED and not fall back to code default"
+    );
+
+    // Re-grant role permission in DB
+    grant_role_permission(&conn, Role::Cashier, Permission::SalesCreate).expect("grant role perm");
+
+    assert!(
+        evaluate_user_permission(&conn, &cashier.id, &cashier.role, Permission::SalesCreate)
+            .expect("eval after re-grant")
+    );
+}
+
+#[test]
+fn fallback_to_code_defaults_happens_only_when_role_has_zero_db_rows() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+
+    let cashier = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Zero Row Cashier",
+        Some("zero_cashier"),
+        None,
+        None,
+        "cashier",
+    )
+    .expect("create cashier");
+
+    // Delete all DB role_permissions for cashier
+    conn.execute("DELETE FROM role_permissions WHERE role = 'cashier'", [])
+        .expect("delete all cashier role perms");
+
+    // Now cashier has ZERO DB rows -> fallback to code defaults occurs
+    assert!(
+        evaluate_user_permission(&conn, &cashier.id, &cashier.role, Permission::SalesCreate)
+            .expect("eval zero db rows")
+    );
+}
+
+#[test]
+fn list_role_permissions_queries_database_mappings() {
+    let conn = setup_test_db();
+
+    let cashier_perms = list_role_permissions(&conn, Role::Cashier).expect("list perms");
+    assert_eq!(cashier_perms.len(), 5);
+    assert!(cashier_perms.contains(&Permission::SalesCreate));
+    assert!(cashier_perms.contains(&Permission::CashOpen));
+    assert!(!cashier_perms.contains(&Permission::SalesVoid));
 }
 
 #[test]

@@ -331,8 +331,8 @@ pub fn validate_scope(
 
 /// Evaluates effective permission for a user considering:
 /// 1. Explicit user-level override in `user_permissions` (deny takes highest precedence).
-/// 2. Database `role_permissions` mapping.
-/// 3. Code-defined default role permissions fallback.
+/// 2. Database `role_permissions` mapping (authoritative if role has any DB mappings).
+/// 3. Code-defined default role permissions fallback ONLY when role has ZERO DB rows.
 /// 4. Default: DENY.
 #[allow(dead_code)]
 pub fn evaluate_user_permission(
@@ -343,7 +343,7 @@ pub fn evaluate_user_permission(
 ) -> Result<bool, PermissionError> {
     let perm_code = permission.as_str();
 
-    // 1. Check user-level override
+    // 1. Check user-level override (highest precedence)
     let user_override: Option<String> = conn
         .query_row(
             "SELECT up.effect \
@@ -365,25 +365,36 @@ pub fn evaluate_user_permission(
         }
     }
 
-    // 2. Check database role_permissions
-    let role_allowed: bool = conn
+    // 2. Check if this role has ANY rows configured in `role_permissions`
+    let role_mapped_in_db: bool = conn
         .query_row(
-            "SELECT 1 \
-             FROM role_permissions rp \
-             JOIN permissions p ON rp.permission_id = p.id \
-             WHERE rp.role = ?1 AND p.code = ?2",
-            params![role_str, perm_code],
+            "SELECT 1 FROM role_permissions WHERE role = ?1 LIMIT 1",
+            params![role_str],
             |_| Ok(true),
         )
         .optional()
         .map_err(|e| PermissionError::Database(e.to_string()))?
         .unwrap_or(false);
 
-    if role_allowed {
-        return Ok(true);
+    if role_mapped_in_db {
+        // DB mapping is authoritative for this role: missing row means strictly DENIED!
+        let has_perm: bool = conn
+            .query_row(
+                "SELECT 1 \
+                 FROM role_permissions rp \
+                 JOIN permissions p ON rp.permission_id = p.id \
+                 WHERE rp.role = ?1 AND p.code = ?2",
+                params![role_str, perm_code],
+                |_| Ok(true),
+            )
+            .optional()
+            .map_err(|e| PermissionError::Database(e.to_string()))?
+            .unwrap_or(false);
+
+        return Ok(has_perm);
     }
 
-    // 3. Fallback to code-defined default role permissions
+    // 3. Fallback to code-defined default role permissions ONLY if role has ZERO DB rows
     Ok(check_role_permission(role_str, perm_code))
 }
 
@@ -403,6 +414,89 @@ pub fn get_effective_user_permissions(
     }
 
     Ok(effective)
+}
+
+/// Grants a permission to a role in the local database.
+#[allow(dead_code)]
+pub fn grant_role_permission(
+    conn: &Connection,
+    role: Role,
+    permission: Permission,
+) -> Result<(), PermissionError> {
+    let permission_id: String = conn
+        .query_row(
+            "SELECT id FROM permissions WHERE code = ?1",
+            params![permission.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| PermissionError::Database(e.to_string()))?
+        .ok_or_else(|| PermissionError::InvalidPermission(permission.to_string()))?;
+
+    conn.execute(
+        "INSERT OR IGNORE INTO role_permissions (role, permission_id) VALUES (?1, ?2)",
+        params![role.as_str(), permission_id],
+    )
+    .map_err(|e| PermissionError::Database(format!("Failed to grant role permission: {e}")))?;
+
+    Ok(())
+}
+
+/// Revokes a permission from a role in the local database.
+#[allow(dead_code)]
+pub fn revoke_role_permission(
+    conn: &Connection,
+    role: Role,
+    permission: Permission,
+) -> Result<(), PermissionError> {
+    let permission_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM permissions WHERE code = ?1",
+            params![permission.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| PermissionError::Database(e.to_string()))?;
+
+    if let Some(pid) = permission_id {
+        conn.execute(
+            "DELETE FROM role_permissions WHERE role = ?1 AND permission_id = ?2",
+            params![role.as_str(), pid],
+        )
+        .map_err(|e| PermissionError::Database(format!("Failed to revoke role permission: {e}")))?;
+    }
+
+    Ok(())
+}
+
+/// Lists all database permissions assigned to a role.
+#[allow(dead_code)]
+pub fn list_role_permissions(
+    conn: &Connection,
+    role: Role,
+) -> Result<Vec<Permission>, PermissionError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT p.code \
+             FROM role_permissions rp \
+             JOIN permissions p ON rp.permission_id = p.id \
+             WHERE rp.role = ?1 \
+             ORDER BY p.code ASC",
+        )
+        .map_err(|e| PermissionError::Database(e.to_string()))?;
+
+    let rows = stmt
+        .query_map(params![role.as_str()], |row| row.get::<_, String>(0))
+        .map_err(|e| PermissionError::Database(e.to_string()))?;
+
+    let mut list = Vec::new();
+    for row in rows {
+        let code = row.map_err(|e| PermissionError::Database(e.to_string()))?;
+        if let Some(perm) = Permission::parse(&code) {
+            list.push(perm);
+        }
+    }
+    Ok(list)
 }
 
 /// Grants or denies an explicit permission override for a user in the local database.
