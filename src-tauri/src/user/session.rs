@@ -115,6 +115,55 @@ pub fn create_local_session(
     Ok(session)
 }
 
+/// Strongly typed session validation errors.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SessionValidationError {
+    NotFound,
+    Revoked,
+    Expired,
+    InactiveUser,
+    InactiveBranch,
+    Database(String),
+}
+
+impl std::fmt::Display for SessionValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SessionValidationError::NotFound => write!(f, "Session not found"),
+            SessionValidationError::Revoked => write!(f, "Session has been revoked"),
+            SessionValidationError::Expired => write!(f, "Session has expired"),
+            SessionValidationError::InactiveUser => write!(f, "User account is inactive"),
+            SessionValidationError::InactiveBranch => write!(f, "Branch is inactive"),
+            SessionValidationError::Database(msg) => write!(f, "Database error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for SessionValidationError {}
+
+impl From<SessionValidationError> for UserError {
+    fn from(err: SessionValidationError) -> Self {
+        match err {
+            SessionValidationError::NotFound => {
+                UserError::InvalidCredentials("Session not found".into())
+            }
+            SessionValidationError::Revoked => {
+                UserError::InvalidCredentials("Session has been revoked".into())
+            }
+            SessionValidationError::Expired => {
+                UserError::InvalidCredentials("Session has expired".into())
+            }
+            SessionValidationError::InactiveUser => {
+                UserError::InvalidCredentials("User account is inactive".into())
+            }
+            SessionValidationError::InactiveBranch => {
+                UserError::InvalidCredentials("Branch is inactive".into())
+            }
+            SessionValidationError::Database(msg) => UserError::Database(msg),
+        }
+    }
+}
+
 /// Validates an active local session against all security and tenant boundaries:
 /// 1. Session exists and revoked_at IS NULL
 /// 2. expires_at > datetime('now')
@@ -123,7 +172,7 @@ pub fn create_local_session(
 pub fn validate_local_session(
     conn: &Connection,
     session_id: &str,
-) -> Result<SessionContext, UserError> {
+) -> Result<SessionContext, SessionValidationError> {
     let result = conn
         .query_row(
             "SELECT s.id, s.user_id, u.full_name, u.username, u.role, \
@@ -161,29 +210,25 @@ pub fn validate_local_session(
             },
         )
         .optional()
-        .map_err(|e| UserError::Database(e.to_string()))?
-        .ok_or_else(|| UserError::InvalidCredentials("Session not found".into()))?;
+        .map_err(|e| SessionValidationError::Database(e.to_string()))?
+        .ok_or(SessionValidationError::NotFound)?;
 
     let (context, revoked_at, user_active, branch_active, is_not_expired) = result;
 
     if revoked_at.is_some() {
-        return Err(UserError::InvalidCredentials(
-            "Session has been revoked".into(),
-        ));
+        return Err(SessionValidationError::Revoked);
     }
 
     if !is_not_expired {
-        return Err(UserError::InvalidCredentials("Session has expired".into()));
+        return Err(SessionValidationError::Expired);
     }
 
     if !user_active {
-        return Err(UserError::InvalidCredentials(
-            "User account is inactive".into(),
-        ));
+        return Err(SessionValidationError::InactiveUser);
     }
 
     if !branch_active {
-        return Err(UserError::InvalidCredentials("Branch is inactive".into()));
+        return Err(SessionValidationError::InactiveBranch);
     }
 
     Ok(context)

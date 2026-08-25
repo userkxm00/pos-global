@@ -4,8 +4,7 @@
 use crate::permission::{
     evaluate_user_permission, validate_scope, Permission, PermissionError, Role,
 };
-use crate::user::session::{validate_local_session, SessionContext};
-use crate::user::UserError;
+use crate::user::session::{validate_local_session, SessionContext, SessionValidationError};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -86,19 +85,24 @@ impl From<PermissionError> for AuthMiddlewareError {
     }
 }
 
-fn map_session_error(err: UserError) -> AuthMiddlewareError {
+fn map_session_error(err: SessionValidationError) -> AuthMiddlewareError {
     match err {
-        UserError::InvalidCredentials(msg) if msg.contains("revoked") => {
-            AuthMiddlewareError::SessionRevoked(msg)
+        SessionValidationError::Revoked => {
+            AuthMiddlewareError::SessionRevoked("Session has been revoked".into())
         }
-        UserError::InvalidCredentials(msg) if msg.contains("expired") => {
-            AuthMiddlewareError::SessionExpired(msg)
+        SessionValidationError::Expired => {
+            AuthMiddlewareError::SessionExpired("Session has expired".into())
         }
-        UserError::InvalidCredentials(msg) => AuthMiddlewareError::Unauthenticated(msg),
-        UserError::NotFound(msg) => AuthMiddlewareError::Unauthenticated(msg),
-        UserError::Validation(msg) => AuthMiddlewareError::Unauthenticated(msg),
-        UserError::Database(msg) => AuthMiddlewareError::Database(msg),
-        other => AuthMiddlewareError::Unauthenticated(other.to_string()),
+        SessionValidationError::NotFound => {
+            AuthMiddlewareError::Unauthenticated("Session not found".into())
+        }
+        SessionValidationError::InactiveUser => {
+            AuthMiddlewareError::Unauthenticated("User account is inactive".into())
+        }
+        SessionValidationError::InactiveBranch => {
+            AuthMiddlewareError::Unauthenticated("Branch is inactive".into())
+        }
+        SessionValidationError::Database(msg) => AuthMiddlewareError::Database(msg),
     }
 }
 

@@ -2,6 +2,7 @@ use crate::branch::{create_branch, CreateBranchInput};
 use crate::tests::test_helpers::{create_test_user_hierarchy, setup_test_db};
 use crate::user::session::{
     create_local_session, get_active_session, revoke_local_session, validate_local_session,
+    SessionValidationError,
 };
 use crate::user::{update_user, UpdateUserInput, UserError};
 
@@ -35,13 +36,10 @@ fn session_lifecycle_create_validate_and_revoke() {
     // 4. Revoke session
     revoke_local_session(&conn, &session.id).expect("session revoked");
 
-    // 5. Validation after revocation fails
+    // 5. Validation after revocation fails with typed Revoked variant
     let err = validate_local_session(&conn, &session.id).unwrap_err();
-    assert!(matches!(err, UserError::InvalidCredentials(_)));
-    assert_eq!(
-        err.to_string(),
-        "Invalid credentials: Session has been revoked"
-    );
+    assert_eq!(err, SessionValidationError::Revoked);
+    assert_eq!(err.to_string(), "Session has been revoked");
 
     // 6. Active session query now returns None
     let active_after_revoke = get_active_session(&conn, &user.id).expect("query active session");
@@ -64,8 +62,8 @@ fn expired_session_is_rejected() {
     .expect("insert expired session");
 
     let err = validate_local_session(&conn, &session_id).unwrap_err();
-    assert!(matches!(err, UserError::InvalidCredentials(_)));
-    assert_eq!(err.to_string(), "Invalid credentials: Session has expired");
+    assert_eq!(err, SessionValidationError::Expired);
+    assert_eq!(err.to_string(), "Session has expired");
 }
 
 #[test]
@@ -93,11 +91,8 @@ fn inactive_user_invalidates_active_session() {
     .expect("user deactivated");
 
     let err = validate_local_session(&conn, &session.id).unwrap_err();
-    assert!(matches!(err, UserError::InvalidCredentials(_)));
-    assert_eq!(
-        err.to_string(),
-        "Invalid credentials: User account is inactive"
-    );
+    assert_eq!(err, SessionValidationError::InactiveUser);
+    assert_eq!(err.to_string(), "User account is inactive");
 }
 
 #[test]
@@ -116,8 +111,8 @@ fn inactive_branch_invalidates_active_session() {
     .expect("branch deactivated");
 
     let err = validate_local_session(&conn, &session.id).unwrap_err();
-    assert!(matches!(err, UserError::InvalidCredentials(_)));
-    assert_eq!(err.to_string(), "Invalid credentials: Branch is inactive");
+    assert_eq!(err, SessionValidationError::InactiveBranch);
+    assert_eq!(err.to_string(), "Branch is inactive");
 }
 
 #[test]

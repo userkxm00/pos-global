@@ -454,3 +454,77 @@ fn full_end_to_end_authorization_pipeline_integration() {
     assert_eq!(ctx.organization_id.as_deref(), Some(org_id.as_str()));
     assert_eq!(ctx.branch_id, branch_id);
 }
+
+#[test]
+fn typed_session_error_classification_is_deterministic_and_immune_to_wording_changes() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+
+    let user = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Classification Test User",
+        Some("classification_user"),
+        None,
+        None,
+        "cashier",
+    )
+    .expect("create user");
+
+    // 1. Invalid/non-existent session ID -> Unauthenticated
+    let err_not_found = require_session(&conn, "definitely-not-a-session-id").unwrap_err();
+    assert!(
+        matches!(err_not_found, AuthMiddlewareError::Unauthenticated(_)),
+        "Non-existent session must be classified as Unauthenticated"
+    );
+
+    // 2. Revoked session -> SessionRevoked
+    let session_to_revoke =
+        create_local_session(&conn, &user.id, &branch_id, "pin", None).expect("create session");
+    revoke_local_session(&conn, &session_to_revoke.id).expect("revoke session");
+    let err_revoked = require_session(&conn, &session_to_revoke.id).unwrap_err();
+    assert!(
+        matches!(err_revoked, AuthMiddlewareError::SessionRevoked(_)),
+        "Revoked session must be classified as SessionRevoked"
+    );
+
+    // 3. Expired session -> SessionExpired
+    let expired_session =
+        create_local_session(&conn, &user.id, &branch_id, "pin", Some(-5)).expect("create expired");
+    let err_expired = require_session(&conn, &expired_session.id).unwrap_err();
+    assert!(
+        matches!(err_expired, AuthMiddlewareError::SessionExpired(_)),
+        "Expired session must be classified as SessionExpired"
+    );
+
+    // 4. Inactive user -> Unauthenticated
+    let session_inactive_user =
+        create_local_session(&conn, &user.id, &branch_id, "pin", None).expect("create session");
+    conn.execute(
+        "UPDATE users SET is_active = 0 WHERE id = ?1",
+        params![user.id],
+    )
+    .expect("deactivate user");
+    let err_inactive_user = require_session(&conn, &session_inactive_user.id).unwrap_err();
+    assert!(
+        matches!(err_inactive_user, AuthMiddlewareError::Unauthenticated(_)),
+        "Inactive user session must be classified as Unauthenticated"
+    );
+
+    // 5. Inactive branch -> Unauthenticated
+    conn.execute(
+        "UPDATE users SET is_active = 1 WHERE id = ?1",
+        params![user.id],
+    )
+    .expect("reactivate user");
+    conn.execute(
+        "UPDATE branches SET is_active = 0 WHERE id = ?1",
+        params![branch_id],
+    )
+    .expect("deactivate branch");
+    let err_inactive_branch = require_session(&conn, &session_inactive_user.id).unwrap_err();
+    assert!(
+        matches!(err_inactive_branch, AuthMiddlewareError::Unauthenticated(_)),
+        "Inactive branch session must be classified as Unauthenticated"
+    );
+}
