@@ -10,6 +10,8 @@ mod organization_tests;
 mod permission_tests;
 #[path = "register_tests.rs"]
 mod register_tests;
+#[path = "rls_migration_tests.rs"]
+mod rls_migration_tests;
 #[path = "sales_tests.rs"]
 mod sales_tests;
 #[path = "session_tests.rs"]
