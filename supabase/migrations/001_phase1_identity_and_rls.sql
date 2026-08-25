@@ -164,6 +164,72 @@ AS $$
     );
 $$;
 
+-- Security check preventing an organization from being orphaned by sole-owner deletion
+CREATE OR REPLACE FUNCTION public.can_delete_organization_member(target_org_id UUID, target_user_id UUID, target_role TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT CASE
+        -- When the member to be deleted is an owner:
+        WHEN target_role = 'owner' THEN
+            -- Must be an owner deleting AND at least one other owner must remain
+            EXISTS (
+                SELECT 1
+                FROM public.organization_members
+                WHERE organization_id = target_org_id
+                  AND user_id = auth.uid()
+                  AND role = 'owner'
+            )
+            AND (
+                SELECT COUNT(*)
+                FROM public.organization_members
+                WHERE organization_id = target_org_id
+                  AND role = 'owner'
+                  AND user_id <> target_user_id
+            ) >= 1
+
+        -- When the member to be deleted is not an owner:
+        ELSE
+            public.is_org_admin_or_owner(target_org_id)
+            OR (target_user_id = auth.uid() AND public.is_org_member(target_org_id))
+    END;
+$$;
+
+-- Trigger ensuring no deletion (even direct or cascading) can leave an organization with 0 owners
+CREATE OR REPLACE FUNCTION public.prevent_orphaned_organization()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    remaining_owners INTEGER;
+BEGIN
+    IF OLD.role = 'owner' THEN
+        SELECT COUNT(*)
+        INTO remaining_owners
+        FROM public.organization_members
+        WHERE organization_id = OLD.organization_id
+          AND role = 'owner'
+          AND id <> OLD.id;
+
+        IF remaining_owners < 1 THEN
+            RAISE EXCEPTION 'Cannot delete the sole remaining owner of an organization';
+        END IF;
+    END IF;
+    RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_prevent_orphaned_organization ON public.organization_members;
+CREATE TRIGGER trg_prevent_orphaned_organization
+    BEFORE DELETE ON public.organization_members
+    FOR EACH ROW
+    EXECUTE FUNCTION public.prevent_orphaned_organization();
+
 -- 5. Enable Row Level Security (RLS) on All Cloud Tables
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.organization_members ENABLE ROW LEVEL SECURITY;
@@ -221,7 +287,7 @@ CREATE POLICY members_update_policy ON public.organization_members
 DROP POLICY IF EXISTS members_delete_policy ON public.organization_members;
 CREATE POLICY members_delete_policy ON public.organization_members
     FOR DELETE
-    USING (public.is_org_admin_or_owner(organization_id) OR user_id = auth.uid());
+    USING (public.can_delete_organization_member(organization_id, user_id, role));
 
 -- --- Branches Policies ---
 DROP POLICY IF EXISTS branches_select_policy ON public.branches;

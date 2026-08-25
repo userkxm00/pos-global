@@ -36,6 +36,8 @@ fn rls_migration_defines_security_definer_functions_with_safe_search_path() {
         "is_org_member",
         "is_org_admin_or_owner",
         "is_org_manager_or_above",
+        "can_delete_organization_member",
+        "prevent_orphaned_organization",
     ];
 
     for func in expected_functions {
@@ -52,6 +54,22 @@ fn rls_migration_defines_security_definer_functions_with_safe_search_path() {
     assert!(
         RLS_MIGRATION_SQL.contains("SET search_path = public"),
         "Expected helper functions to enforce search_path = public against hijacking"
+    );
+}
+
+#[test]
+fn rls_migration_enforces_sole_owner_protection() {
+    assert!(
+        RLS_MIGRATION_SQL.contains("can_delete_organization_member"),
+        "Expected can_delete_organization_member function to be used in delete policy"
+    );
+    assert!(
+        RLS_MIGRATION_SQL.contains("prevent_orphaned_organization"),
+        "Expected prevent_orphaned_organization trigger to protect against zero-owner organizations"
+    );
+    assert!(
+        RLS_MIGRATION_SQL.contains("trg_prevent_orphaned_organization"),
+        "Expected trg_prevent_orphaned_organization trigger definition"
     );
 }
 
@@ -105,7 +123,15 @@ fn rls_permission_catalog_matches_canonical_rust_catalog() {
 }
 
 #[test]
-fn rls_test_suite_covers_cross_tenant_isolation_and_negative_cases() {
+fn rls_test_suite_covers_authenticated_execution_and_sole_owner_cases() {
+    assert!(
+        RLS_TEST_SQL.contains("SET LOCAL ROLE authenticated"),
+        "Expected RLS tests to execute under authenticated role"
+    );
+    assert!(
+        RLS_TEST_SQL.contains("auth.uid()"),
+        "Expected test harness to validate and provide auth.uid() function"
+    );
     assert!(
         RLS_TEST_SQL.contains("RLS SECURITY VIOLATION"),
         "Expected negative security assertions in RLS test suite"
@@ -115,7 +141,11 @@ fn rls_test_suite_covers_cross_tenant_isolation_and_negative_cases() {
         "Expected cross-organization negative assertion"
     );
     assert!(
-        RLS_TEST_SQL.contains("Non-member saw"),
-        "Expected unauthenticated/non-member negative assertion"
+        RLS_TEST_SQL.contains("Sole owner was able to delete their own membership"),
+        "Expected sole-owner deletion prevention assertion"
+    );
+    assert!(
+        RLS_TEST_SQL.contains("Co-owner should be permitted to leave when another owner remains"),
+        "Expected multi-owner leave assertion"
     );
 }
