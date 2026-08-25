@@ -181,7 +181,8 @@ END $$;
 -- Test 4: cross_tenant_branch_mismatch_is_rejected
 DO $$
 DECLARE
-    blocked BOOLEAN := false;
+    blocked_insert BOOLEAN := false;
+    blocked_user_insert BOOLEAN := false;
 BEGIN
     SET LOCAL ROLE authenticated;
     PERFORM set_config('request.jwt.claim.sub', '21212121-2121-2121-2121-212121212121', true); -- Manager A
@@ -191,12 +192,29 @@ BEGIN
         INSERT INTO public.registers (id, organization_id, branch_id, name, code)
         VALUES ('a8a8a8a8-a8a8-a8a8-a8a8-a8a8a8a8a8a8', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'b1b1b1b1-b1b1-b1b1-b1b1-b1b1b1b1b1b1', 'Mismatched Reg', 'REG-BAD');
     EXCEPTION WHEN OTHERS THEN
-        blocked := true;
+        blocked_insert := true;
     END;
 
-    IF NOT blocked THEN
+    IF NOT blocked_insert THEN
         IF EXISTS (SELECT 1 FROM public.registers WHERE id = 'a8a8a8a8-a8a8-a8a8-a8a8-a8a8a8a8a8a8') THEN
             RAISE EXCEPTION 'RLS SECURITY VIOLATION: Manager A attached a register to Branch B across tenants!';
+        END IF;
+    END IF;
+
+    -- Switch to Admin A context
+    PERFORM set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', true);
+
+    -- Admin A attempts to create a user in Org A linked to Branch B (which belongs to Org B)
+    BEGIN
+        INSERT INTO public.users (id, organization_id, branch_id, full_name, username, role)
+        VALUES ('a7a7a7a7-a7a7-a7a7-a7a7-a7a7a7a7a7a7', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'b1b1b1b1-b1b1-b1b1-b1b1-b1b1b1b1b1b1', 'Bad Branch User', 'bad_user', 'cashier');
+    EXCEPTION WHEN OTHERS THEN
+        blocked_user_insert := true;
+    END;
+
+    IF NOT blocked_user_insert THEN
+        IF EXISTS (SELECT 1 FROM public.users WHERE id = 'a7a7a7a7-a7a7-a7a7-a7a7-a7a7a7a7a7a7') THEN
+            RAISE EXCEPTION 'RLS SECURITY VIOLATION: Admin A attached a user to Branch B across tenants!';
         END IF;
     END IF;
 END $$;

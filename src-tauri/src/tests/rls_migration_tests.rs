@@ -154,7 +154,11 @@ fn rls_test_suite_covers_authenticated_execution_and_sole_owner_cases() {
     );
     assert!(
         RLS_TEST_SQL.contains("Manager A attached a register to Branch B across tenants"),
-        "Expected cross-tenant branch mismatch rejection assertion"
+        "Expected cross-tenant branch mismatch rejection assertion for registers"
+    );
+    assert!(
+        RLS_TEST_SQL.contains("Admin A attached a user to Branch B across tenants"),
+        "Expected cross-tenant branch mismatch rejection assertion for users"
     );
     assert!(
         RLS_TEST_SQL.contains("Sole owner was able to delete their own membership"),
