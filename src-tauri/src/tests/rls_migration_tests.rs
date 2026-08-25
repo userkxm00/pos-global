@@ -73,8 +73,15 @@ fn rls_migration_enforces_sole_owner_and_branch_boundary_protection() {
         "Expected trg_prevent_orphaned_organization trigger definition"
     );
     assert!(
-        RLS_MIGRATION_SQL.contains("b.id = branch_id AND b.organization_id = organization_id"),
-        "Expected branch tenant boundary check in registers/users mutation policies"
+        RLS_MIGRATION_SQL.contains(
+            "b.id = registers.branch_id AND b.organization_id = registers.organization_id"
+        ),
+        "Expected table-qualified branch tenant boundary check in registers mutation policies"
+    );
+    assert!(
+        RLS_MIGRATION_SQL
+            .contains("b.id = users.branch_id AND b.organization_id = users.organization_id"),
+        "Expected table-qualified branch tenant boundary check in users mutation policies"
     );
 }
 

@@ -126,9 +126,9 @@ SET search_path = public
 AS $$
     SELECT EXISTS (
         SELECT 1
-        FROM public.organization_members
-        WHERE organization_id = target_org_id
-          AND user_id = auth.uid()
+        FROM public.organization_members om
+        WHERE om.organization_id = target_org_id
+          AND om.user_id = auth.uid()
     );
 $$;
 
@@ -141,10 +141,10 @@ SET search_path = public
 AS $$
     SELECT EXISTS (
         SELECT 1
-        FROM public.organization_members
-        WHERE organization_id = target_org_id
-          AND user_id = auth.uid()
-          AND role IN ('owner', 'admin')
+        FROM public.organization_members om
+        WHERE om.organization_id = target_org_id
+          AND om.user_id = auth.uid()
+          AND om.role IN ('owner', 'admin')
     );
 $$;
 
@@ -157,10 +157,10 @@ SET search_path = public
 AS $$
     SELECT EXISTS (
         SELECT 1
-        FROM public.organization_members
-        WHERE organization_id = target_org_id
-          AND user_id = auth.uid()
-          AND role IN ('owner', 'admin', 'manager')
+        FROM public.organization_members om
+        WHERE om.organization_id = target_org_id
+          AND om.user_id = auth.uid()
+          AND om.role IN ('owner', 'admin', 'manager')
     );
 $$;
 
@@ -178,17 +178,17 @@ AS $$
             -- Must be an owner deleting AND at least one other owner must remain
             EXISTS (
                 SELECT 1
-                FROM public.organization_members
-                WHERE organization_id = target_org_id
-                  AND user_id = auth.uid()
-                  AND role = 'owner'
+                FROM public.organization_members om
+                WHERE om.organization_id = target_org_id
+                  AND om.user_id = auth.uid()
+                  AND om.role = 'owner'
             )
             AND (
                 SELECT COUNT(*)
-                FROM public.organization_members
-                WHERE organization_id = target_org_id
-                  AND role = 'owner'
-                  AND user_id <> target_user_id
+                FROM public.organization_members om
+                WHERE om.organization_id = target_org_id
+                  AND om.role = 'owner'
+                  AND om.user_id <> target_user_id
             ) >= 1
 
         -- When the member to be deleted is not an owner:
@@ -211,10 +211,10 @@ BEGIN
     IF OLD.role = 'owner' THEN
         SELECT COUNT(*)
         INTO remaining_owners
-        FROM public.organization_members
-        WHERE organization_id = OLD.organization_id
-          AND role = 'owner'
-          AND id <> OLD.id;
+        FROM public.organization_members om
+        WHERE om.organization_id = OLD.organization_id
+          AND om.role = 'owner'
+          AND om.id <> OLD.id;
 
         IF remaining_owners < 1 THEN
             RAISE EXCEPTION 'Cannot delete the sole remaining owner of an organization';
@@ -269,7 +269,7 @@ ALTER TABLE public.user_permissions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS organizations_select_policy ON public.organizations;
 CREATE POLICY organizations_select_policy ON public.organizations
     FOR SELECT
-    USING (id IN (SELECT public.get_user_organization_ids()));
+    USING (organizations.id IN (SELECT public.get_user_organization_ids()));
 
 DROP POLICY IF EXISTS organizations_insert_policy ON public.organizations;
 CREATE POLICY organizations_insert_policy ON public.organizations
@@ -279,128 +279,134 @@ CREATE POLICY organizations_insert_policy ON public.organizations
 DROP POLICY IF EXISTS organizations_update_policy ON public.organizations;
 CREATE POLICY organizations_update_policy ON public.organizations
     FOR UPDATE
-    USING (public.is_org_admin_or_owner(id))
-    WITH CHECK (public.is_org_admin_or_owner(id));
+    USING (public.is_org_admin_or_owner(organizations.id))
+    WITH CHECK (public.is_org_admin_or_owner(organizations.id));
 
 DROP POLICY IF EXISTS organizations_delete_policy ON public.organizations;
 CREATE POLICY organizations_delete_policy ON public.organizations
     FOR DELETE
     USING (EXISTS (
-        SELECT 1 FROM public.organization_members
-        WHERE organization_id = id AND user_id = auth.uid() AND role = 'owner'
+        SELECT 1 FROM public.organization_members om
+        WHERE om.organization_id = organizations.id
+          AND om.user_id = auth.uid()
+          AND om.role = 'owner'
     ));
 
 -- --- Organization Members Policies ---
 DROP POLICY IF EXISTS members_select_policy ON public.organization_members;
 CREATE POLICY members_select_policy ON public.organization_members
     FOR SELECT
-    USING (organization_id IN (SELECT public.get_user_organization_ids()));
+    USING (organization_members.organization_id IN (SELECT public.get_user_organization_ids()));
 
 DROP POLICY IF EXISTS members_insert_policy ON public.organization_members;
 CREATE POLICY members_insert_policy ON public.organization_members
     FOR INSERT
-    WITH CHECK (public.is_org_admin_or_owner(organization_id));
+    WITH CHECK (public.is_org_admin_or_owner(organization_members.organization_id));
 
 DROP POLICY IF EXISTS members_update_policy ON public.organization_members;
 CREATE POLICY members_update_policy ON public.organization_members
     FOR UPDATE
-    USING (public.is_org_admin_or_owner(organization_id))
-    WITH CHECK (public.is_org_admin_or_owner(organization_id));
+    USING (public.is_org_admin_or_owner(organization_members.organization_id))
+    WITH CHECK (public.is_org_admin_or_owner(organization_members.organization_id));
 
 DROP POLICY IF EXISTS members_delete_policy ON public.organization_members;
 CREATE POLICY members_delete_policy ON public.organization_members
     FOR DELETE
-    USING (public.can_delete_organization_member(organization_id, user_id, role));
+    USING (public.can_delete_organization_member(organization_members.organization_id, organization_members.user_id, organization_members.role));
 
 -- --- Branches Policies ---
 DROP POLICY IF EXISTS branches_select_policy ON public.branches;
 CREATE POLICY branches_select_policy ON public.branches
     FOR SELECT
-    USING (organization_id IN (SELECT public.get_user_organization_ids()));
+    USING (branches.organization_id IN (SELECT public.get_user_organization_ids()));
 
 DROP POLICY IF EXISTS branches_insert_policy ON public.branches;
 CREATE POLICY branches_insert_policy ON public.branches
     FOR INSERT
-    WITH CHECK (public.is_org_admin_or_owner(organization_id));
+    WITH CHECK (public.is_org_admin_or_owner(branches.organization_id));
 
 DROP POLICY IF EXISTS branches_update_policy ON public.branches;
 CREATE POLICY branches_update_policy ON public.branches
     FOR UPDATE
-    USING (public.is_org_admin_or_owner(organization_id))
-    WITH CHECK (public.is_org_admin_or_owner(organization_id));
+    USING (public.is_org_admin_or_owner(branches.organization_id))
+    WITH CHECK (public.is_org_admin_or_owner(branches.organization_id));
 
 DROP POLICY IF EXISTS branches_delete_policy ON public.branches;
 CREATE POLICY branches_delete_policy ON public.branches
     FOR DELETE
-    USING (public.is_org_admin_or_owner(organization_id));
+    USING (public.is_org_admin_or_owner(branches.organization_id));
 
 -- --- Registers Policies ---
 DROP POLICY IF EXISTS registers_select_policy ON public.registers;
 CREATE POLICY registers_select_policy ON public.registers
     FOR SELECT
-    USING (organization_id IN (SELECT public.get_user_organization_ids()));
+    USING (registers.organization_id IN (SELECT public.get_user_organization_ids()));
 
 DROP POLICY IF EXISTS registers_insert_policy ON public.registers;
 CREATE POLICY registers_insert_policy ON public.registers
     FOR INSERT
     WITH CHECK (
-        public.is_org_manager_or_above(organization_id)
+        public.is_org_manager_or_above(registers.organization_id)
         AND EXISTS (
             SELECT 1 FROM public.branches b
-            WHERE b.id = branch_id AND b.organization_id = organization_id
+            WHERE b.id = registers.branch_id
+              AND b.organization_id = registers.organization_id
         )
     );
 
 DROP POLICY IF EXISTS registers_update_policy ON public.registers;
 CREATE POLICY registers_update_policy ON public.registers
     FOR UPDATE
-    USING (public.is_org_manager_or_above(organization_id))
+    USING (public.is_org_manager_or_above(registers.organization_id))
     WITH CHECK (
-        public.is_org_manager_or_above(organization_id)
+        public.is_org_manager_or_above(registers.organization_id)
         AND EXISTS (
             SELECT 1 FROM public.branches b
-            WHERE b.id = branch_id AND b.organization_id = organization_id
+            WHERE b.id = registers.branch_id
+              AND b.organization_id = registers.organization_id
         )
     );
 
 DROP POLICY IF EXISTS registers_delete_policy ON public.registers;
 CREATE POLICY registers_delete_policy ON public.registers
     FOR DELETE
-    USING (public.is_org_admin_or_owner(organization_id));
+    USING (public.is_org_admin_or_owner(registers.organization_id));
 
 -- --- Users Policies ---
 DROP POLICY IF EXISTS users_select_policy ON public.users;
 CREATE POLICY users_select_policy ON public.users
     FOR SELECT
-    USING (organization_id IN (SELECT public.get_user_organization_ids()));
+    USING (users.organization_id IN (SELECT public.get_user_organization_ids()));
 
 DROP POLICY IF EXISTS users_insert_policy ON public.users;
 CREATE POLICY users_insert_policy ON public.users
     FOR INSERT
     WITH CHECK (
-        public.is_org_admin_or_owner(organization_id)
+        public.is_org_admin_or_owner(users.organization_id)
         AND EXISTS (
             SELECT 1 FROM public.branches b
-            WHERE b.id = branch_id AND b.organization_id = organization_id
+            WHERE b.id = users.branch_id
+              AND b.organization_id = users.organization_id
         )
     );
 
 DROP POLICY IF EXISTS users_update_policy ON public.users;
 CREATE POLICY users_update_policy ON public.users
     FOR UPDATE
-    USING (public.is_org_admin_or_owner(organization_id))
+    USING (public.is_org_admin_or_owner(users.organization_id))
     WITH CHECK (
-        public.is_org_admin_or_owner(organization_id)
+        public.is_org_admin_or_owner(users.organization_id)
         AND EXISTS (
             SELECT 1 FROM public.branches b
-            WHERE b.id = branch_id AND b.organization_id = organization_id
+            WHERE b.id = users.branch_id
+              AND b.organization_id = users.organization_id
         )
     );
 
 DROP POLICY IF EXISTS users_delete_policy ON public.users;
 CREATE POLICY users_delete_policy ON public.users
     FOR DELETE
-    USING (public.is_org_admin_or_owner(organization_id));
+    USING (public.is_org_admin_or_owner(users.organization_id));
 
 -- --- Permissions Catalog & Mapping Policies ---
 DROP POLICY IF EXISTS permissions_select_policy ON public.permissions;
@@ -418,7 +424,8 @@ CREATE POLICY user_permissions_select_policy ON public.user_permissions
     FOR SELECT
     USING (EXISTS (
         SELECT 1 FROM public.users u
-        WHERE u.id = user_id AND u.organization_id IN (SELECT public.get_user_organization_ids())
+        WHERE u.id = user_permissions.user_id
+          AND u.organization_id IN (SELECT public.get_user_organization_ids())
     ));
 
 DROP POLICY IF EXISTS user_permissions_mutate_policy ON public.user_permissions;
@@ -426,11 +433,13 @@ CREATE POLICY user_permissions_mutate_policy ON public.user_permissions
     FOR ALL
     USING (EXISTS (
         SELECT 1 FROM public.users u
-        WHERE u.id = user_id AND public.is_org_admin_or_owner(u.organization_id)
+        WHERE u.id = user_permissions.user_id
+          AND public.is_org_admin_or_owner(u.organization_id)
     ))
     WITH CHECK (EXISTS (
         SELECT 1 FROM public.users u
-        WHERE u.id = user_id AND public.is_org_admin_or_owner(u.organization_id)
+        WHERE u.id = user_permissions.user_id
+          AND public.is_org_admin_or_owner(u.organization_id)
     ));
 
 -- 7. Seed Authoritative Permission Catalog (matching local migration 004)
