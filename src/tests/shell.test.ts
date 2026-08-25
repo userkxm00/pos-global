@@ -6,6 +6,11 @@ test('i18n direction calculation conforms to language rules', () => {
   assert.equal(getDirectionForLocale('en'), 'ltr')
   assert.equal(getDirectionForLocale('fr'), 'ltr')
   assert.equal(getDirectionForLocale('ar'), 'rtl')
+  assert.equal(getDirectionForLocale('ar-DZ'), 'rtl')
+  assert.equal(getDirectionForLocale('ar-SA'), 'rtl')
+  assert.equal(getDirectionForLocale('arn'), 'ltr')
+  assert.equal(getDirectionForLocale('art'), 'ltr')
+  assert.equal(getDirectionForLocale('arabic'), 'ltr')
   assert.equal(getDirectionForLocale('unknown'), 'ltr')
 })
 
