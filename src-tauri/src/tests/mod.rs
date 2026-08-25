@@ -18,6 +18,8 @@ mod rls_migration_tests;
 mod sales_tests;
 #[path = "session_tests.rs"]
 mod session_tests;
+#[path = "tenant_isolation_tests.rs"]
+mod tenant_isolation_tests;
 #[path = "test_helpers.rs"]
 mod test_helpers;
 #[path = "user_tests.rs"]
