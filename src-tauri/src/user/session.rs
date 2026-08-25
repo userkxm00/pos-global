@@ -82,6 +82,7 @@ pub fn create_local_session(
         return Err(UserError::Validation("Branch is inactive".into()));
     }
 
+    let session_id = uuid::Uuid::new_v4().to_string();
     let hours = duration_hours.unwrap_or(DEFAULT_SESSION_DURATION_HOURS);
     let duration_modifier = if hours >= 0 {
         format!("+{hours} hours")
