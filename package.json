@@ -3,23 +3,29 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "scripts": {"dev":"vite","build":"tsc && vite build","preview":"vite preview","tauri":"tauri"},
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "test": "node -e \"const fs=require('fs'); if(!fs.existsSync('coverage')) fs.mkdirSync('coverage');\" && node --experimental-strip-types --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info src/tests/shell.test.ts",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
   "dependencies": {
-    "react":"^18.3.1",
-    "react-dom":"^18.3.1",
-    "react-i18next":"^15.0.0",
-    "i18next":"^23.14.0",
-    "@tauri-apps/api":"^2.11.1",
-    "@tauri-apps/plugin-updater":"^2.10.1",
-    "@tauri-apps/plugin-process":"^2.3.1",
-    "@supabase/supabase-js":"^2.111.0"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^15.0.0",
+    "i18next": "^23.14.0",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@supabase/supabase-js": "^2.111.0"
   },
   "devDependencies": {
-    "@types/react":"^18.3.3",
-    "@types/react-dom":"^18.3.0",
-    "@vitejs/plugin-react":"^4.3.1",
-    "typescript":"^5.5.3",
-    "vite":"^6.4.3",
-    "@tauri-apps/cli":"^2.11.4"
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.3",
+    "vite": "^6.4.3",
+    "@tauri-apps/cli": "^2.11.4"
   }
 }
