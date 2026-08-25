@@ -89,6 +89,29 @@ impl Permission {
         }
     }
 
+    /// Returns the canonical human-readable description matching migration 004.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Permission::SalesCreate => "Create sales",
+            Permission::SalesRefund => "Refund sales",
+            Permission::SalesVoid => "Void sales",
+            Permission::InventoryAdjust => "Adjust inventory",
+            Permission::InventoryTransfer => "Transfer inventory",
+            Permission::ProductsManage => "Manage products",
+            Permission::PurchasesManage => "Manage purchases",
+            Permission::CustomersManage => "Manage customers",
+            Permission::DebtsManage => "Manage customer debts",
+            Permission::CashOpen => "Open cash shift",
+            Permission::CashClose => "Close cash shift",
+            Permission::CashAdjust => "Adjust cash",
+            Permission::ReportsView => "View reports",
+            Permission::ReportsExport => "Export reports",
+            Permission::UsersManage => "Manage users",
+            Permission::SettingsManage => "Manage settings",
+            Permission::LicenseManage => "Manage license",
+        }
+    }
+
     /// Parses an exact permission string into a typed Permission enum.
     /// Strict exact matching: fails closed on unknown values, casing, or whitespace.
     pub fn parse(s: &str) -> Option<Permission> {
@@ -198,6 +221,14 @@ impl std::fmt::Display for Role {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
+}
+
+/// Description of a catalog-to-database discrepancy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogIntegrityMismatch {
+    pub role: Role,
+    pub missing_permission: Permission,
+    pub description: String,
 }
 
 /// Typed authorization errors.
@@ -497,6 +528,103 @@ pub fn list_role_permissions(
         }
     }
     Ok(list)
+}
+
+/// Validates the database role_permissions against the compiled catalog.
+/// Detects when a database-mapped built-in role is missing expected catalog permissions.
+#[allow(dead_code)]
+pub fn validate_role_catalog_integrity(
+    conn: &Connection,
+) -> Result<Vec<CatalogIntegrityMismatch>, PermissionError> {
+    let mut mismatches = Vec::new();
+
+    for role in Role::ALL {
+        let role_has_db_rows: bool = conn
+            .query_row(
+                "SELECT 1 FROM role_permissions WHERE role = ?1 LIMIT 1",
+                params![role.as_str()],
+                |_| Ok(true),
+            )
+            .optional()
+            .map_err(|e| PermissionError::Database(e.to_string()))?
+            .unwrap_or(false);
+
+        if role_has_db_rows {
+            let active_perms: HashSet<String> = list_role_permissions(conn, *role)?
+                .into_iter()
+                .map(|p| p.as_str().to_string())
+                .collect();
+
+            for expected in role.default_permissions() {
+                if !active_perms.contains(expected.as_str()) {
+                    mismatches.push(CatalogIntegrityMismatch {
+                        role: *role,
+                        missing_permission: *expected,
+                        description: format!(
+                            "Role '{}' is missing catalog-expected permission '{}' in database role_permissions",
+                            role.as_str(),
+                            expected.as_str()
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(mismatches)
+}
+
+/// Reconciles database permissions and built-in role assignments with the compiled catalog.
+/// Inserts any missing catalog permissions into the `permissions` table, and ensures built-in roles
+/// have their default catalog permissions mapped in `role_permissions`.
+#[allow(dead_code)]
+pub fn reconcile_role_permissions(conn: &Connection) -> Result<usize, PermissionError> {
+    let mut inserted_count = 0;
+
+    // 1. Ensure all catalog permissions exist in `permissions` table
+    for perm in Permission::ALL {
+        let rows = conn
+            .execute(
+                "INSERT INTO permissions (id, code, description) \
+                 VALUES (lower(hex(randomblob(16))), ?1, ?2) \
+                 ON CONFLICT(code) DO NOTHING",
+                params![perm.as_str(), perm.description()],
+            )
+            .map_err(|e| {
+                PermissionError::Database(format!(
+                    "Failed to seed permission '{}': {e}",
+                    perm.as_str()
+                ))
+            })?;
+        inserted_count += rows;
+    }
+
+    // 2. Ensure built-in roles have their catalog default permissions mapped
+    for role in Role::ALL {
+        for perm in role.default_permissions() {
+            let perm_id: String = conn
+                .query_row(
+                    "SELECT id FROM permissions WHERE code = ?1",
+                    params![perm.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(|e| PermissionError::Database(e.to_string()))?;
+
+            let rows = conn
+                .execute(
+                    "INSERT INTO role_permissions (role, permission_id) \
+                     VALUES (?1, ?2) \
+                     ON CONFLICT(role, permission_id) DO NOTHING",
+                    params![role.as_str(), perm_id],
+                )
+                .map_err(|e| {
+                    PermissionError::Database(format!("Failed to map role permission: {e}"))
+                })?;
+            inserted_count += rows;
+        }
+    }
+
+    Ok(inserted_count)
 }
 
 /// Grants or denies an explicit permission override for a user in the local database.

@@ -1,9 +1,9 @@
 use crate::permission::{
     check_role_all_permissions, check_role_any_permission, check_role_permission,
     evaluate_user_permission, get_effective_user_permissions, grant_role_permission,
-    list_role_permissions, list_user_permission_overrides, remove_user_permission_override,
-    revoke_role_permission, set_user_permission_override, validate_scope, Permission,
-    PermissionError, Role,
+    list_role_permissions, list_user_permission_overrides, reconcile_role_permissions,
+    remove_user_permission_override, revoke_role_permission, set_user_permission_override,
+    validate_role_catalog_integrity, validate_scope, Permission, PermissionError, Role,
 };
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
@@ -36,6 +36,7 @@ fn permission_catalog_exact_matching_and_fail_closed() {
         let perm = Permission::parse(code).unwrap_or_else(|| panic!("failed to parse {code}"));
         assert_eq!(perm.as_str(), code);
         assert_eq!(perm.to_string(), code);
+        assert!(!perm.description().is_empty());
     }
 
     // Fail-closed verification: case, whitespace, prefixes, and unknown strings
@@ -338,6 +339,60 @@ fn list_role_permissions_queries_database_mappings() {
     assert!(cashier_perms.contains(&Permission::SalesCreate));
     assert!(cashier_perms.contains(&Permission::CashOpen));
     assert!(!cashier_perms.contains(&Permission::SalesVoid));
+}
+
+#[test]
+fn catalog_integrity_and_reconciliation_verifies_seed_and_detects_mismatches() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+
+    // 1. Seeded database matches the compiled catalog with 0 mismatches
+    let mismatches = validate_role_catalog_integrity(&conn).expect("validate integrity");
+    assert!(
+        mismatches.is_empty(),
+        "Seeded database must have 0 catalog mismatches"
+    );
+
+    // 2. Simulate missing expected permission for Admin in DB
+    revoke_role_permission(&conn, Role::Admin, Permission::LicenseManage)
+        .expect("simulate missing permission");
+
+    let detected = validate_role_catalog_integrity(&conn).expect("validate after mismatch");
+    assert_eq!(detected.len(), 1);
+    assert_eq!(detected[0].role, Role::Admin);
+    assert_eq!(detected[0].missing_permission, Permission::LicenseManage);
+
+    // 3. Authorization check stays DENIED on the missing row (no silent auto-granting)
+    let admin = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Integrity Admin",
+        Some("integrity_admin"),
+        None,
+        None,
+        "admin",
+    )
+    .expect("create admin");
+
+    assert!(
+        !evaluate_user_permission(&conn, &admin.id, &admin.role, Permission::LicenseManage)
+            .expect("eval missing permission")
+    );
+
+    // 4. Safe explicit reconciliation resolves the mismatch and restores catalog defaults
+    let reconciled = reconcile_role_permissions(&conn).expect("reconcile");
+    assert!(reconciled >= 1, "Must reconcile at least the missing row");
+
+    let clean = validate_role_catalog_integrity(&conn).expect("validate after reconcile");
+    assert!(
+        clean.is_empty(),
+        "After reconciliation, catalog mismatches must be zero"
+    );
+
+    assert!(
+        evaluate_user_permission(&conn, &admin.id, &admin.role, Permission::LicenseManage)
+            .expect("eval after reconcile")
+    );
 }
 
 #[test]
