@@ -383,6 +383,13 @@ fn catalog_integrity_and_reconciliation_verifies_seed_and_detects_mismatches() {
     let reconciled = reconcile_role_permissions(&conn).expect("reconcile");
     assert!(reconciled >= 1, "Must reconcile at least the missing row");
 
+    // 5. Idempotent check: second reconciliation inserts 0 rows
+    let second_run = reconcile_role_permissions(&conn).expect("second reconcile");
+    assert_eq!(
+        second_run, 0,
+        "Reconciliation must be idempotent when already consistent"
+    );
+
     let clean = validate_role_catalog_integrity(&conn).expect("validate after reconcile");
     assert!(
         clean.is_empty(),

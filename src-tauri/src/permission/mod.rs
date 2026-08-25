@@ -5,6 +5,70 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+/// Static authoritative permission catalog data matching migration 004 seed data.
+const PERMISSION_CATALOG: &[(Permission, &str, &str)] = &[
+    (Permission::SalesCreate, "sales.create", "Create sales"),
+    (Permission::SalesRefund, "sales.refund", "Refund sales"),
+    (Permission::SalesVoid, "sales.void", "Void sales"),
+    (
+        Permission::InventoryAdjust,
+        "inventory.adjust",
+        "Adjust inventory",
+    ),
+    (
+        Permission::InventoryTransfer,
+        "inventory.transfer",
+        "Transfer inventory",
+    ),
+    (
+        Permission::ProductsManage,
+        "products.manage",
+        "Manage products",
+    ),
+    (
+        Permission::PurchasesManage,
+        "purchases.manage",
+        "Manage purchases",
+    ),
+    (
+        Permission::CustomersManage,
+        "customers.manage",
+        "Manage customers",
+    ),
+    (
+        Permission::DebtsManage,
+        "debts.manage",
+        "Manage customer debts",
+    ),
+    (Permission::CashOpen, "cash.open", "Open cash shift"),
+    (Permission::CashClose, "cash.close", "Close cash shift"),
+    (Permission::CashAdjust, "cash.adjust", "Adjust cash"),
+    (Permission::ReportsView, "reports.view", "View reports"),
+    (
+        Permission::ReportsExport,
+        "reports.export",
+        "Export reports",
+    ),
+    (Permission::UsersManage, "users.manage", "Manage users"),
+    (
+        Permission::SettingsManage,
+        "settings.manage",
+        "Manage settings",
+    ),
+    (
+        Permission::LicenseManage,
+        "license.manage",
+        "Manage license",
+    ),
+];
+
+/// Static role definitions.
+const ROLE_CATALOG: &[(Role, &str)] = &[
+    (Role::Admin, "admin"),
+    (Role::Manager, "manager"),
+    (Role::Cashier, "cashier"),
+];
+
 /// Machine-readable authoritative permission catalog matching migration 004 seed data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Permission {
@@ -68,73 +132,29 @@ impl Permission {
 
     /// Returns the exact string identifier for this permission.
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Permission::SalesCreate => "sales.create",
-            Permission::SalesRefund => "sales.refund",
-            Permission::SalesVoid => "sales.void",
-            Permission::InventoryAdjust => "inventory.adjust",
-            Permission::InventoryTransfer => "inventory.transfer",
-            Permission::ProductsManage => "products.manage",
-            Permission::PurchasesManage => "purchases.manage",
-            Permission::CustomersManage => "customers.manage",
-            Permission::DebtsManage => "debts.manage",
-            Permission::CashOpen => "cash.open",
-            Permission::CashClose => "cash.close",
-            Permission::CashAdjust => "cash.adjust",
-            Permission::ReportsView => "reports.view",
-            Permission::ReportsExport => "reports.export",
-            Permission::UsersManage => "users.manage",
-            Permission::SettingsManage => "settings.manage",
-            Permission::LicenseManage => "license.manage",
-        }
+        PERMISSION_CATALOG
+            .iter()
+            .find(|(p, _, _)| p == self)
+            .map(|(_, code, _)| *code)
+            .unwrap_or("")
     }
 
     /// Returns the canonical human-readable description matching migration 004.
     pub fn description(&self) -> &'static str {
-        match self {
-            Permission::SalesCreate => "Create sales",
-            Permission::SalesRefund => "Refund sales",
-            Permission::SalesVoid => "Void sales",
-            Permission::InventoryAdjust => "Adjust inventory",
-            Permission::InventoryTransfer => "Transfer inventory",
-            Permission::ProductsManage => "Manage products",
-            Permission::PurchasesManage => "Manage purchases",
-            Permission::CustomersManage => "Manage customers",
-            Permission::DebtsManage => "Manage customer debts",
-            Permission::CashOpen => "Open cash shift",
-            Permission::CashClose => "Close cash shift",
-            Permission::CashAdjust => "Adjust cash",
-            Permission::ReportsView => "View reports",
-            Permission::ReportsExport => "Export reports",
-            Permission::UsersManage => "Manage users",
-            Permission::SettingsManage => "Manage settings",
-            Permission::LicenseManage => "Manage license",
-        }
+        PERMISSION_CATALOG
+            .iter()
+            .find(|(p, _, _)| p == self)
+            .map(|(_, _, desc)| *desc)
+            .unwrap_or("")
     }
 
     /// Parses an exact permission string into a typed Permission enum.
     /// Strict exact matching: fails closed on unknown values, casing, or whitespace.
     pub fn parse(s: &str) -> Option<Permission> {
-        match s {
-            "sales.create" => Some(Permission::SalesCreate),
-            "sales.refund" => Some(Permission::SalesRefund),
-            "sales.void" => Some(Permission::SalesVoid),
-            "inventory.adjust" => Some(Permission::InventoryAdjust),
-            "inventory.transfer" => Some(Permission::InventoryTransfer),
-            "products.manage" => Some(Permission::ProductsManage),
-            "purchases.manage" => Some(Permission::PurchasesManage),
-            "customers.manage" => Some(Permission::CustomersManage),
-            "debts.manage" => Some(Permission::DebtsManage),
-            "cash.open" => Some(Permission::CashOpen),
-            "cash.close" => Some(Permission::CashClose),
-            "cash.adjust" => Some(Permission::CashAdjust),
-            "reports.view" => Some(Permission::ReportsView),
-            "reports.export" => Some(Permission::ReportsExport),
-            "users.manage" => Some(Permission::UsersManage),
-            "settings.manage" => Some(Permission::SettingsManage),
-            "license.manage" => Some(Permission::LicenseManage),
-            _ => None,
-        }
+        PERMISSION_CATALOG
+            .iter()
+            .find(|(_, code, _)| *code == s)
+            .map(|(p, _, _)| *p)
     }
 }
 
@@ -162,22 +182,20 @@ impl Role {
 
     /// Returns the exact string identifier for this role.
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Role::Admin => "admin",
-            Role::Manager => "manager",
-            Role::Cashier => "cashier",
-        }
+        ROLE_CATALOG
+            .iter()
+            .find(|(r, _)| r == self)
+            .map(|(_, code)| *code)
+            .unwrap_or("")
     }
 
     /// Parses an exact role string into a typed Role enum.
     /// Strict exact matching: fails closed on unknown values, casing, or whitespace.
     pub fn parse(s: &str) -> Option<Role> {
-        match s {
-            "admin" => Some(Role::Admin),
-            "manager" => Some(Role::Manager),
-            "cashier" => Some(Role::Cashier),
-            _ => None,
-        }
+        ROLE_CATALOG
+            .iter()
+            .find(|(_, code)| *code == s)
+            .map(|(r, _)| *r)
     }
 
     /// Returns default built-in permission set matching migration 004 seed rules.
@@ -277,6 +295,43 @@ impl std::fmt::Display for PermissionError {
 }
 
 impl std::error::Error for PermissionError {}
+
+// Helper database functions to eliminate duplication across repository operations.
+
+fn get_permission_id(conn: &Connection, permission: Permission) -> Result<String, PermissionError> {
+    conn.query_row(
+        "SELECT id FROM permissions WHERE code = ?1",
+        params![permission.as_str()],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| PermissionError::Database(e.to_string()))?
+    .ok_or_else(|| PermissionError::InvalidPermission(permission.to_string()))
+}
+
+fn get_optional_permission_id(
+    conn: &Connection,
+    permission: Permission,
+) -> Result<Option<String>, PermissionError> {
+    conn.query_row(
+        "SELECT id FROM permissions WHERE code = ?1",
+        params![permission.as_str()],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| PermissionError::Database(e.to_string()))
+}
+
+fn is_role_mapped_in_db(conn: &Connection, role: &str) -> Result<bool, PermissionError> {
+    conn.query_row(
+        "SELECT 1 FROM role_permissions WHERE role = ?1 LIMIT 1",
+        params![role],
+        |_| Ok(true),
+    )
+    .optional()
+    .map_err(|e| PermissionError::Database(e.to_string()))
+    .map(|opt| opt.unwrap_or(false))
+}
 
 /// In-memory fast role permission check with deny-by-default semantics.
 /// Fails closed on unknown roles or invalid permissions.
@@ -397,17 +452,7 @@ pub fn evaluate_user_permission(
     }
 
     // 2. Check if this role has ANY rows configured in `role_permissions`
-    let role_mapped_in_db: bool = conn
-        .query_row(
-            "SELECT 1 FROM role_permissions WHERE role = ?1 LIMIT 1",
-            params![role_str],
-            |_| Ok(true),
-        )
-        .optional()
-        .map_err(|e| PermissionError::Database(e.to_string()))?
-        .unwrap_or(false);
-
-    if role_mapped_in_db {
+    if is_role_mapped_in_db(conn, role_str)? {
         // DB mapping is authoritative for this role: missing row means strictly DENIED!
         let has_perm: bool = conn
             .query_row(
@@ -454,15 +499,7 @@ pub fn grant_role_permission(
     role: Role,
     permission: Permission,
 ) -> Result<(), PermissionError> {
-    let permission_id: String = conn
-        .query_row(
-            "SELECT id FROM permissions WHERE code = ?1",
-            params![permission.as_str()],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| PermissionError::Database(e.to_string()))?
-        .ok_or_else(|| PermissionError::InvalidPermission(permission.to_string()))?;
+    let permission_id = get_permission_id(conn, permission)?;
 
     conn.execute(
         "INSERT OR IGNORE INTO role_permissions (role, permission_id) VALUES (?1, ?2)",
@@ -480,16 +517,7 @@ pub fn revoke_role_permission(
     role: Role,
     permission: Permission,
 ) -> Result<(), PermissionError> {
-    let permission_id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM permissions WHERE code = ?1",
-            params![permission.as_str()],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| PermissionError::Database(e.to_string()))?;
-
-    if let Some(pid) = permission_id {
+    if let Some(pid) = get_optional_permission_id(conn, permission)? {
         conn.execute(
             "DELETE FROM role_permissions WHERE role = ?1 AND permission_id = ?2",
             params![role.as_str(), pid],
@@ -539,17 +567,7 @@ pub fn validate_role_catalog_integrity(
     let mut mismatches = Vec::new();
 
     for role in Role::ALL {
-        let role_has_db_rows: bool = conn
-            .query_row(
-                "SELECT 1 FROM role_permissions WHERE role = ?1 LIMIT 1",
-                params![role.as_str()],
-                |_| Ok(true),
-            )
-            .optional()
-            .map_err(|e| PermissionError::Database(e.to_string()))?
-            .unwrap_or(false);
-
-        if role_has_db_rows {
+        if is_role_mapped_in_db(conn, role.as_str())? {
             let active_perms: HashSet<String> = list_role_permissions(conn, *role)?
                 .into_iter()
                 .map(|p| p.as_str().to_string())
@@ -602,13 +620,7 @@ pub fn reconcile_role_permissions(conn: &Connection) -> Result<usize, Permission
     // 2. Ensure built-in roles have their catalog default permissions mapped
     for role in Role::ALL {
         for perm in role.default_permissions() {
-            let perm_id: String = conn
-                .query_row(
-                    "SELECT id FROM permissions WHERE code = ?1",
-                    params![perm.as_str()],
-                    |row| row.get(0),
-                )
-                .map_err(|e| PermissionError::Database(e.to_string()))?;
+            let perm_id = get_permission_id(conn, *perm)?;
 
             let rows = conn
                 .execute(
@@ -645,15 +657,7 @@ pub fn set_user_permission_override(
         }
     };
 
-    let permission_id: String = conn
-        .query_row(
-            "SELECT id FROM permissions WHERE code = ?1",
-            params![permission.as_str()],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| PermissionError::Database(e.to_string()))?
-        .ok_or_else(|| PermissionError::InvalidPermission(permission.to_string()))?;
+    let permission_id = get_permission_id(conn, permission)?;
 
     conn.execute(
         "INSERT INTO user_permissions (user_id, permission_id, effect) \
@@ -673,16 +677,7 @@ pub fn remove_user_permission_override(
     user_id: &str,
     permission: Permission,
 ) -> Result<(), PermissionError> {
-    let permission_id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM permissions WHERE code = ?1",
-            params![permission.as_str()],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| PermissionError::Database(e.to_string()))?;
-
-    if let Some(pid) = permission_id {
+    if let Some(pid) = get_optional_permission_id(conn, permission)? {
         conn.execute(
             "DELETE FROM user_permissions WHERE user_id = ?1 AND permission_id = ?2",
             params![user_id, pid],
