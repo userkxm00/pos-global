@@ -1,5 +1,5 @@
 // Online identity and Supabase Auth contracts.
-// F1.04 — Supabase Auth adapter
+// F1.04 — Supabase Auth adapter & F1.13 — Authentication screens and session lifecycle
 
 export interface SupabaseAuthConfig {
   url: string
@@ -26,3 +26,11 @@ export interface SignInInput {
   email: string
   password: string
 }
+
+export interface LocalSignInInput {
+  username: string
+  password: string
+}
+
+export type AuthMode = 'online' | 'local'
+export type AuthStatus = 'unauthenticated' | 'authenticating' | 'authenticated' | 'expired'
