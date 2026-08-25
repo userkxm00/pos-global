@@ -5,68 +5,124 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// Static authoritative permission catalog data matching migration 004 seed data.
-const PERMISSION_CATALOG: &[(Permission, &str, &str)] = &[
-    (Permission::SalesCreate, "sales.create", "Create sales"),
-    (Permission::SalesRefund, "sales.refund", "Refund sales"),
-    (Permission::SalesVoid, "sales.void", "Void sales"),
-    (
-        Permission::InventoryAdjust,
-        "inventory.adjust",
-        "Adjust inventory",
-    ),
-    (
-        Permission::InventoryTransfer,
-        "inventory.transfer",
-        "Transfer inventory",
-    ),
-    (
-        Permission::ProductsManage,
-        "products.manage",
-        "Manage products",
-    ),
-    (
-        Permission::PurchasesManage,
-        "purchases.manage",
-        "Manage purchases",
-    ),
-    (
-        Permission::CustomersManage,
-        "customers.manage",
-        "Manage customers",
-    ),
-    (
-        Permission::DebtsManage,
-        "debts.manage",
-        "Manage customer debts",
-    ),
-    (Permission::CashOpen, "cash.open", "Open cash shift"),
-    (Permission::CashClose, "cash.close", "Close cash shift"),
-    (Permission::CashAdjust, "cash.adjust", "Adjust cash"),
-    (Permission::ReportsView, "reports.view", "View reports"),
-    (
-        Permission::ReportsExport,
-        "reports.export",
-        "Export reports",
-    ),
-    (Permission::UsersManage, "users.manage", "Manage users"),
-    (
-        Permission::SettingsManage,
-        "settings.manage",
-        "Manage settings",
-    ),
-    (
-        Permission::LicenseManage,
-        "license.manage",
-        "Manage license",
-    ),
+/// Authoritative permission entry in the central system catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PermissionCatalogEntry {
+    pub permission: Permission,
+    pub code: &'static str,
+    pub description: &'static str,
+}
+
+/// Authoritative role entry in the central system catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoleCatalogEntry {
+    pub role: Role,
+    pub code: &'static str,
+}
+
+/// Static authoritative permission catalog matching migration 004 seed data.
+pub const PERMISSION_CATALOG: &[PermissionCatalogEntry] = &[
+    PermissionCatalogEntry {
+        permission: Permission::SalesCreate,
+        code: "sales.create",
+        description: "Create sales",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::SalesRefund,
+        code: "sales.refund",
+        description: "Refund sales",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::SalesVoid,
+        code: "sales.void",
+        description: "Void sales",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::InventoryAdjust,
+        code: "inventory.adjust",
+        description: "Adjust inventory",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::InventoryTransfer,
+        code: "inventory.transfer",
+        description: "Transfer inventory",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::ProductsManage,
+        code: "products.manage",
+        description: "Manage products",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::PurchasesManage,
+        code: "purchases.manage",
+        description: "Manage purchases",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::CustomersManage,
+        code: "customers.manage",
+        description: "Manage customers",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::DebtsManage,
+        code: "debts.manage",
+        description: "Manage customer debts",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::CashOpen,
+        code: "cash.open",
+        description: "Open cash shift",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::CashClose,
+        code: "cash.close",
+        description: "Close cash shift",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::CashAdjust,
+        code: "cash.adjust",
+        description: "Adjust cash",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::ReportsView,
+        code: "reports.view",
+        description: "View reports",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::ReportsExport,
+        code: "reports.export",
+        description: "Export reports",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::UsersManage,
+        code: "users.manage",
+        description: "Manage users",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::SettingsManage,
+        code: "settings.manage",
+        description: "Manage settings",
+    },
+    PermissionCatalogEntry {
+        permission: Permission::LicenseManage,
+        code: "license.manage",
+        description: "Manage license",
+    },
 ];
 
 /// Static role definitions.
-const ROLE_CATALOG: &[(Role, &str)] = &[
-    (Role::Admin, "admin"),
-    (Role::Manager, "manager"),
-    (Role::Cashier, "cashier"),
+pub const ROLE_CATALOG: &[RoleCatalogEntry] = &[
+    RoleCatalogEntry {
+        role: Role::Admin,
+        code: "admin",
+    },
+    RoleCatalogEntry {
+        role: Role::Manager,
+        code: "manager",
+    },
+    RoleCatalogEntry {
+        role: Role::Cashier,
+        code: "cashier",
+    },
 ];
 
 /// Machine-readable authoritative permission catalog matching migration 004 seed data.
@@ -110,7 +166,7 @@ pub enum Permission {
 
 impl Permission {
     /// Complete authoritative list of all system permissions.
-    pub const ALL: &'static [Permission] = &[
+    pub const ALL: &[Permission] = &[
         Permission::SalesCreate,
         Permission::SalesRefund,
         Permission::SalesVoid,
@@ -134,8 +190,8 @@ impl Permission {
     pub fn as_str(&self) -> &'static str {
         PERMISSION_CATALOG
             .iter()
-            .find(|(p, _, _)| p == self)
-            .map(|(_, code, _)| *code)
+            .find(|entry| entry.permission == *self)
+            .map(|entry| entry.code)
             .unwrap_or("")
     }
 
@@ -143,8 +199,8 @@ impl Permission {
     pub fn description(&self) -> &'static str {
         PERMISSION_CATALOG
             .iter()
-            .find(|(p, _, _)| p == self)
-            .map(|(_, _, desc)| *desc)
+            .find(|entry| entry.permission == *self)
+            .map(|entry| entry.description)
             .unwrap_or("")
     }
 
@@ -153,8 +209,8 @@ impl Permission {
     pub fn parse(s: &str) -> Option<Permission> {
         PERMISSION_CATALOG
             .iter()
-            .find(|(_, code, _)| *code == s)
-            .map(|(p, _, _)| *p)
+            .find(|entry| entry.code == s)
+            .map(|entry| entry.permission)
     }
 }
 
@@ -178,14 +234,14 @@ pub enum Role {
 impl Role {
     /// Complete list of all supported built-in roles.
     #[allow(dead_code)]
-    pub const ALL: &'static [Role] = &[Role::Admin, Role::Manager, Role::Cashier];
+    pub const ALL: &[Role] = &[Role::Admin, Role::Manager, Role::Cashier];
 
     /// Returns the exact string identifier for this role.
     pub fn as_str(&self) -> &'static str {
         ROLE_CATALOG
             .iter()
-            .find(|(r, _)| r == self)
-            .map(|(_, code)| *code)
+            .find(|entry| entry.role == *self)
+            .map(|entry| entry.code)
             .unwrap_or("")
     }
 
@@ -194,8 +250,8 @@ impl Role {
     pub fn parse(s: &str) -> Option<Role> {
         ROLE_CATALOG
             .iter()
-            .find(|(_, code)| *code == s)
-            .map(|(r, _)| *r)
+            .find(|entry| entry.code == s)
+            .map(|entry| entry.role)
     }
 
     /// Returns default built-in permission set matching migration 004 seed rules.

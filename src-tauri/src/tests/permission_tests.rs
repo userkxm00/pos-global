@@ -4,10 +4,116 @@ use crate::permission::{
     list_role_permissions, list_user_permission_overrides, reconcile_role_permissions,
     remove_user_permission_override, revoke_role_permission, set_user_permission_override,
     validate_role_catalog_integrity, validate_scope, Permission, PermissionError, Role,
+    PERMISSION_CATALOG, ROLE_CATALOG,
 };
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
 };
+use std::collections::HashSet;
+
+#[test]
+fn permission_catalog_is_exhaustive_and_bijection() {
+    assert_eq!(
+        PERMISSION_CATALOG.len(),
+        Permission::ALL.len(),
+        "Catalog length must match Permission::ALL"
+    );
+
+    let mut catalog_permissions = HashSet::new();
+    let mut catalog_codes = HashSet::new();
+
+    for entry in PERMISSION_CATALOG {
+        assert!(
+            catalog_permissions.insert(entry.permission),
+            "Duplicate permission enum in catalog: {:?}",
+            entry.permission
+        );
+        assert!(
+            catalog_codes.insert(entry.code),
+            "Duplicate code in catalog: {}",
+            entry.code
+        );
+        assert!(!entry.code.is_empty(), "Code must not be empty");
+        assert!(
+            !entry.description.is_empty(),
+            "Description must not be empty"
+        );
+    }
+
+    for permission in Permission::ALL {
+        assert!(
+            catalog_permissions.contains(permission),
+            "Permission {:?} missing from PERMISSION_CATALOG",
+            permission
+        );
+        assert!(
+            !permission.as_str().is_empty(),
+            "as_str() must not be empty for {:?}",
+            permission
+        );
+        assert!(
+            !permission.description().is_empty(),
+            "description() must not be empty for {:?}",
+            permission
+        );
+        assert_eq!(
+            Permission::parse(permission.as_str()),
+            Some(*permission),
+            "Parsing roundtrip must succeed for {:?}",
+            permission
+        );
+    }
+}
+
+#[test]
+fn role_catalog_is_exhaustive_and_bijection() {
+    assert_eq!(
+        ROLE_CATALOG.len(),
+        Role::ALL.len(),
+        "Role catalog length must match Role::ALL"
+    );
+
+    let mut catalog_roles = HashSet::new();
+    let mut catalog_codes = HashSet::new();
+
+    for entry in ROLE_CATALOG {
+        assert!(
+            catalog_roles.insert(entry.role),
+            "Duplicate role enum in catalog: {:?}",
+            entry.role
+        );
+        assert!(
+            catalog_codes.insert(entry.code),
+            "Duplicate code in role catalog: {}",
+            entry.code
+        );
+        assert!(!entry.code.is_empty(), "Role code must not be empty");
+    }
+
+    for role in Role::ALL {
+        assert!(
+            catalog_roles.contains(role),
+            "Role {:?} missing from ROLE_CATALOG",
+            role
+        );
+        assert!(
+            !role.as_str().is_empty(),
+            "as_str() must not be empty for {:?}",
+            role
+        );
+        assert!(
+            !role.default_permissions().is_empty(),
+            "default_permissions() must not be empty for {:?}",
+            role
+        );
+        assert_eq!(
+            Role::parse(role.as_str()),
+            Some(*role),
+            "Parsing roundtrip must succeed for {:?}",
+            role
+        );
+    }
+}
 
 #[test]
 fn permission_catalog_exact_matching_and_fail_closed() {
