@@ -4,7 +4,7 @@ use crate::user::session::{
     create_local_session, get_active_session, revoke_local_session, validate_local_session,
     SessionValidationError,
 };
-use crate::user::{update_user, UpdateUserInput, UserError};
+use crate::user::{update_user, UpdateUserInput};
 
 #[test]
 fn session_lifecycle_create_validate_and_revoke() {

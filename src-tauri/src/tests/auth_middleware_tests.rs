@@ -440,13 +440,18 @@ fn full_end_to_end_authorization_pipeline_integration() {
         .expect("create session");
 
     // Declarative builder authorization request
-    let auth_result = AuthorizeRequest::new(&session.id)
+    let req = AuthorizeRequest::new(&session.id)
         .with_permission(Permission::ProductsManage)
         .with_all_permissions(&[Permission::InventoryAdjust, Permission::ReportsView])
         .with_organization_scope(&org_id)
-        .with_branch_scope(&branch_id)
-        .execute(&conn);
+        .with_branch_scope(&branch_id);
 
+    // 1. Direct function call
+    let direct_ctx = authorize(&conn, &req).expect("direct authorize");
+    assert_eq!(direct_ctx.user_id, manager.id);
+
+    // 2. Builder execute call
+    let auth_result = req.execute(&conn);
     assert!(auth_result.is_ok());
     let ctx = auth_result.unwrap();
     assert_eq!(ctx.user_id, manager.id);

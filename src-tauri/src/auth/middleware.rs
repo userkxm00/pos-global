@@ -165,6 +165,7 @@ impl<'a> AuthorizeRequest<'a> {
     }
 
     /// Executes the full authorization check pipeline against SQLite database state.
+    #[allow(dead_code)]
     pub fn execute(&self, conn: &Connection) -> Result<SessionContext, AuthMiddlewareError> {
         authorize(conn, self)
     }
@@ -175,6 +176,7 @@ impl<'a> AuthorizeRequest<'a> {
 /// 1. Active, unexpired, unrevoked local session with active user and branch.
 /// 2. Organization and branch tenancy scope boundaries (even admin cannot bypass).
 /// 3. Single and multi-permission checks with exact matching and explicit user deny precedence.
+#[allow(dead_code)]
 pub fn authorize(
     conn: &Connection,
     req: &AuthorizeRequest<'_>,
