@@ -168,7 +168,7 @@ BEGIN
         VALUES ('a9a9a9a9-a9a9-a9a9-a9a9-a9a9a9a9a9a9', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Unauthorized Branch', 'USD');
     EXCEPTION WHEN OTHERS THEN
         blocked := true;
-    END IF;
+    END;
 
     -- If no exception was raised by RLS check, verify row was not inserted
     IF NOT blocked THEN
