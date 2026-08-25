@@ -1,5 +1,7 @@
 // Supabase Auth adapter for online account identity.
-// F1.04 — Supabase Auth adapter
+// F1.04 — Supabase Auth adapter & F1.07 — Rust authorization middleware
+
+pub mod middleware;
 
 use serde::{Deserialize, Serialize};
 
