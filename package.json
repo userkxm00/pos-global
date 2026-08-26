@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "node -e \"const fs=require('fs'); if(!fs.existsSync('coverage')) fs.mkdirSync('coverage');\" && node --experimental-strip-types --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info src/tests/shell.test.ts src/tests/onboarding.test.ts src/tests/auth.test.ts src/tests/lock.test.ts src/tests/contextSwitcher.test.ts src/tests/rolesPermissions.test.ts",
+    "test": "node -e \"const fs=require('fs'); if(!fs.existsSync('coverage')) fs.mkdirSync('coverage');\" && node --experimental-strip-types --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info src/tests/shell.test.ts src/tests/onboarding.test.ts src/tests/auth.test.ts src/tests/lock.test.ts src/tests/contextSwitcher.test.ts src/tests/rolesPermissions.test.ts src/tests/syncIndicator.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },
