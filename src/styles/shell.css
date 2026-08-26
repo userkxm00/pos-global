@@ -607,3 +607,180 @@
   font-weight: var(--font-weight-bold);
   box-shadow: var(--shadow-xs);
 }
+
+/* Context Switcher Trigger Button */
+.tenant-badge--interactive {
+  cursor: pointer;
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-bg-surface-sunken);
+  transition: all var(--transition-fast);
+}
+
+.tenant-badge--interactive:hover {
+  background-color: var(--color-bg-surface-hover);
+  border-color: var(--color-border-strong);
+}
+
+.tenant-badge--interactive:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tenant-badge__register {
+  color: var(--color-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.tenant-badge__icon {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+/* Context Switcher Modal & Backdrop */
+.context-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal, 1000);
+  padding: var(--space-4);
+  animation: modal-fade-in 0.15s ease-out;
+}
+
+.context-modal {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 2 * var(--space-4));
+  overflow-y: auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  animation: modal-scale-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-scale-in {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.context-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.context-modal__title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.context-modal__subtitle {
+  margin: var(--space-1) 0 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.context-modal__close-btn {
+  background: transparent;
+  border: none;
+  font-size: var(--font-size-lg);
+  line-height: 1;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.context-modal__close-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.context-modal__close-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.context-modal__error {
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-danger-bg, #fef2f2);
+  border: 1px solid var(--color-danger-border, #fecaca);
+  border-radius: var(--radius-md);
+  color: var(--color-danger-text, #991b1b);
+  font-size: var(--font-size-sm);
+}
+
+.context-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.context-modal__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+
+.context-modal__label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.context-modal__select {
+  width: 100%;
+  padding-block: var(--space-2-5);
+  padding-inline: var(--space-3);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-surface-sunken);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.context-modal__select:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.context-modal__select:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.context-modal__select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.context-modal__hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.context-modal__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-block-start: var(--space-2);
+}

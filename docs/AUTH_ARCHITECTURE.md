@@ -34,3 +34,6 @@ Every tenant-owned cloud table requires RLS and policies based on organization/b
 - JWT signing secrets
 - license private keys
 - updater private signing keys
+
+## Context Switcher Boundary (F1.15)
+The Organization / Branch / Register context switcher in the client shell orchestrates UI context presentation only. Active operational context is constrained strictly to existing entities returned by authoritative domain commands (`list_organizations`, `list_branches`, `list_registers`).

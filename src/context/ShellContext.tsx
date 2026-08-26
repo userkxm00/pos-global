@@ -34,6 +34,7 @@ export interface ShellContextType {
   setBranch: (branch: Branch | null) => void
   register: Register | null
   setRegister: (register: Register | null) => void
+  switchContext: (org: Organization, branch: Branch, register: Register) => void
   session: SessionContext | null
   setSession: (session: SessionContext | null) => void
   isOnline: boolean
@@ -104,6 +105,15 @@ export const ShellProvider: React.FC<ShellProviderProps> = ({
     setSidebarCollapsed((prev) => !prev)
   }, [])
 
+  const switchContext = useCallback(
+    (newOrg: Organization, newBranch: Branch, newRegister: Register) => {
+      setOrganization(newOrg)
+      setBranch(newBranch)
+      setRegister(newRegister)
+    },
+    [],
+  )
+
   const lockSession = useCallback(() => {
     setViewState('idle')
   }, [])
@@ -148,6 +158,7 @@ export const ShellProvider: React.FC<ShellProviderProps> = ({
       setBranch,
       register,
       setRegister,
+      switchContext,
       session,
       setSession,
       isOnline,
@@ -175,6 +186,7 @@ export const ShellProvider: React.FC<ShellProviderProps> = ({
       organization,
       branch,
       register,
+      switchContext,
       session,
       isOnline,
       isSyncing,
