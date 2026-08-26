@@ -250,6 +250,15 @@ dialog.sync-popover-card {
   color: var(--color-danger, #dc2626);
 }
 
+.sync-feedback-success {
+  background: rgba(22, 163, 74, 0.1);
+  border: 1px solid rgba(22, 163, 74, 0.25);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-success, #16a34a);
+}
+
 .sync-popover-actions {
   display: flex;
   gap: var(--space-2);

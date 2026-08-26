@@ -22,6 +22,11 @@ export interface SyncIndicatorProps {
   onTriggerSync?: () => Promise<boolean | void>
 }
 
+interface ActionFeedback {
+  message: string
+  type: 'success' | 'error'
+}
+
 export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
   isOnline,
   isSyncing,
@@ -35,7 +40,7 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
   const { t, i18n } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
   const [isManualSyncing, setIsManualSyncing] = useState(false)
-  const [actionFeedback, setActionFeedback] = useState<string | null>(null)
+  const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null)
 
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -66,6 +71,11 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
   const triggerTitle = pendingCount > 0 ? `${statusLabel} (${pendingCount})` : statusLabel
   const connectionBadgeClass = isOnline ? 'online' : 'offline'
 
+  const handleClose = useCallback(() => {
+    setIsOpen(false)
+    triggerRef.current?.focus()
+  }, [])
+
   // Manage native dialog visibility & events
   useEffect(() => {
     const dialogEl = dialogRef.current
@@ -86,8 +96,7 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setIsOpen(false)
-        triggerRef.current?.focus()
+        handleClose()
       }
     }
 
@@ -99,7 +108,7 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
         triggerRef.current &&
         !triggerRef.current.contains(e.target as Node)
       ) {
-        setIsOpen(false)
+        handleClose()
       }
     }
 
@@ -110,15 +119,25 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
       document.removeEventListener('keydown', handleKeyDown)
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [isOpen])
+  }, [isOpen, handleClose])
 
   const handleToggle = () => {
     setIsOpen((prev) => !prev)
   }
 
-  const handleClose = () => {
-    setIsOpen(false)
-    triggerRef.current?.focus()
+  const handleDialogClick = (e: React.MouseEvent<HTMLDialogElement>) => {
+    const dialogEl = dialogRef.current
+    if (!dialogEl) return
+    const rect = dialogEl.getBoundingClientRect()
+    const isInside = (
+      e.clientX >= rect.left &&
+      e.clientX <= rect.right &&
+      e.clientY >= rect.top &&
+      e.clientY <= rect.bottom
+    )
+    if (!isInside) {
+      handleClose()
+    }
   }
 
   const handleSyncClick = useCallback(async () => {
@@ -129,12 +148,21 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
     try {
       const result = await onTriggerSync()
       if (result === false) {
-        setActionFeedback(t('sync.syncError'))
+        setActionFeedback({
+          message: t('sync.syncError'),
+          type: 'error',
+        })
       } else {
-        setActionFeedback(t('sync.syncSuccess'))
+        setActionFeedback({
+          message: t('sync.syncSuccess'),
+          type: 'success',
+        })
       }
     } catch {
-      setActionFeedback(t('sync.syncError'))
+      setActionFeedback({
+        message: t('sync.syncError'),
+        type: 'error',
+      })
     } finally {
       setIsManualSyncing(false)
     }
@@ -183,6 +211,7 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
           aria-labelledby="sync-popover-heading"
           className="sync-popover-card"
           data-testid="sync-popover-card"
+          onClick={handleDialogClick}
           onCancel={(e) => {
             e.preventDefault()
             handleClose()
@@ -269,8 +298,16 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
 
           {/* Action Feedback Banner */}
           {actionFeedback && (
-            <div className="sync-popover-row" style={{ color: 'var(--color-success)' }}>
-              <span>{actionFeedback}</span>
+            <div
+              className={
+                actionFeedback.type === 'success'
+                  ? 'sync-feedback-success'
+                  : 'sync-popover-error'
+              }
+              role={actionFeedback.type === 'error' ? 'alert' : 'status'}
+              data-testid="sync-action-feedback"
+            >
+              <span>{actionFeedback.message}</span>
             </div>
           )}
 
