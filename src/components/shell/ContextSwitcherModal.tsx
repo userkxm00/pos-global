@@ -110,20 +110,35 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
   // Request sequencing guard to discard out-of-order race conditions
   const guardRef = useRef<CascadingSequenceGuard>(createCascadingSequenceGuard())
 
-  // Native modal dialog lifecycle and focus restoration
+  // Native modal dialog lifecycle, focus restoration, and backdrop dismissal
   useEffect(() => {
     const dialog = modalRef.current
     if (!dialog) return
+
+    const handleDialogClick = (e: MouseEvent) => {
+      if (e.target === dialog) {
+        onClose()
+      }
+    }
+
+    const handleCancel = (e: Event) => {
+      e.preventDefault()
+      onClose()
+    }
 
     if (isOpen) {
       previousActiveElement.current = document.activeElement as HTMLElement | null
       if (typeof dialog.showModal === 'function' && !dialog.open) {
         dialog.showModal()
       }
+      dialog.addEventListener('click', handleDialogClick)
+      dialog.addEventListener('cancel', handleCancel)
     }
 
     return () => {
-      if (dialog && typeof dialog.close === 'function' && dialog.open) {
+      dialog.removeEventListener('click', handleDialogClick)
+      dialog.removeEventListener('cancel', handleCancel)
+      if (typeof dialog.close === 'function' && dialog.open) {
         dialog.close()
       }
       if (previousActiveElement.current) {
@@ -131,7 +146,7 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
         previousActiveElement.current = null
       }
     }
-  }, [isOpen])
+  }, [isOpen, onClose])
 
   // Load registers for a specific branch with sequence guard
   const loadRegistersForBranch = useCallback(
@@ -344,15 +359,6 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
         className="context-modal"
         aria-modal="true"
         aria-labelledby="context-switcher-title"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) {
-            onClose()
-          }
-        }}
-        onCancel={(e) => {
-          e.preventDefault()
-          onClose()
-        }}
         data-testid="context-switcher-modal"
       >
         <header className="context-modal__header">
