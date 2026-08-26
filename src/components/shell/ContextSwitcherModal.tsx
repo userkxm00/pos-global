@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShell } from '../../context/ShellContext'
 import { getContextApi } from '../../services/contextApi'
+import type { ContextApiClient } from '../../services/contextApi'
 import {
   validateContextHierarchy,
   resolveBranchOnOrgChange,
@@ -17,6 +18,67 @@ import type { Register } from '../../types/register'
 export interface ContextSwitcherModalProps {
   isOpen: boolean
   onClose: () => void
+}
+
+interface InitialContextResult {
+  orgs: Organization[]
+  selectedOrgId: string
+  branches: Branch[]
+  selectedBranchId: string
+  registers: Register[]
+  selectedRegisterId: string
+}
+
+async function fetchInitialOrgContext(
+  api: ContextApiClient,
+  currentOrg: Organization | null,
+  currentBranch: Branch | null,
+  currentRegister: Register | null,
+): Promise<InitialContextResult> {
+  const fetchedOrgs = await api.listOrganizations()
+  const activeOrgId = currentOrg?.id || (fetchedOrgs[0]?.id ?? '')
+  if (!activeOrgId) {
+    return {
+      orgs: fetchedOrgs,
+      selectedOrgId: '',
+      branches: [],
+      selectedBranchId: '',
+      registers: [],
+      selectedRegisterId: '',
+    }
+  }
+
+  const fetchedBranches = await api.listBranches(activeOrgId)
+  const initialBranch = resolveBranchOnOrgChange(activeOrgId, currentBranch, fetchedBranches)
+  const activeBranchId = initialBranch?.id || (fetchedBranches[0]?.id ?? '')
+  if (!activeBranchId) {
+    return {
+      orgs: fetchedOrgs,
+      selectedOrgId: activeOrgId,
+      branches: fetchedBranches,
+      selectedBranchId: '',
+      registers: [],
+      selectedRegisterId: '',
+    }
+  }
+
+  const fetchedRegisters = await api.listRegisters(activeBranchId)
+  const initialReg = resolveRegisterOnBranchChange(
+    activeOrgId,
+    activeBranchId,
+    currentRegister,
+    fetchedRegisters,
+  )
+  const activeRegId = initialReg?.id || (fetchedRegisters[0]?.id ?? '')
+
+  return {
+    orgs: fetchedOrgs,
+    selectedOrgId: activeOrgId,
+    branches: fetchedBranches,
+    selectedBranchId: activeBranchId,
+    registers: fetchedRegisters,
+    selectedRegisterId: activeRegId,
+  }
 }
 
 export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOpen, onClose }) => {
@@ -54,7 +116,7 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
     }
   }, [isOpen])
 
-  // Handle Escape key to close
+  // Handle Escape key and outside click to close
   useEffect(() => {
     if (!isOpen) return
 
@@ -65,9 +127,18 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
       }
     }
 
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+
     window.addEventListener('keydown', handleKeyDown)
+    document.addEventListener('mousedown', handleOutsideClick)
+
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('mousedown', handleOutsideClick)
     }
   }, [isOpen, onClose])
 
@@ -176,44 +247,26 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
 
     let isMounted = true
     setIsLoadingOrgs(true)
+    setIsLoadingBranches(true)
+    setIsLoadingRegisters(true)
     setErrorMessage(null)
 
     async function loadInitial() {
       try {
-        const api = getContextApi()
-        const fetchedOrgs = await api.listOrganizations()
-        if (!isMounted) return
-        setOrgs(fetchedOrgs)
-
-        const initialOrgId = organization?.id || (fetchedOrgs.length > 0 ? fetchedOrgs[0].id : '')
-        if (!initialOrgId) return
-
-        setSelectedOrgId(initialOrgId)
-        setIsLoadingBranches(true)
-
-        const fetchedBranches = await api.listBranches(initialOrgId)
-        if (!isMounted) return
-        setBranches(fetchedBranches)
-
-        const initialBranch = resolveBranchOnOrgChange(initialOrgId, branch, fetchedBranches)
-        const activeBranchId = initialBranch?.id || (fetchedBranches.length > 0 ? fetchedBranches[0].id : '')
-
-        if (!activeBranchId) return
-        setSelectedBranchId(activeBranchId)
-        setIsLoadingRegisters(true)
-
-        const fetchedRegisters = await api.listRegisters(activeBranchId)
-        if (!isMounted) return
-        setRegisters(fetchedRegisters)
-
-        const initialReg = resolveRegisterOnBranchChange(
-          initialOrgId,
-          activeBranchId,
+        const result = await fetchInitialOrgContext(
+          getContextApi(),
+          organization,
+          branch,
           register,
-          fetchedRegisters,
         )
-        const activeRegId = initialReg?.id || (fetchedRegisters.length > 0 ? fetchedRegisters[0].id : '')
-        setSelectedRegisterId(activeRegId)
+        if (!isMounted) return
+
+        setOrgs(result.orgs)
+        setSelectedOrgId(result.selectedOrgId)
+        setBranches(result.branches)
+        setSelectedBranchId(result.selectedBranchId)
+        setRegisters(result.registers)
+        setSelectedRegisterId(result.selectedRegisterId)
       } catch (err) {
         if (isMounted) {
           setErrorMessage(
@@ -289,13 +342,7 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
   )
 
   return (
-    <div
-      className="context-modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-      data-testid="context-switcher-backdrop"
-    >
+    <div className="context-modal-backdrop" data-testid="context-switcher-backdrop">
       <dialog
         ref={modalRef}
         className="context-modal"
