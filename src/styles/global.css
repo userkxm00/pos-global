@@ -1,5 +1,6 @@
 @import './tokens.css';
 @import './shell.css';
+@import './admin.css';
 
 * {
   box-sizing: border-box;

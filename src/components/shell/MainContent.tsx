@@ -6,6 +6,7 @@ import { LoadingSkeleton } from '../common/LoadingSkeleton'
 import { EmptyState } from '../common/EmptyState'
 import { ErrorState } from '../common/ErrorState'
 import { PermissionDeniedState } from '../common/PermissionDeniedState'
+import { RolesPermissionsAdmin } from '../admin/RolesPermissionsAdmin'
 
 export const MainContent: React.FC = () => {
   const { t } = useTranslation()
@@ -79,32 +80,38 @@ export const MainContent: React.FC = () => {
           />
         )}
         {viewState === 'idle' && (
-          <div
-            className="state-container"
-            style={{ minHeight: '400px', justifyContent: 'flex-start', alignItems: 'stretch' }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-secondary)' }}>
-                {t('status.systemReady')} — {routeTitle}
-              </span>
-            </div>
-            <div
-              style={{
-                marginBlockStart: 'var(--space-6)',
-                padding: 'var(--space-4)',
-                backgroundColor: 'var(--color-bg-surface-sunken)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 'var(--font-size-sm)',
-                color: 'var(--color-text-secondary)',
-                lineHeight: 'var(--line-height-relaxed)',
-              }}
-            >
-              <p style={{ margin: 0 }}>
-                <strong>Foundation Workspace</strong>: Module <code>{activeRoute}</code> active.
-                Authorization, multi-tenant boundaries, and local SQLite data layers are verified and enforced.
-              </p>
-            </div>
-          </div>
+          <>
+            {activeRoute === 'users' ? (
+              <RolesPermissionsAdmin />
+            ) : (
+              <div
+                className="state-container"
+                style={{ minHeight: '400px', justifyContent: 'flex-start', alignItems: 'stretch' }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-secondary)' }}>
+                    {t('status.systemReady')} — {routeTitle}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    marginBlockStart: 'var(--space-6)',
+                    padding: 'var(--space-4)',
+                    backgroundColor: 'var(--color-bg-surface-sunken)',
+                    borderRadius: 'var(--radius-md)',
+                    fontSize: 'var(--font-size-sm)',
+                    color: 'var(--color-text-secondary)',
+                    lineHeight: 'var(--line-height-relaxed)',
+                  }}
+                >
+                  <p style={{ margin: 0 }}>
+                    <strong>Foundation Workspace</strong>: Module <code>{activeRoute}</code> active.
+                    Authorization, multi-tenant boundaries, and local SQLite data layers are verified and enforced.
+                  </p>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </main>

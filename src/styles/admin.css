@@ -1,0 +1,507 @@
+/* Roles and Permissions Administration Styles */
+/* F1.16 — Roles / Permissions Administration UI */
+
+.admin-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  width: 100%;
+}
+
+/* Tabs */
+.admin-tabs {
+  display: flex;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding-bottom: var(--space-1);
+}
+
+.admin-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.admin-tab:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-surface-hover);
+}
+
+.admin-tab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.admin-tab--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Toolbar */
+.admin-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.admin-search-box {
+  flex: 1;
+  max-width: 360px;
+}
+
+.admin-search-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.admin-search-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.admin-add-user-btn {
+  white-space: nowrap;
+}
+
+/* Alerts */
+.admin-alert {
+  display: block;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-2);
+}
+
+.admin-alert--success {
+  background-color: #d1fae5;
+  border: 1px solid #10b981;
+  color: #064e3b;
+}
+
+/* Users Layout */
+.admin-users-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .admin-users-layout:has(.admin-user-detail-pane) {
+    grid-template-columns: 1fr 380px;
+  }
+}
+
+/* Table Container & Base Table */
+.admin-table-container {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: start;
+  font-size: var(--font-size-sm);
+}
+
+.admin-table th {
+  background-color: #f1f5f9;
+  color: #1e293b;
+  font-weight: var(--font-weight-semibold);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+  white-space: nowrap;
+}
+
+.admin-table td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+  color: var(--color-text-primary);
+}
+
+.admin-user-row {
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.admin-user-row:hover {
+  background-color: var(--color-bg-surface-hover);
+}
+
+.admin-user-row--selected {
+  background-color: rgba(14, 165, 233, 0.08);
+}
+
+.admin-user-row:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.user-info-cell .user-name {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.user-info-cell .user-handle {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* Role Select */
+.admin-role-select {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.admin-role-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* Status Badges */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  border: none;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.status-badge:hover {
+  opacity: 0.85;
+}
+
+.status-badge--active {
+  background-color: #d1fae5;
+  color: #064e3b;
+}
+
+.status-badge--inactive {
+  background-color: #fee2e2;
+  color: #7f1d1d;
+}
+
+.role-badge {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: capitalize;
+}
+
+.role-badge--admin {
+  background-color: #e0e7ff;
+  color: #1e1b4b;
+}
+
+.role-badge--manager {
+  background-color: #e0f2fe;
+  color: #0c4a6e;
+}
+
+.role-badge--cashier {
+  background-color: #fef3c7;
+  color: #78350f;
+}
+
+/* User Detail Drawer */
+.admin-user-detail-pane {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  box-shadow: var(--shadow-sm);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.admin-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding-bottom: var(--space-3);
+}
+
+.admin-detail-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.admin-detail-subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.admin-detail-meta {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-xs);
+}
+
+.meta-label {
+  color: var(--color-text-secondary);
+}
+
+.meta-value {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.admin-overrides-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.admin-overrides-title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.admin-overrides-subtitle {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.admin-overrides-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.override-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-sunken);
+  font-size: var(--font-size-xs);
+}
+
+.override-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.override-name {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.override-code {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.override-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+}
+
+.status-indicator--allowed {
+  background-color: #d1fae5;
+  color: #064e3b;
+}
+
+.status-indicator--denied {
+  background-color: #fee2e2;
+  color: #7f1d1d;
+}
+
+.override-select {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-1);
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+/* Empty State */
+.admin-empty-table {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+/* Matrix View */
+.admin-matrix-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.admin-matrix-header .admin-matrix-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.admin-matrix-header .admin-matrix-subtitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.role-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4);
+}
+
+.role-summary-card {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.role-summary-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.role-summary-card__count {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+
+.role-summary-card__desc {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
+}
+
+/* Matrix Table Specifics */
+.matrix-col-permission {
+  width: 55%;
+}
+
+.matrix-col-role {
+  text-align: center;
+  width: 15%;
+}
+
+.matrix-category-row th {
+  background-color: #f1f5f9;
+  color: #1e293b;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: var(--space-2) var(--space-4);
+}
+
+.matrix-perm-row td {
+  padding: var(--space-3) var(--space-4);
+}
+
+.matrix-perm-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.matrix-perm-title {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.matrix-perm-code {
+  font-size: 11px;
+  color: var(--color-primary);
+}
+
+.matrix-perm-desc {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.matrix-cell-status {
+  text-align: center;
+}
+
+.status-icon {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+}
+
+.status-icon--allowed {
+  color: #064e3b;
+}
+
+.status-icon--denied {
+  color: #334155;
+}
