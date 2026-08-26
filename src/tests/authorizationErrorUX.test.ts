@@ -1,12 +1,5 @@
-// Deterministic Unit & Integration Tests for F1.18: Authorization & Error-State UX
-// Tests permission gating, toast alerts, confirmation dialogs, error boundaries, and i18n completeness.
-
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  checkPermissions,
-  EMPTY_OVERRIDES,
-} from '../components/common/permissionGateHelpers.ts'
 import {
   isBackdropClick,
   validateConfirmationReason,
@@ -16,6 +9,8 @@ import {
   DEFAULT_TOAST_DURATION,
 } from '../context/toastHelpers.ts'
 import {
+  checkPermissions,
+  EMPTY_OVERRIDES,
   computeEffectivePermissions,
   hasEffectivePermission,
   AUTHORITATIVE_PERMISSIONS,

@@ -5,7 +5,7 @@ import React, { useMemo } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import type { Permission, UserPermissionOverride } from '../../types/permission'
 import { PermissionDeniedState } from './PermissionDeniedState'
-import { checkPermissions, EMPTY_OVERRIDES } from './permissionGateHelpers'
+import { checkPermissions, EMPTY_OVERRIDES } from '../../context/permissionEvaluation'
 
 export { checkPermissions, EMPTY_OVERRIDES }
 
