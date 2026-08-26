@@ -23,72 +23,24 @@ export function extractInvokeErrorMessage(err: unknown): string {
   return String(err)
 }
 
-export const FALLBACK_AUTHORITATIVE_PERMISSIONS: readonly Permission[] = [
-  'sales.create',
-  'sales.refund',
-  'sales.void',
-  'inventory.adjust',
-  'inventory.transfer',
-  'products.manage',
-  'purchases.manage',
-  'customers.manage',
-  'debts.manage',
-  'cash.open',
-  'cash.close',
-  'cash.adjust',
-  'reports.view',
-  'reports.export',
-  'users.manage',
-  'settings.manage',
-  'license.manage',
-] as const
+export type RolePermissionResolver = (role: Role | string) => Permission[]
+export type EffectivePermissionResolver = (
+  role: Role | string,
+  overrides: UserPermissionOverride[],
+) => Permission[]
 
-export const FALLBACK_DEFAULT_PERMISSIONS: Record<Role, readonly Permission[]> = {
-  admin: FALLBACK_AUTHORITATIVE_PERMISSIONS,
-  manager: [
-    'sales.create',
-    'sales.refund',
-    'sales.void',
-    'inventory.adjust',
-    'inventory.transfer',
-    'products.manage',
-    'purchases.manage',
-    'customers.manage',
-    'debts.manage',
-    'cash.open',
-    'cash.close',
-    'cash.adjust',
-    'reports.view',
-    'reports.export',
-    'settings.manage',
-  ],
-  cashier: [
-    'sales.create',
-    'customers.manage',
-    'reports.view',
-    'cash.open',
-    'cash.close',
-  ],
-}
+let activeRolePermissionResolver: RolePermissionResolver | null = null
+let activeEffectivePermissionResolver: EffectivePermissionResolver | null = null
 
-function computeFallbackEffective(roleStr: string, overrides: UserPermissionOverride[] = []): Permission[] {
-  const normalized = roleStr.trim().toLowerCase() as Role
-  const defaults = FALLBACK_DEFAULT_PERMISSIONS[normalized] ?? []
-  const effective = new Set<Permission>(defaults)
-
-  for (const o of overrides) {
-    if (o.effect === 'allow') {
-      effective.add(o.permission)
-    }
-  }
-
-  for (const o of overrides) {
-    if (o.effect === 'deny') {
-      effective.delete(o.permission)
-    }
-  }
-
-  return FALLBACK_AUTHORITATIVE_PERMISSIONS.filter((p) => effective.has(p))
+/**
+ * Injects domain permission resolvers to eliminate duplicated permission catalogs across modules.
+ */
+export function setPermissionResolvers(
+  roleResolver: RolePermissionResolver | null,
+  effectiveResolver: EffectivePermissionResolver | null,
+): void {
+  activeRolePermissionResolver = roleResolver
+  activeEffectivePermissionResolver = effectiveResolver
 }
 
 // Real Tauri IPC Implementation
@@ -122,7 +74,10 @@ export class TauriPermissionApiClient implements PermissionApiClient {
     try {
       return await this.invoke<Permission[]>('list_role_permissions', { role })
     } catch {
-      return [...(FALLBACK_DEFAULT_PERMISSIONS[role] ?? [])]
+      if (activeRolePermissionResolver) {
+        return activeRolePermissionResolver(role)
+      }
+      return []
     }
   }
 
@@ -148,7 +103,10 @@ export class TauriPermissionApiClient implements PermissionApiClient {
     } catch {
       const user = await this.getUser(userId)
       const overrides = await this.listUserPermissionOverrides(userId)
-      return computeFallbackEffective(user.role, overrides)
+      if (activeEffectivePermissionResolver) {
+        return activeEffectivePermissionResolver(user.role, overrides)
+      }
+      return []
     }
   }
 }
@@ -268,7 +226,10 @@ export class MockPermissionApiClient implements PermissionApiClient {
   async listRolePermissions(role: Role): Promise<Permission[]> {
     await this.maybeDelay()
     if (this.shouldFailWith) throw new Error(this.shouldFailWith)
-    return [...(FALLBACK_DEFAULT_PERMISSIONS[role] ?? [])]
+    if (activeRolePermissionResolver) {
+      return activeRolePermissionResolver(role)
+    }
+    return []
   }
 
   async listUserPermissionOverrides(userId: string): Promise<UserPermissionOverride[]> {
@@ -303,7 +264,10 @@ export class MockPermissionApiClient implements PermissionApiClient {
     if (this.shouldFailWith) throw new Error(this.shouldFailWith)
     const user = await this.getUser(userId)
     const userOverrides = await this.listUserPermissionOverrides(userId)
-    return computeFallbackEffective(user.role, userOverrides)
+    if (activeEffectivePermissionResolver) {
+      return activeEffectivePermissionResolver(user.role, userOverrides)
+    }
+    return []
   }
 }
 

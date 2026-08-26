@@ -5,8 +5,12 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShell } from '../../context/ShellContext'
 import { useAuth } from '../../context/AuthContext'
-import { getPermissionApi } from '../../services/permissionApi'
-import { hasEffectivePermission } from '../../context/permissionEvaluation'
+import { getPermissionApi, setPermissionResolvers } from '../../services/permissionApi'
+import {
+  hasEffectivePermission,
+  getRoleDefaultPermissions,
+  computeEffectivePermissions,
+} from '../../context/permissionEvaluation'
 import type { User } from '../../types/user'
 import type { UserPermissionOverride } from '../../types/permission'
 import { UserManagementView } from './UserManagementView'
@@ -30,6 +34,11 @@ export const RolesPermissionsAdmin: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const activeBranchRequestRef = useRef<number>(0)
+
+  // Configure authoritative permission resolvers for fallback API client
+  useEffect(() => {
+    setPermissionResolvers(getRoleDefaultPermissions, computeEffectivePermissions)
+  }, [])
 
   // Load active user's overrides to evaluate accurate authorization
   useEffect(() => {

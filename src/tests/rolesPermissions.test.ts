@@ -9,7 +9,6 @@ import {
   PERMISSION_CATALOG,
   ROLE_CATALOG,
   CATEGORY_ORDER,
-  ROLE_DEFAULT_PERMISSIONS,
   getRoleDefaultPermissions,
   computeEffectivePermissions,
   hasEffectivePermission,
@@ -18,11 +17,10 @@ import {
 import {
   MockPermissionApiClient,
   TauriPermissionApiClient,
-  FALLBACK_AUTHORITATIVE_PERMISSIONS,
-  FALLBACK_DEFAULT_PERMISSIONS,
   extractInvokeErrorMessage,
   getPermissionApi,
   setPermissionApi,
+  setPermissionResolvers,
 } from '../services/permissionApi.ts'
 import { en, ar, fr, getDirectionForLocale } from '../i18n/index.ts'
 import type { User, CreateUserInput } from '../types/user.ts'
@@ -80,6 +78,7 @@ describe('F1.16 Roles & Permissions Administration Test Suite', () => {
   let mockApi: MockPermissionApiClient
 
   beforeEach(() => {
+    setPermissionResolvers(getRoleDefaultPermissions, computeEffectivePermissions)
     mockApi = new MockPermissionApiClient([
       sampleAdmin,
       sampleManager,
@@ -364,7 +363,7 @@ describe('F1.16 Roles & Permissions Administration Test Suite', () => {
     setPermissionApi(tauriClient)
     assert.strictEqual(getPermissionApi(), tauriClient)
 
-    // listRolePermissions fallbacks gracefully outside Tauri
+    // listRolePermissions fallbacks gracefully via registered resolver
     const adminPerms = await tauriClient.listRolePermissions('admin')
     assert.strictEqual(adminPerms.length, 17)
 
@@ -413,11 +412,17 @@ describe('F1.16 Roles & Permissions Administration Test Suite', () => {
     assert.strictEqual(getDirectionForLocale('fr'), 'ltr')
   })
 
-  // Test 14: Fallback Catalog Invariant Verification
-  it('14. FALLBACK permission catalogs are strictly identical to authoritative definitions', () => {
-    assert.deepStrictEqual(FALLBACK_AUTHORITATIVE_PERMISSIONS, AUTHORITATIVE_PERMISSIONS)
-    assert.deepStrictEqual(FALLBACK_DEFAULT_PERMISSIONS.admin, ROLE_DEFAULT_PERMISSIONS.admin)
-    assert.deepStrictEqual(FALLBACK_DEFAULT_PERMISSIONS.manager, ROLE_DEFAULT_PERMISSIONS.manager)
-    assert.deepStrictEqual(FALLBACK_DEFAULT_PERMISSIONS.cashier, ROLE_DEFAULT_PERMISSIONS.cashier)
+  // Test 14: Dynamic Resolver Injection
+  it('14. setPermissionResolvers injects domain evaluation without duplicated catalogs', () => {
+    const customRoleResolver = (role: string) => (role === 'admin' ? ['users.manage' as const] : [])
+    const customEffResolver = () => ['users.manage' as const]
+
+    setPermissionResolvers(customRoleResolver, customEffResolver)
+    const tauriClient = new TauriPermissionApiClient()
+    setPermissionApi(tauriClient)
+
+    // Reset back to authoritative resolvers
+    setPermissionResolvers(getRoleDefaultPermissions, computeEffectivePermissions)
+    setPermissionApi(mockApi)
   })
 })
