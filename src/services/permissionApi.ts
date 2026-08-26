@@ -23,9 +23,9 @@ export function extractInvokeErrorMessage(err: unknown): string {
   return String(err)
 }
 
-export type RolePermissionResolver = (role: Role | string) => Permission[]
+export type RolePermissionResolver = (role: string) => Permission[]
 export type EffectivePermissionResolver = (
-  role: Role | string,
+  role: string,
   overrides: UserPermissionOverride[],
 ) => Permission[]
 

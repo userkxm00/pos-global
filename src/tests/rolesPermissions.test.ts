@@ -413,13 +413,16 @@ describe('F1.16 Roles & Permissions Administration Test Suite', () => {
   })
 
   // Test 14: Dynamic Resolver Injection
-  it('14. setPermissionResolvers injects domain evaluation without duplicated catalogs', () => {
+  it('14. setPermissionResolvers injects domain evaluation without duplicated catalogs', async () => {
     const customRoleResolver = (role: string) => (role === 'admin' ? ['users.manage' as const] : [])
     const customEffResolver = () => ['users.manage' as const]
 
     setPermissionResolvers(customRoleResolver, customEffResolver)
     const tauriClient = new TauriPermissionApiClient()
     setPermissionApi(tauriClient)
+
+    const perms = await tauriClient.listRolePermissions('admin')
+    assert.deepStrictEqual(perms, ['users.manage'])
 
     // Reset back to authoritative resolvers
     setPermissionResolvers(getRoleDefaultPermissions, computeEffectivePermissions)
