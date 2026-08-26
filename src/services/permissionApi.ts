@@ -4,12 +4,6 @@
 
 import type { User, CreateUserInput, UpdateUserInput } from '../types/user'
 import type { Permission, Role, PermissionEffect, UserPermissionOverride } from '../types/permission'
-import {
-  AUTHORITATIVE_PERMISSIONS,
-  ROLE_DEFAULT_PERMISSIONS,
-  getRoleDefaultPermissions,
-  computeEffectivePermissions,
-} from '../context/permissionEvaluation'
 
 export interface PermissionApiClient {
   listUsers(branchId: string): Promise<User[]>
@@ -27,6 +21,72 @@ export function extractInvokeErrorMessage(err: unknown): string {
   if (typeof err === 'string') return err
   if (err instanceof Error) return err.message
   return String(err)
+}
+
+const FALLBACK_DEFAULT_PERMISSIONS: Record<Role, readonly Permission[]> = {
+  admin: [
+    'sales.create',
+    'sales.refund',
+    'sales.void',
+    'inventory.adjust',
+    'inventory.transfer',
+    'products.manage',
+    'purchases.manage',
+    'customers.manage',
+    'debts.manage',
+    'cash.open',
+    'cash.close',
+    'cash.adjust',
+    'reports.view',
+    'reports.export',
+    'users.manage',
+    'settings.manage',
+    'license.manage',
+  ],
+  manager: [
+    'sales.create',
+    'sales.refund',
+    'sales.void',
+    'inventory.adjust',
+    'inventory.transfer',
+    'products.manage',
+    'purchases.manage',
+    'customers.manage',
+    'debts.manage',
+    'cash.open',
+    'cash.close',
+    'cash.adjust',
+    'reports.view',
+    'reports.export',
+    'settings.manage',
+  ],
+  cashier: [
+    'sales.create',
+    'customers.manage',
+    'reports.view',
+    'cash.open',
+    'cash.close',
+  ],
+}
+
+function computeFallbackEffective(roleStr: string, overrides: UserPermissionOverride[] = []): Permission[] {
+  const normalized = roleStr.trim().toLowerCase() as Role
+  const defaults = FALLBACK_DEFAULT_PERMISSIONS[normalized] ?? []
+  const effective = new Set<Permission>(defaults)
+
+  for (const o of overrides) {
+    if (o.effect === 'allow') {
+      effective.add(o.permission)
+    }
+  }
+
+  for (const o of overrides) {
+    if (o.effect === 'deny') {
+      effective.delete(o.permission)
+    }
+  }
+
+  return FALLBACK_DEFAULT_PERMISSIONS.admin.filter((p) => effective.has(p))
 }
 
 // Real Tauri IPC Implementation
@@ -60,7 +120,7 @@ export class TauriPermissionApiClient implements PermissionApiClient {
     try {
       return await this.invoke<Permission[]>('list_role_permissions', { role })
     } catch {
-      return getRoleDefaultPermissions(role)
+      return [...(FALLBACK_DEFAULT_PERMISSIONS[role] ?? [])]
     }
   }
 
@@ -86,7 +146,7 @@ export class TauriPermissionApiClient implements PermissionApiClient {
     } catch {
       const user = await this.getUser(userId)
       const overrides = await this.listUserPermissionOverrides(userId)
-      return computeEffectivePermissions(user.role, overrides)
+      return computeFallbackEffective(user.role, overrides)
     }
   }
 }
@@ -206,7 +266,7 @@ export class MockPermissionApiClient implements PermissionApiClient {
   async listRolePermissions(role: Role): Promise<Permission[]> {
     await this.maybeDelay()
     if (this.shouldFailWith) throw new Error(this.shouldFailWith)
-    return getRoleDefaultPermissions(role)
+    return [...(FALLBACK_DEFAULT_PERMISSIONS[role] ?? [])]
   }
 
   async listUserPermissionOverrides(userId: string): Promise<UserPermissionOverride[]> {
@@ -241,7 +301,7 @@ export class MockPermissionApiClient implements PermissionApiClient {
     if (this.shouldFailWith) throw new Error(this.shouldFailWith)
     const user = await this.getUser(userId)
     const userOverrides = await this.listUserPermissionOverrides(userId)
-    return computeEffectivePermissions(user.role, userOverrides)
+    return computeFallbackEffective(user.role, userOverrides)
   }
 }
 
