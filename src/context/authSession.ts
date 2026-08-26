@@ -106,6 +106,18 @@ export function storeOnlineSession(session: OnlineSession, user: AuthenticatedUs
   }
 }
 
+function parseExpirationTimestamp(expiresAtStr?: string | null): number | null {
+  if (!expiresAtStr || expiresAtStr === 'null' || expiresAtStr === 'undefined') return null
+  const parsed = Number(expiresAtStr)
+  return !Number.isNaN(parsed) && parsed > 0 ? parsed : null
+}
+
+function sanitizeTokenString(token?: string | null): string | null {
+  if (!token || token === 'null' || token === 'undefined') return null
+  const trimmed = token.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 /**
  * Evaluates stored online session credentials, parsing expiration timestamps and enforcing fail-closed expired status.
  */
@@ -115,7 +127,8 @@ export async function restoreOnlineSession(
   refreshToken?: string | null,
   expiresAtStr?: string | null,
 ): Promise<RestoredSessionData> {
-  if (!token || !rawUser || token === 'null' || token === 'undefined') {
+  const cleanToken = sanitizeTokenString(token)
+  if (!cleanToken || !rawUser) {
     clearStoredAuth()
     return { status: 'unauthenticated', user: null, sessionId: null, mode: 'online' }
   }
@@ -123,33 +136,13 @@ export async function restoreOnlineSession(
   try {
     const parsedUser = JSON.parse(rawUser) as AuthenticatedUser
     if (parsedUser?.id && parsedUser?.email) {
-      const cleanExpiresAtStr =
-        expiresAtStr && expiresAtStr !== 'null' && expiresAtStr !== 'undefined' ? expiresAtStr : null
-      const parsedExpiresAt = cleanExpiresAtStr ? Number(cleanExpiresAtStr) : null
-      const validExpiresAt =
-        parsedExpiresAt !== null && !Number.isNaN(parsedExpiresAt) && parsedExpiresAt > 0
-          ? parsedExpiresAt
-          : null
-
-      const cleanRefreshToken =
-        refreshToken && refreshToken !== 'null' && refreshToken !== 'undefined'
-          ? refreshToken.trim()
-          : null
-
+      const validExpiresAt = parseExpirationTimestamp(expiresAtStr)
+      const cleanRefreshToken = sanitizeTokenString(refreshToken)
       const nowSeconds = Math.floor(Date.now() / 1000)
-      if (validExpiresAt !== null && validExpiresAt <= nowSeconds) {
-        return {
-          status: 'expired',
-          user: parsedUser,
-          sessionId: parsedUser.id,
-          mode: 'online',
-          refreshToken: cleanRefreshToken,
-          expiresAt: validExpiresAt,
-        }
-      }
+      const isPast = validExpiresAt !== null && validExpiresAt <= nowSeconds
 
       return {
-        status: 'authenticated',
+        status: isPast ? 'expired' : 'authenticated',
         user: parsedUser,
         sessionId: parsedUser.id,
         mode: 'online',

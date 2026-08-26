@@ -31,40 +31,18 @@ export function extractInvokeErrorMessage(err: unknown): string {
   return String(err)
 }
 
-/**
- * Strips all trailing slashes from endpoint URLs.
- */
-export function stripTrailingSlash(url: string): string {
-  let clean = url.trim()
-  while (clean.endsWith('/')) {
-    clean = clean.slice(0, -1)
-  }
-  return clean
-}
-
-/**
- * Returns default Supabase Auth configuration from environment variables or mock defaults.
- */
 export function getDefaultSupabaseConfig(): SupabaseAuthConfig {
-  const url = import.meta.env?.VITE_SUPABASE_URL ?? 'https://pos-global-mock.supabase.co'
-  const publishableKey = import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY ?? 'mock_publishable_key'
   return {
-    url,
-    publishable_key: publishableKey,
+    url: 'https://mock.supabase.co',
+    publishable_key: 'mock-anon-key',
   }
 }
 
-/**
- * Creates a typed authentication error adhering to the domain AuthErrorCode contract.
- */
-export function createTypedAuthError(code: AuthErrorCode, message: string): TypedAuthError {
-  const err = new Error(message) as TypedAuthError
-  err.code = code
-  err.name = 'TypedAuthError'
-  return err
+export function stripTrailingSlash(url: string): string {
+  return url.replace(/\/+$/, '')
 }
 
-const VALID_AUTH_ERROR_CODES: Set<AuthErrorCode> = new Set([
+export const VALID_AUTH_ERROR_CODES = new Set<AuthErrorCode>([
   'invalid_credentials',
   'session_expired',
   'rate_limit',
@@ -75,6 +53,83 @@ const VALID_AUTH_ERROR_CODES: Set<AuthErrorCode> = new Set([
   'security_violation',
   'unknown',
 ])
+
+export class AuthErrorInstance extends Error implements TypedAuthError {
+  code: AuthErrorCode
+  details?: Record<string, unknown>
+
+  constructor(code: AuthErrorCode, message: string, details?: Record<string, unknown>) {
+    super(message)
+    this.name = 'TypedAuthError'
+    this.code = code
+    this.details = details
+    Object.setPrototypeOf(this, AuthErrorInstance.prototype)
+  }
+}
+
+export function createTypedAuthError(
+  code: AuthErrorCode,
+  message: string,
+  details?: Record<string, unknown>,
+): TypedAuthError {
+  return new AuthErrorInstance(code, message, details)
+}
+
+const SESSION_EXPIRED_PATTERNS = [
+  'session expired',
+  'invalid refresh token',
+  'refresh token is invalid',
+  'refresh token not found',
+  'refresh_token_not_found',
+  'already used',
+  'jwt expired',
+  'session has expired',
+]
+
+const CREDENTIAL_PATTERNS = [
+  'invalid credentials',
+  'invalid login credentials',
+  'invalid email',
+  'invalid pin',
+  'user not found',
+  'does not match',
+]
+
+const NETWORK_PATTERNS = [
+  'network',
+  'unable to reach',
+  'failed to fetch',
+  'connection refused',
+]
+
+function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'string') return err
+  if (err && typeof err === 'object') {
+    const obj = err as Record<string, unknown>
+    if (typeof obj.message === 'string') return obj.message
+    if (typeof obj.error_description === 'string') return obj.error_description
+    if (typeof obj.error === 'string') return obj.error
+    try {
+      return JSON.stringify(err)
+    } catch {
+      return 'Unknown error'
+    }
+  }
+  return typeof err === 'number' || typeof err === 'boolean' ? String(err) : ''
+}
+
+function matchAuthErrorCode(lower: string): AuthErrorCode {
+  if (SESSION_EXPIRED_PATTERNS.some((p) => lower.includes(p))) return 'session_expired'
+  if (lower.includes('rate limit') || lower.includes('too many')) return 'rate_limit'
+  if (NETWORK_PATTERNS.some((p) => lower.includes(p))) return 'network_error'
+  if (CREDENTIAL_PATTERNS.some((p) => lower.includes(p))) return 'invalid_credentials'
+  if (lower.includes('unavailable') || lower.includes('service unavailable')) return 'service_unavailable'
+  if (lower.includes('security violation') || lower.includes('forbidden') || lower.includes('secret key')) return 'security_violation'
+  if (lower.includes('unconfigured') || lower.includes('missing configuration')) return 'unconfigured'
+  if (lower.includes('validation')) return 'validation_error'
+  return 'unknown'
+}
 
 /**
  * Classifies an unknown error into a structured TypedAuthError.
@@ -92,83 +147,9 @@ export function classifyAuthError(err: unknown): TypedAuthError {
     return err as TypedAuthError
   }
 
-  let msg = ''
-  if (err instanceof Error) {
-    msg = err.message
-  } else if (err && typeof err === 'object') {
-    const obj = err as Record<string, unknown>
-    if (typeof obj.message === 'string') {
-      msg = obj.message
-    } else if (typeof obj.error_description === 'string') {
-      msg = obj.error_description
-    } else if (typeof obj.error === 'string') {
-      msg = obj.error
-    } else {
-      try {
-        msg = JSON.stringify(err)
-      } catch {
-        msg = String(err)
-      }
-    }
-  } else {
-    msg = String(err ?? '')
-  }
-
-  const lower = msg.toLowerCase()
-
-  if (
-    lower.includes('session expired') ||
-    lower.includes('invalid refresh token') ||
-    lower.includes('refresh token is invalid') ||
-    lower.includes('refresh token not found') ||
-    lower.includes('refresh_token_not_found') ||
-    lower.includes('already used') ||
-    lower.includes('jwt expired') ||
-    lower.includes('session has expired')
-  ) {
-    return createTypedAuthError('session_expired', msg)
-  }
-
-  if (lower.includes('rate limit') || lower.includes('too many')) {
-    return createTypedAuthError('rate_limit', msg)
-  }
-
-  if (
-    lower.includes('network') ||
-    lower.includes('unable to reach') ||
-    lower.includes('failed to fetch') ||
-    lower.includes('connection refused')
-  ) {
-    return createTypedAuthError('network_error', msg)
-  }
-
-  if (
-    lower.includes('invalid credentials') ||
-    lower.includes('invalid login credentials') ||
-    lower.includes('invalid email') ||
-    lower.includes('user not found') ||
-    lower.includes('does not match')
-  ) {
-    return createTypedAuthError('invalid_credentials', msg)
-  }
-
-  if (lower.includes('unavailable') || lower.includes('service unavailable')) {
-    return createTypedAuthError('service_unavailable', msg)
-  }
-
-  if (lower.includes('security violation') || lower.includes('forbidden') || lower.includes('secret key')) {
-    return createTypedAuthError('security_violation', msg)
-  }
-
-  if (lower.includes('unconfigured') || lower.includes('missing configuration')) {
-    return createTypedAuthError('unconfigured', msg)
-  }
-
-  if (lower.includes('validation')) {
-    return createTypedAuthError('validation_error', msg)
-  }
-
-  return createTypedAuthError('unknown', msg)
+  const msg = extractErrorMessage(err)
+  const code = matchAuthErrorCode(msg.toLowerCase())
+  return createTypedAuthError(code, msg)
 }
 
 // Real Tauri IPC & Cloud Auth Implementation
@@ -394,12 +375,28 @@ export class MockAuthApiClient implements AuthApiClient {
   async getAuthState(sessionId?: string | null): Promise<AuthState> {
     if (this.shouldFailWith) throw classifyAuthError(this.shouldFailWith)
     if (!sessionId) {
-      return { authenticated: false }
+      return {
+        authenticated: false,
+        session_id: null,
+        user_id: null,
+        branch_id: null,
+        role: null,
+        organization_id: null,
+      }
     }
+
     const session = this.activeSessions.get(sessionId)
     if (!session) {
-      return { authenticated: false }
+      return {
+        authenticated: false,
+        session_id: null,
+        user_id: null,
+        branch_id: null,
+        role: null,
+        organization_id: null,
+      }
     }
+
     return { ...session }
   }
 

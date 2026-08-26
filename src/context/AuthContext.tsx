@@ -46,6 +46,43 @@ export interface AuthProviderProps {
   initialMode?: AuthMode
 }
 
+interface RestoredOnlineState {
+  status: AuthStatus
+  user: AuthenticatedUser | null
+  sessionId: string | null
+  mode: AuthMode
+}
+
+async function handleStartupOnlineRefresh(
+  restored: Awaited<ReturnType<typeof evaluateStoredSession>>,
+  refreshFn: () => Promise<OnlineSession | null>,
+): Promise<RestoredOnlineState | null> {
+  if (!restored.refreshToken) {
+    if (restored.status === 'expired') {
+      clearStoredAuth()
+      return { status: 'expired', user: null, sessionId: null, mode: 'online' }
+    }
+    return null
+  }
+
+  const refreshedSession = await refreshFn()
+  if (refreshedSession) {
+    return null
+  }
+
+  // If refresh failed, check if session was merely expiring soon and still in storage (transient error)
+  const tokenStillStored =
+    typeof window !== 'undefined' &&
+    window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN)
+  if (restored.status !== 'expired' && tokenStillStored && restored.user && restored.sessionId) {
+    return { status: 'authenticated', user: restored.user, sessionId: restored.sessionId, mode: 'online' }
+  }
+
+  // Definitive auth failure -> fail closed
+  clearStoredAuth()
+  return { status: 'expired', user: null, sessionId: null, mode: 'online' }
+}
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({
   children,
   initialStatus = 'authenticating',
@@ -126,46 +163,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       const restored = await evaluateStoredSession(api)
       if (!isMounted) return
 
-      if (restored.mode === 'online' && restored.user && restored.sessionId) {
-        // If restored token is already expired or expiring soon, evaluate immediately
-        if (restored.status === 'expired' || isTokenExpiringSoon(restored.expiresAt)) {
-          if (restored.refreshToken) {
-            const refreshedSession = await refreshSession()
-            if (!isMounted) return
+      const needsImmediateRefresh =
+        restored.mode === 'online' &&
+        restored.user &&
+        restored.sessionId &&
+        (restored.status === 'expired' || isTokenExpiringSoon(restored.expiresAt))
 
-            if (refreshedSession) {
-              return
-            }
-
-            // If refresh returned null, check if session was merely expiring soon and still in storage (transient error)
-            const tokenStillStored =
-              typeof window !== 'undefined' &&
-              window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN)
-            if (restored.status !== 'expired' && tokenStillStored) {
-              setActiveUser(restored.user)
-              setSessionId(restored.sessionId)
-              setAuthMode('online')
-              setAuthStatus('authenticated')
-              return
-            }
-
-            // Definitive authentication failure on expired session -> fail closed
-            clearStoredAuth()
-            setAuthStatus('expired')
-            setActiveUser(null)
-            setSessionId(null)
-            return
-          } else if (restored.status === 'expired') {
-            // Already expired in past with no refresh token: fail closed
-            clearStoredAuth()
-            if (isMounted) {
-              setAuthStatus('expired')
-              setActiveUser(null)
-              setSessionId(null)
-            }
-            return
-          }
-        }
+      if (needsImmediateRefresh) {
+        const nextState = await handleStartupOnlineRefresh(restored, refreshSession)
+        if (!isMounted || !nextState) return
+        setAuthStatus(nextState.status)
+        setActiveUser(nextState.user)
+        setSessionId(nextState.sessionId)
+        setAuthMode(nextState.mode)
+        return
       }
 
       if (isMounted) {
