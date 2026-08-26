@@ -72,17 +72,11 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
     onCancel()
   }, [isSubmitting, onCancel])
 
-  // Escape key and backdrop click listener
+  // Backdrop click listener
   useEffect(() => {
     if (!isOpen) return
 
     const dialogEl = dialogRef.current
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        handleClose()
-      }
-    }
 
     const handleBackdropClick = (e: MouseEvent) => {
       if (!dialogEl) return
@@ -97,11 +91,9 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
       }
     }
 
-    document.addEventListener('keydown', handleKeyDown)
     dialogEl?.addEventListener('click', handleBackdropClick)
 
     return () => {
-      document.removeEventListener('keydown', handleKeyDown)
       dialogEl?.removeEventListener('click', handleBackdropClick)
     }
   }, [isOpen, handleClose])

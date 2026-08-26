@@ -88,6 +88,7 @@ export const en = {
     pendingChanges_other: '{{count}} pending changes queued for synchronization',
     currentRegister: 'Terminal: {{name}}',
     systemReady: 'System Ready',
+    processing: 'Processing...',
   },
   sync: {
     title: 'Synchronization Details',
@@ -516,6 +517,7 @@ export const ar = {
     pendingChanges_other: '{{count}} تغيير قيد المزامنة',
     currentRegister: 'الجهاز: {{name}}',
     systemReady: 'النظام جاهز',
+    processing: 'جاري المعالجة...',
   },
   sync: {
     title: 'تفاصيل المزامنة',
@@ -940,6 +942,7 @@ export const fr = {
     pendingChanges_other: '{{count}} modifications en attente de synchronisation',
     currentRegister: 'Caisse : {{name}}',
     systemReady: 'Système prêt',
+    processing: 'Traitement en cours...',
   },
   sync: {
     title: 'Détails de synchronisation',

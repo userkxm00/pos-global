@@ -3,7 +3,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkPermissions } from '../components/common/PermissionGate.ts'
+import { checkPermissions } from '../components/common/permissionGateHelpers.ts'
 import {
   computeEffectivePermissions,
   hasEffectivePermission,
@@ -238,6 +238,20 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
       assert.ok(dict.errorBoundary.description, `Locales ${code} must have errorBoundary.description`)
       assert.ok(dict.errorBoundary.tryAgain, `Locales ${code} must have errorBoundary.tryAgain`)
       assert.ok(dict.errorBoundary.reloadApp, `Locales ${code} must have errorBoundary.reloadApp`)
+    }
+  })
+
+  // Test 13: Status processing key completeness across en, ar, fr
+  it('13. verifies status.processing translations across English, Arabic (RTL), and French', () => {
+    const locales = [
+      { code: 'en', dict: en },
+      { code: 'ar', dict: ar },
+      { code: 'fr', dict: fr },
+    ]
+
+    for (const { code, dict } of locales) {
+      assert.ok(dict.status, `Locales ${code} must have status dictionary`)
+      assert.ok(dict.status.processing, `Locales ${code} must have status.processing`)
     }
   })
 })

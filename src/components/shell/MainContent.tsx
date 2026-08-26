@@ -1,10 +1,12 @@
 // Main Content View Container with Authorization and Error States
 // F1.11 — Shell & F1.18 — Authorization and Error-State UX
 
-import React from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShell, NavigationRoute } from '../../context/ShellContext'
-import type { Permission } from '../../types/permission'
+import { useAuth } from '../../context/AuthContext'
+import type { Permission, UserPermissionOverride } from '../../types/permission'
+import { getPermissionApi } from '../../services/permissionApi'
 import { OfflineBanner } from '../common/OfflineBanner'
 import { LoadingSkeleton } from '../common/LoadingSkeleton'
 import { EmptyState } from '../common/EmptyState'
@@ -28,6 +30,7 @@ export const MainContent: React.FC = () => {
   const { t } = useTranslation()
   const {
     activeRoute,
+    setActiveRoute,
     isOnline,
     pendingSyncCount,
     viewState,
@@ -35,6 +38,37 @@ export const MainContent: React.FC = () => {
     errorMessage,
     deniedPermission,
   } = useShell()
+
+  const { activeUser } = useAuth()
+  const [activeOverrides, setActiveOverrides] = useState<UserPermissionOverride[]>([])
+
+  useEffect(() => {
+    let isMounted = true
+    async function loadOverrides() {
+      if (!activeUser?.id) {
+        setActiveOverrides([])
+        return
+      }
+      try {
+        const api = getPermissionApi()
+        const overrides = await api.listUserPermissionOverrides(activeUser.id)
+        if (isMounted) {
+          setActiveOverrides(overrides)
+        }
+      } catch {
+        if (isMounted) setActiveOverrides([])
+      }
+    }
+    void loadOverrides()
+    return () => {
+      isMounted = false
+    }
+  }, [activeUser?.id])
+
+  const handleReturnToSafeRoute = useCallback(() => {
+    setActiveRoute('pos')
+    setViewState('idle')
+  }, [setActiveRoute, setViewState])
 
   const routeTitleKey = `nav.items.${activeRoute}`
   const routeTitle = t(routeTitleKey)
@@ -93,14 +127,20 @@ export const MainContent: React.FC = () => {
         {viewState === 'permission-denied' && (
           <PermissionDeniedState
             permission={deniedPermission || requiredPermission}
-            onAction={() => setViewState('idle')}
+            onAction={handleReturnToSafeRoute}
           />
         )}
         {viewState === 'idle' && (
           requiredPermission ? (
             <PermissionGate
               permission={requiredPermission}
-              showDeniedState
+              overrides={activeOverrides}
+              fallback={
+                <PermissionDeniedState
+                  permission={requiredPermission}
+                  onAction={handleReturnToSafeRoute}
+                />
+              }
             >
               {activeRoute === 'users' ? (
                 <RolesPermissionsAdmin />

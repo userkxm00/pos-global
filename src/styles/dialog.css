@@ -10,7 +10,7 @@
   max-width: 480px;
   width: calc(100vw - var(--space-8));
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
-  animation: dialogFadeIn 0.2s ease-out;
+  animation: dialog-fade-in 0.2s ease-out;
 }
 
 .confirmation-dialog::backdrop {
@@ -18,7 +18,7 @@
   backdrop-filter: blur(4px);
 }
 
-@keyframes dialogFadeIn {
+@keyframes dialog-fade-in {
   from {
     opacity: 0;
     transform: scale(0.95);

@@ -2,6 +2,7 @@
 // F1.18 — Authorization and Error-State UX & UI_SPEC.md
 
 import React, { Component, ErrorInfo } from 'react'
+import i18n from '../../i18n'
 import { ErrorState } from './ErrorState'
 
 export interface ErrorBoundaryProps {
@@ -56,10 +57,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         return this.props.fallback
       }
 
+      const title = i18n.t('errorBoundary.title')
+      const defaultDesc = i18n.t('errorBoundary.description')
+
       return (
         <ErrorState
-          title="Application Encountered an Error"
-          message={this.state.error?.message || 'An unexpected error occurred in the view.'}
+          title={title}
+          message={this.state.error?.message || defaultDesc}
           errorCode="ERR_RENDER_FAILURE"
           onRetry={this.handleRetry}
           onReport={this.handleReload}
