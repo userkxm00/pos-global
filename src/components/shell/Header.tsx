@@ -16,6 +16,11 @@ export const Header: React.FC = () => {
     session,
     isOnline,
     isSyncing,
+    syncStatus,
+    pendingSyncCount,
+    lastSyncedAt,
+    syncErrorMessage,
+    triggerSync,
     locale,
     setLocale,
     lockSession,
@@ -77,7 +82,16 @@ export const Header: React.FC = () => {
       />
 
       <div className="app-header__center">
-        <SyncIndicator isOnline={isOnline} isSyncing={isSyncing} />
+        <SyncIndicator
+          isOnline={isOnline}
+          isSyncing={isSyncing}
+          syncStatus={syncStatus}
+          pendingCount={pendingSyncCount}
+          lastSyncedAt={lastSyncedAt}
+          lastError={syncErrorMessage}
+          deviceId={register?.id || null}
+          onTriggerSync={triggerSync}
+        />
       </div>
 
       <div className="app-header__end">
