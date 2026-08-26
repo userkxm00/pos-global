@@ -1,15 +1,18 @@
-// AuthContext managing authentication lifecycle, session restoration, lock/unlock, and logout
-// F1.13 — Authentication screens and session lifecycle & F1.14 — Local PIN and Lock screen
+// AuthContext managing authentication lifecycle, session restoration, lock/unlock, logout, and token refresh
+// F1.13 — Authentication screens and session lifecycle & F1.14 — Local PIN and Lock screen & F1.19 — Supabase Auth adapter hardening
 
-import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react'
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import type { AuthMode, AuthStatus, SignInInput, LocalSignInInput, OnlineSession } from '../types/auth'
 import type { LoginResult } from '../types/session'
 import { getAuthApi } from '../services/authApi'
 import { DEFAULT_AUTH_MODE } from '../components/auth/constants'
 import {
+  AUTH_STORAGE_KEYS,
   AuthenticatedUser,
   evaluateStoredSession,
+  isTokenExpiringSoon,
   performOnlineLogin,
+  performTokenRefresh,
   performLocalLogin,
   performPinUnlock,
   performLogout,
@@ -25,6 +28,7 @@ export interface AuthContextType {
   sessionId: string | null
   isAuthenticating: boolean
   loginOnline: (credentials: SignInInput) => Promise<OnlineSession>
+  refreshSession: () => Promise<OnlineSession | null>
   loginLocal: (credentials: LocalSignInInput) => Promise<LoginResult>
   lock: () => void
   unlockWithPin: (pin: string) => Promise<LoginResult>
@@ -54,6 +58,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId)
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false)
 
+  const isRefreshingRef = useRef<boolean>(false)
+
   // Restore session on startup
   useEffect(() => {
     let isMounted = true
@@ -80,6 +86,64 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       isMounted = false
     }
   }, [initialUser, initialSessionId])
+
+  const refreshSession = useCallback(async (): Promise<OnlineSession | null> => {
+    if (isRefreshingRef.current) return null
+    if (typeof window === 'undefined' || !window.sessionStorage) return null
+
+    const storedMode = window.sessionStorage.getItem(AUTH_STORAGE_KEYS.AUTH_MODE)
+    const storedRefreshToken = window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN)
+
+    if (storedMode !== 'online' || !storedRefreshToken) {
+      return null
+    }
+
+    isRefreshingRef.current = true
+    try {
+      const api = getAuthApi()
+      const { session, user } = await performTokenRefresh(storedRefreshToken, api, activeUser)
+      setActiveUser(user)
+      setSessionId(session.user.id)
+      setAuthMode('online')
+      setAuthStatus('authenticated')
+      return session
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      const lower = errMsg.toLowerCase()
+      if (lower.includes('expired') || lower.includes('invalid') || lower.includes('session expired')) {
+        setAuthStatus('expired')
+        setActiveUser(null)
+        setSessionId(null)
+      }
+      return null
+    } finally {
+      isRefreshingRef.current = false
+    }
+  }, [activeUser])
+
+  // Proactive token refresh check on window focus / visibility change
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handleVisibilityCheck = () => {
+      if (document.visibilityState !== 'visible') return
+      if (authStatus !== 'authenticated' || authMode !== 'online') return
+
+      const expiresAtStr = window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT)
+      const expiresAt = expiresAtStr ? Number(expiresAtStr) : null
+      if (isTokenExpiringSoon(expiresAt)) {
+        void refreshSession()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityCheck)
+    window.addEventListener('focus', handleVisibilityCheck)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityCheck)
+      window.removeEventListener('focus', handleVisibilityCheck)
+    }
+  }, [authStatus, authMode, refreshSession])
 
   const loginOnline = useCallback(async (credentials: SignInInput): Promise<OnlineSession> => {
     setIsAuthenticating(true)
@@ -166,6 +230,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       sessionId,
       isAuthenticating,
       loginOnline,
+      refreshSession,
       loginLocal,
       lock,
       unlockWithPin,
@@ -178,6 +243,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       sessionId,
       isAuthenticating,
       loginOnline,
+      refreshSession,
       loginLocal,
       lock,
       unlockWithPin,

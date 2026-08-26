@@ -6,6 +6,7 @@ import type { AuthState, LoginResult } from '../types/session'
 
 export interface AuthApiClient {
   onlineLogin(credentials: SignInInput, config?: SupabaseAuthConfig): Promise<OnlineSession>
+  refreshOnlineSession(refreshToken: string, config?: SupabaseAuthConfig): Promise<OnlineSession>
   onlineLogout(token?: string | null, config?: SupabaseAuthConfig): Promise<void>
   localLogin(credentials: LocalSignInInput): Promise<LoginResult>
   verifyPin(userId: string, pin: string): Promise<LoginResult>
@@ -58,23 +59,21 @@ class TauriAuthApiClient implements AuthApiClient {
     })
   }
 
+  async refreshOnlineSession(refreshToken: string, config?: SupabaseAuthConfig): Promise<OnlineSession> {
+    const activeConfig = config || getDefaultSupabaseConfig()
+    return this.invoke<OnlineSession>('refresh_online_session', {
+      config: activeConfig,
+      refreshToken: refreshToken.trim(),
+    })
+  }
+
   async onlineLogout(token?: string | null, config?: SupabaseAuthConfig): Promise<void> {
     if (!token) return
     const activeConfig = config || getDefaultSupabaseConfig()
-    const baseUrl = stripTrailingSlash(activeConfig.url)
-    const logoutUrl = `${baseUrl}/auth/v1/logout`
-    try {
-      await fetch(logoutUrl, {
-        method: 'POST',
-        headers: {
-          apikey: activeConfig.publishable_key,
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      })
-    } catch (err) {
-      throw new Error(extractInvokeErrorMessage(err))
-    }
+    return this.invoke<void>('online_logout', {
+      config: activeConfig,
+      accessToken: token.trim(),
+    })
   }
 
   async localLogin(credentials: LocalSignInInput): Promise<LoginResult> {
@@ -133,6 +132,38 @@ export class MockAuthApiClient implements AuthApiClient {
       user: {
         id: userId,
         email: trimmedEmail,
+        created_at: new Date().toISOString(),
+        last_sign_in_at: new Date().toISOString(),
+      },
+    }
+  }
+
+  async refreshOnlineSession(refreshToken: string, _config?: SupabaseAuthConfig): Promise<OnlineSession> {
+    if (this.shouldFailWith) throw new Error(this.shouldFailWith)
+    const trimmedToken = refreshToken.trim()
+    if (!trimmedToken) {
+      throw new Error('Validation error: Refresh token cannot be empty')
+    }
+    if (trimmedToken === 'invalid_refresh' || trimmedToken === 'expired_refresh') {
+      throw new Error('Session expired: Refresh token is invalid or has already been used. Please sign in again.')
+    }
+    if (trimmedToken === 'rate_limited') {
+      throw new Error('Rate limit exceeded: Too many authentication requests. Please wait a moment and try again.')
+    }
+    if (trimmedToken === 'network_error') {
+      throw new Error('Network error: Unable to reach Supabase authentication service')
+    }
+
+    const userId = 'usr_cloud_123'
+    return {
+      access_token: `mock_refreshed_jwt_${Date.now()}`,
+      refresh_token: `mock_refreshed_refresh_${Date.now()}`,
+      expires_in: 3600,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      token_type: 'bearer',
+      user: {
+        id: userId,
+        email: 'owner@example.com',
         created_at: new Date().toISOString(),
         last_sign_in_at: new Date().toISOString(),
       },

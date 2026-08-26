@@ -1,5 +1,5 @@
 // Pure TypeScript session evaluation and storage manager
-// F1.13 — Authentication screens and session lifecycle & F1.14 — Local PIN and Lock screen
+// F1.13 — Authentication screens and session lifecycle & F1.14 — Local PIN and Lock screen & F1.19 — Supabase Auth adapter hardening
 
 import type { AuthMode, AuthStatus, SignInInput, LocalSignInInput, OnlineSession } from '../types/auth'
 import type { LoginResult } from '../types/session'
@@ -9,10 +9,13 @@ export const AUTH_STORAGE_KEYS = {
   SESSION_ID: 'pos_global_session_id',
   AUTH_MODE: 'pos_global_auth_mode',
   CLOUD_TOKEN: 'pos_global_cloud_token',
+  CLOUD_REFRESH_TOKEN: 'pos_global_cloud_refresh_token',
+  CLOUD_EXPIRES_AT: 'pos_global_cloud_expires_at',
   CLOUD_USER: 'pos_global_cloud_user',
 } as const
 
 export const DEFAULT_AUTH_MODE = 'online' as const
+export const DEFAULT_EXPIRY_THRESHOLD_SECONDS = 300 // 5 minutes proactive refresh window
 
 export interface AuthenticatedUser {
   id: string
@@ -29,18 +32,60 @@ export interface RestoredSessionData {
   user: AuthenticatedUser | null
   sessionId: string | null
   mode: AuthMode
+  refreshToken?: string | null
+  expiresAt?: number | null
 }
 
+/**
+ * Checks if a token expires within the given threshold (defaults to 5 minutes).
+ */
+export function isTokenExpiringSoon(
+  expiresAt: number | undefined | null,
+  thresholdSeconds = DEFAULT_EXPIRY_THRESHOLD_SECONDS,
+): boolean {
+  if (expiresAt === undefined || expiresAt === null) return true
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  return expiresAt - nowSeconds <= thresholdSeconds
+}
+
+/**
+ * Safely clears all stored authentication credentials and tokens from tab sessionStorage.
+ */
 export function clearStoredAuth(): void {
   if (typeof window !== 'undefined' && window.sessionStorage) {
     window.sessionStorage.removeItem(AUTH_STORAGE_KEYS.SESSION_ID)
     window.sessionStorage.removeItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN)
+    window.sessionStorage.removeItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN)
+    window.sessionStorage.removeItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT)
     window.sessionStorage.removeItem(AUTH_STORAGE_KEYS.CLOUD_USER)
     window.sessionStorage.removeItem(AUTH_STORAGE_KEYS.AUTH_MODE)
   }
 }
 
-export async function restoreOnlineSession(token: string, rawUser: string | null): Promise<RestoredSessionData> {
+/**
+ * Persists active online session state to tab sessionStorage.
+ */
+export function storeOnlineSession(session: OnlineSession, user: AuthenticatedUser): void {
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.AUTH_MODE, 'online')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN, session.access_token)
+    if (session.refresh_token) {
+      window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN, session.refresh_token)
+    }
+    if (session.expires_at !== undefined) {
+      window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT, String(session.expires_at))
+    }
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.SESSION_ID, user.id)
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_USER, JSON.stringify(user))
+  }
+}
+
+export async function restoreOnlineSession(
+  token: string,
+  rawUser: string | null,
+  refreshToken?: string | null,
+  expiresAtStr?: string | null,
+): Promise<RestoredSessionData> {
   if (!token || !rawUser) {
     clearStoredAuth()
     return { status: 'unauthenticated', user: null, sessionId: null, mode: 'online' }
@@ -49,11 +94,14 @@ export async function restoreOnlineSession(token: string, rawUser: string | null
   try {
     const parsedUser = JSON.parse(rawUser) as AuthenticatedUser
     if (parsedUser?.id && parsedUser?.email) {
+      const expiresAt = expiresAtStr ? Number(expiresAtStr) : null
       return {
         status: 'authenticated',
         user: parsedUser,
         sessionId: parsedUser.id,
         mode: 'online',
+        refreshToken: refreshToken || null,
+        expiresAt: expiresAt && !Number.isNaN(expiresAt) ? expiresAt : null,
       }
     }
   } catch {
@@ -101,10 +149,12 @@ export async function evaluateStoredSession(apiClient: AuthApiClient): Promise<R
   const storedMode = window.sessionStorage.getItem(AUTH_STORAGE_KEYS.AUTH_MODE) as AuthMode | null
   const storedSessionId = window.sessionStorage.getItem(AUTH_STORAGE_KEYS.SESSION_ID)
   const storedCloudToken = window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN)
+  const storedCloudRefreshToken = window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN)
+  const storedCloudExpiresAt = window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT)
   const storedCloudUser = window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_USER)
 
   if (storedMode === 'online' && storedCloudToken) {
-    return restoreOnlineSession(storedCloudToken, storedCloudUser)
+    return restoreOnlineSession(storedCloudToken, storedCloudUser, storedCloudRefreshToken, storedCloudExpiresAt)
   }
 
   if (storedSessionId) {
@@ -126,13 +176,26 @@ export async function performOnlineLogin(
     role: 'owner',
   }
 
-  if (typeof window !== 'undefined' && window.sessionStorage) {
-    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.AUTH_MODE, 'online')
-    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN, onlineSession.access_token)
-    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.SESSION_ID, onlineSession.user.id)
-    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_USER, JSON.stringify(user))
+  storeOnlineSession(onlineSession, user)
+  return { session: onlineSession, user }
+}
+
+export async function performTokenRefresh(
+  refreshToken: string,
+  apiClient: AuthApiClient,
+  currentUser?: AuthenticatedUser | null,
+): Promise<{ session: OnlineSession; user: AuthenticatedUser }> {
+  const onlineSession = await apiClient.refreshOnlineSession(refreshToken)
+  const user: AuthenticatedUser = {
+    id: onlineSession.user.id || currentUser?.id || 'usr_online',
+    email: onlineSession.user.email || currentUser?.email || '',
+    full_name: (onlineSession.user.email || currentUser?.email || '').split('@')[0],
+    role: currentUser?.role || 'owner',
+    branch_id: currentUser?.branch_id || null,
+    organization_id: currentUser?.organization_id || null,
   }
 
+  storeOnlineSession(onlineSession, user)
   return { session: onlineSession, user }
 }
 
@@ -194,7 +257,7 @@ async function revokeCloudSession(apiClient: AuthApiClient, cloudToken?: string 
     try {
       await apiClient.onlineLogout(token)
     } catch {
-      // Fail-closed
+      // Fail-closed without throwing uncaught rejection
     }
   }
 }
@@ -203,7 +266,7 @@ async function revokeLocalSession(apiClient: AuthApiClient, sessionId: string): 
   try {
     await apiClient.logout(sessionId)
   } catch {
-    // Fail-closed
+    // Fail-closed without throwing uncaught rejection
   }
 }
 

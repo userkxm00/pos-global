@@ -323,3 +323,81 @@ fn error_messages_do_not_leak_passwords_or_tokens() {
     assert!(!display_str.contains(&secret_token));
     assert!(!display_str.contains(&dynamic_pw));
 }
+
+#[test]
+fn validate_refresh_token_accepts_valid_tokens_and_rejects_empty() {
+    use crate::auth::validate_refresh_token;
+
+    assert!(validate_refresh_token("valid_refresh_token_12345").is_ok());
+    assert!(matches!(
+        validate_refresh_token(""),
+        Err(AuthError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_refresh_token("   "),
+        Err(AuthError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_refresh_token("short"),
+        Err(AuthError::Validation(_))
+    ));
+}
+
+#[test]
+fn validate_access_token_accepts_valid_and_rejects_empty() {
+    use crate::auth::validate_access_token;
+
+    assert!(validate_access_token("valid_access_token_12345").is_ok());
+    assert!(matches!(
+        validate_access_token(""),
+        Err(AuthError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_access_token("   "),
+        Err(AuthError::Validation(_))
+    ));
+}
+
+#[test]
+fn parse_error_response_classifies_invalid_and_expired_refresh_tokens() {
+    let invalid_refresh_json = r#"{
+        "error": "invalid_grant",
+        "error_description": "Invalid Refresh Token: Refresh Token Not Found"
+    }"#;
+    let err = parse_error_response(400, invalid_refresh_json);
+    assert!(matches!(err, AuthError::SessionExpired(_)));
+    assert!(err.to_string().contains("Refresh token is invalid"));
+
+    let already_used_json = r#"{
+        "error": "invalid_grant",
+        "error_description": "Refresh token has already used"
+    }"#;
+    let err_used = parse_error_response(400, already_used_json);
+    assert!(matches!(err_used, AuthError::SessionExpired(_)));
+}
+
+#[test]
+fn parse_token_response_handles_successful_refresh_payload() {
+    let refresh_json = r#"{
+        "access_token": "new_access_token_999",
+        "refresh_token": "new_refresh_token_888",
+        "expires_in": 3600,
+        "expires_at": 1893456000,
+        "token_type": "bearer",
+        "user": {
+            "id": "usr_online_refresh_1",
+            "email": "refreshed@example.com",
+            "created_at": "2026-01-01T00:00:00Z",
+            "last_sign_in_at": "2026-08-26T12:00:00Z"
+        }
+    }"#;
+
+    let session = parse_token_response(refresh_json).expect("should parse refresh response");
+    assert_eq!(session.access_token, "new_access_token_999");
+    assert_eq!(
+        session.refresh_token,
+        Some("new_refresh_token_888".to_string())
+    );
+    assert_eq!(session.user.id, "usr_online_refresh_1");
+    assert_eq!(session.user.email, "refreshed@example.com");
+}

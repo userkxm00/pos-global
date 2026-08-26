@@ -19,6 +19,8 @@ import {
 import { AUTH_STORAGE_KEYS } from '../components/auth/constants.ts'
 import {
   performOnlineLogin,
+  performTokenRefresh,
+  isTokenExpiringSoon,
   performLocalLogin,
   performLogout,
   evaluateStoredSession,
@@ -465,5 +467,99 @@ describe('F1.13 Authentication & Session Lifecycle Test Suite', () => {
     assert.strictEqual(getDirectionForLocale('ar-SA'), 'rtl')
     assert.strictEqual(getDirectionForLocale('en'), 'ltr')
     assert.strictEqual(getDirectionForLocale('fr'), 'ltr')
+  })
+
+  // 14. Token Expiry & Expiring-Soon Detection (F1.19)
+  it('14. isTokenExpiringSoon correctly detects impending expiration threshold', () => {
+    const nowSeconds = Math.floor(Date.now() / 1000)
+
+    // Missing expiresAt -> expires soon (fail-closed)
+    assert.strictEqual(isTokenExpiringSoon(undefined), true)
+    assert.strictEqual(isTokenExpiringSoon(null), true)
+
+    // Expired in the past
+    assert.strictEqual(isTokenExpiringSoon(nowSeconds - 100), true)
+
+    // Expiring in 2 minutes (threshold is 5 minutes = 300s)
+    assert.strictEqual(isTokenExpiringSoon(nowSeconds + 120), true)
+
+    // Expiring in 10 minutes (not expiring soon)
+    assert.strictEqual(isTokenExpiringSoon(nowSeconds + 600), false)
+  })
+
+  // 15. Successful Token Refresh Lifecycle (F1.19)
+  it('15. performTokenRefresh refreshes cloud tokens and updates session storage atomically', async () => {
+    const mockApi = new MockAuthApiClient()
+    setAuthApi(mockApi)
+    window.sessionStorage.clear()
+
+    const initialUser = {
+      id: 'usr_cloud_123',
+      email: 'owner@example.com',
+      role: 'owner',
+    }
+
+    const { session, user } = await performTokenRefresh(
+      'mock_valid_refresh_token',
+      mockApi,
+      initialUser,
+    )
+
+    assert.ok(session.access_token)
+    assert.ok(session.refresh_token)
+    assert.strictEqual(user.id, 'usr_cloud_123')
+    assert.strictEqual(user.role, 'owner')
+
+    assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.AUTH_MODE), 'online')
+    assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN), session.access_token)
+    assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN), session.refresh_token)
+  })
+
+  // 16. Failed Token Refresh Fail-Closed Handling (F1.19)
+  it('16. performTokenRefresh with invalid or expired refresh token throws and allows fail-closed handling', async () => {
+    const mockApi = new MockAuthApiClient()
+    setAuthApi(mockApi)
+
+    await assert.rejects(
+      async () => {
+        await performTokenRefresh('expired_refresh', mockApi)
+      },
+      (err: Error) => {
+        assert.ok(err.message.includes('Session expired') || err.message.includes('invalid'))
+        return true
+      },
+    )
+  })
+
+  // 17. Network Error Resilience during Token Refresh (F1.19)
+  it('17. transient network errors during token refresh throw clear typed error without crashing', async () => {
+    const mockApi = new MockAuthApiClient()
+    setAuthApi(mockApi)
+
+    await assert.rejects(
+      async () => {
+        await performTokenRefresh('network_error', mockApi)
+      },
+      (err: Error) => {
+        assert.ok(err.message.includes('Network error'))
+        return true
+      },
+    )
+  })
+
+  // 18. Online Logout Cloud Token Revocation (F1.19)
+  it('18. onlineLogout tracks revoked tokens in MockAuthApiClient and cleans storage', async () => {
+    const mockApi = new MockAuthApiClient()
+    setAuthApi(mockApi)
+    window.sessionStorage.clear()
+
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.AUTH_MODE, 'online')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN, 'token_to_revoke_123')
+
+    await performLogout('sess_123', 'online', mockApi, 'token_to_revoke_123')
+
+    assert.ok(mockApi.revokedCloudTokens.has('token_to_revoke_123'))
+    assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN), null)
+    assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.AUTH_MODE), null)
   })
 })

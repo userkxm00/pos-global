@@ -1,4 +1,4 @@
-// F1.04 — Supabase Auth adapter & F1.13 — Auth screens & F1.14 — Local PIN and Lock screen
+// F1.04 — Supabase Auth adapter & F1.13 — Auth screens & F1.14 — Local PIN and Lock screen & F1.19 — Supabase Auth adapter hardening
 
 export interface SupabaseAuthConfig {
   url: string
@@ -26,6 +26,10 @@ export interface SignInInput {
   password: string
 }
 
+export interface RefreshTokenInput {
+  refresh_token: string
+}
+
 export interface LocalSignInInput {
   username: string
   password: string
@@ -33,3 +37,19 @@ export interface LocalSignInInput {
 
 export type AuthMode = 'online' | 'local'
 export type AuthStatus = 'unauthenticated' | 'authenticating' | 'authenticated' | 'expired' | 'locked'
+
+export type AuthErrorCode =
+  | 'invalid_credentials'
+  | 'session_expired'
+  | 'rate_limit'
+  | 'network_error'
+  | 'service_unavailable'
+  | 'unconfigured'
+  | 'validation_error'
+  | 'security_violation'
+  | 'unknown'
+
+export interface TypedAuthError {
+  code: AuthErrorCode
+  message: string
+}
