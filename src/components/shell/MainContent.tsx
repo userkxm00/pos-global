@@ -7,7 +7,7 @@ import { useShell, NavigationRoute } from '../../context/ShellContext'
 import { useAuth } from '../../context/AuthContext'
 import type { Permission, UserPermissionOverride } from '../../types/permission'
 import { getPermissionApi } from '../../services/permissionApi'
-import { EMPTY_OVERRIDES } from '../../context/permissionEvaluation'
+import { checkPermissions, EMPTY_OVERRIDES } from '../../context/permissionEvaluation'
 import { OfflineBanner } from '../common/OfflineBanner'
 import { LoadingSkeleton } from '../common/LoadingSkeleton'
 import { EmptyState } from '../common/EmptyState'
@@ -27,6 +27,34 @@ export const ROUTE_PERMISSIONS: Record<NavigationRoute, Permission | undefined> 
   settings: 'settings.manage',
 }
 
+export const NAVIGATION_ROUTES_ORDER: readonly NavigationRoute[] = [
+  'pos',
+  'shifts',
+  'inventory',
+  'customers',
+  'reports',
+  'users',
+  'tenants',
+  'settings',
+]
+
+/**
+ * Finds the first accessible safe navigation route for the active user role and overrides.
+ * Prevents redirecting a permission-denied user to another restricted route.
+ */
+export function findSafeNavigationRoute(
+  role: string | undefined | null,
+  overrides: readonly UserPermissionOverride[] = EMPTY_OVERRIDES,
+): NavigationRoute {
+  for (const route of NAVIGATION_ROUTES_ORDER) {
+    const required = ROUTE_PERMISSIONS[route]
+    if (!required || checkPermissions(role, required, false, overrides)) {
+      return route
+    }
+  }
+  return 'pos'
+}
+
 export interface UserOverrideState {
   userId: string | null
   overrides: UserPermissionOverride[]
@@ -37,12 +65,14 @@ interface WorkspaceModuleViewProps {
   activeRoute: NavigationRoute
   routeTitle: string
   systemReadyText: string
+  workspaceNoticeText: string
 }
 
 const WorkspaceModuleView: React.FC<WorkspaceModuleViewProps> = ({
   activeRoute,
   routeTitle,
   systemReadyText,
+  workspaceNoticeText,
 }) => {
   if (activeRoute === 'users') {
     return <RolesPermissionsAdmin />
@@ -69,10 +99,7 @@ const WorkspaceModuleView: React.FC<WorkspaceModuleViewProps> = ({
           lineHeight: 'var(--line-height-relaxed)',
         }}
       >
-        <p style={{ margin: 0 }}>
-          <strong>Foundation Workspace</strong>: Module <code>{activeRoute}</code> active.
-          Authorization, multi-tenant boundaries, and local SQLite data layers are verified and enforced.
-        </p>
+        <p style={{ margin: 0 }}>{workspaceNoticeText}</p>
       </div>
     </div>
   )
@@ -132,11 +159,6 @@ export const MainContent: React.FC = () => {
     }
   }, [activeUser?.id])
 
-  const handleReturnToSafeRoute = useCallback(() => {
-    setActiveRoute('pos')
-    setViewState('idle')
-  }, [setActiveRoute, setViewState])
-
   const routeTitleKey = `nav.items.${activeRoute}`
   const routeTitle = t(routeTitleKey)
   const requiredPermission = ROUTE_PERMISSIONS[activeRoute]
@@ -144,6 +166,12 @@ export const MainContent: React.FC = () => {
   const isOverrideForActiveUser = overrideState.userId === activeUser?.id
   const effectiveOverrides = isOverrideForActiveUser ? overrideState.overrides : EMPTY_OVERRIDES
   const isAuthHydrating = requiredPermission && overrideState.isLoading
+
+  const handleReturnToSafeRoute = useCallback(() => {
+    const safeRoute = findSafeNavigationRoute(activeUser?.role, effectiveOverrides)
+    setActiveRoute(safeRoute)
+    setViewState('idle')
+  }, [activeUser?.role, effectiveOverrides, setActiveRoute, setViewState])
 
   const renderDynamicContent = () => {
     if (viewState === 'loading' || isAuthHydrating) {
@@ -197,6 +225,7 @@ export const MainContent: React.FC = () => {
           activeRoute={activeRoute}
           routeTitle={routeTitle}
           systemReadyText={t('status.systemReady')}
+          workspaceNoticeText={t('status.workspaceNotice', { route: activeRoute })}
         />
       </PermissionGate>
     )

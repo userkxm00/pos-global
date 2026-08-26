@@ -89,6 +89,7 @@ export const en = {
     currentRegister: 'Terminal: {{name}}',
     systemReady: 'System Ready',
     processing: 'Processing...',
+    workspaceNotice: 'Foundation Workspace: Module {{route}} active. Authorization, multi-tenant boundaries, and local SQLite data layers are verified and enforced.',
   },
   sync: {
     title: 'Synchronization Details',
@@ -518,6 +519,7 @@ export const ar = {
     currentRegister: 'الجهاز: {{name}}',
     systemReady: 'النظام جاهز',
     processing: 'جاري المعالجة...',
+    workspaceNotice: 'بيئة العمل الأساسية: الوحدة {{route}} نشطة. يتم التحقق من الصلاحيات والحدود متعددة المستأجرين وطبقات بيانات SQLite المحلية وفرضها.',
   },
   sync: {
     title: 'تفاصيل المزامنة',
@@ -943,6 +945,7 @@ export const fr = {
     currentRegister: 'Caisse : {{name}}',
     systemReady: 'Système prêt',
     processing: 'Traitement en cours...',
+    workspaceNotice: 'Espace de travail : Module {{route}} actif. Les autorisations, les limites multi-locataires et les couches de données SQLite locales sont vérifiées et appliquées.',
   },
   sync: {
     title: 'Détails de synchronisation',

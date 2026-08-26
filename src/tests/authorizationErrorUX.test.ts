@@ -302,4 +302,71 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
       assert.ok(dict.status.processing, `Locales ${code} must have status.processing`)
     }
   })
+
+  // Test 16: Status workspaceNotice key completeness across en, ar, fr
+  it('16. verifies status.workspaceNotice translations across English, Arabic (RTL), and French', () => {
+    const locales = [
+      { code: 'en', dict: en },
+      { code: 'ar', dict: ar },
+      { code: 'fr', dict: fr },
+    ]
+
+    for (const { code, dict } of locales) {
+      assert.ok(dict.status.workspaceNotice, `Locales ${code} must have status.workspaceNotice`)
+    }
+  })
+
+  // Test 17: Safe fallback navigation route calculation
+  it('17. dynamically resolves safe accessible routes avoiding restricted destinations on return', () => {
+    const routePermissions: Record<string, Permission> = {
+      pos: 'sales.create',
+      shifts: 'cash.open',
+      inventory: 'products.manage',
+      customers: 'customers.manage',
+      reports: 'reports.view',
+      users: 'users.manage',
+      tenants: 'settings.manage',
+      settings: 'settings.manage',
+    }
+    const routesOrder = ['pos', 'shifts', 'inventory', 'customers', 'reports', 'users', 'tenants', 'settings']
+
+    function testFindSafeRoute(
+      role: string | undefined | null,
+      overrides: readonly UserPermissionOverride[] = EMPTY_OVERRIDES,
+    ): string {
+      for (const route of routesOrder) {
+        const required = routePermissions[route]
+        if (!required || checkPermissions(role, required, false, overrides)) {
+          return route
+        }
+      }
+      return 'pos'
+    }
+
+    // Default admin / cashier has sales.create -> 'pos'
+    assert.strictEqual(testFindSafeRoute('cashier'), 'pos')
+    assert.strictEqual(testFindSafeRoute('manager'), 'pos')
+    assert.strictEqual(testFindSafeRoute('admin'), 'pos')
+
+    // Cashier with deny override on sales.create -> falls back to 'shifts' (cash.open)
+    const cashierDenySales: UserPermissionOverride[] = [
+      { permission: 'sales.create', effect: 'deny' },
+    ]
+    assert.strictEqual(
+      testFindSafeRoute('cashier', cashierDenySales),
+      'shifts',
+      'Denied on pos must safely navigate to shifts which cashier can access',
+    )
+
+    // User with deny on sales and cash -> falls back to inventory if manager
+    const managerDenySalesAndCash: UserPermissionOverride[] = [
+      { permission: 'sales.create', effect: 'deny' },
+      { permission: 'cash.open', effect: 'deny' },
+    ]
+    assert.strictEqual(
+      testFindSafeRoute('manager', managerDenySalesAndCash),
+      'inventory',
+      'Manager safely routes to inventory',
+    )
+  })
 })
