@@ -1,0 +1,101 @@
+/* Confirmation Dialog & State Container Enhancements */
+/* F1.18 — Authorization and Error-State UX & UI_SPEC.md */
+
+.confirmation-dialog {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  padding: 0;
+  max-width: 480px;
+  width: calc(100vw - var(--space-8));
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+  animation: dialogFadeIn 0.2s ease-out;
+}
+
+.confirmation-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+@keyframes dialogFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.confirmation-dialog__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.confirmation-dialog__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-warning, #d97706);
+}
+
+.confirmation-dialog--destructive .confirmation-dialog__icon {
+  color: var(--color-danger, #dc2626);
+}
+
+.confirmation-dialog__title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.confirmation-dialog__body {
+  padding: var(--space-5) var(--space-6);
+}
+
+.confirmation-dialog__description {
+  margin: 0 0 var(--space-4) 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-normal);
+}
+
+.confirmation-dialog__reason-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.confirmation-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  background: var(--color-bg-surface-sunken);
+  border-top: 1px solid var(--color-border);
+  border-bottom-left-radius: var(--radius-xl);
+  border-bottom-right-radius: var(--radius-xl);
+}
+
+.state-container__code {
+  margin-block-start: var(--space-2);
+}
+
+.state-container__code code {
+  background: var(--color-bg-surface-sunken);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.state-container__correlation {
+  margin-block-start: var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
