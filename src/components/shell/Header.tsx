@@ -1,6 +1,7 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShell } from '../../context/ShellContext'
+import { useAuth } from '../../context/AuthContext'
 import { SyncIndicator } from '../common/SyncIndicator'
 import { PosIcon, LockIcon } from '../common/Icons'
 import { supportedLocales, SupportedLocale } from '../../i18n'
@@ -18,10 +19,17 @@ export const Header: React.FC = () => {
     lockSession,
   } = useShell()
 
+  const { lock, activeUser } = useAuth()
+
   const orgName = organization?.name || 'Default Organization'
   const branchName = branch?.name || 'Main Branch'
-  const userName = session?.full_name || 'Terminal Operator'
-  const userRole = session?.role || 'cashier'
+  const userName = activeUser?.full_name || activeUser?.username || session?.full_name || 'Terminal Operator'
+  const userRole = activeUser?.role || session?.role || 'cashier'
+
+  const handleLock = () => {
+    lockSession()
+    lock()
+  }
 
   return (
     <header className="app-header" role="banner" data-testid="app-header">
@@ -76,9 +84,10 @@ export const Header: React.FC = () => {
         <button
           type="button"
           className="btn btn--secondary btn--sm"
-          onClick={lockSession}
+          onClick={handleLock}
           title={`${t('header.lockSession')} (${t('shortcuts.lock')})`}
           aria-label={`${t('header.lockSession')} (${t('shortcuts.lock')})`}
+          data-testid="header-lock-button"
         >
           <LockIcon />
           <span>{t('header.lockSession')}</span>

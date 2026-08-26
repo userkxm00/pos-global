@@ -1,5 +1,5 @@
 // Pure TypeScript session evaluation and storage manager
-// F1.13 — Authentication screens and session lifecycle
+// F1.13 — Authentication screens and session lifecycle & F1.14 — Local PIN and Lock screen
 
 import type { AuthMode, AuthStatus, SignInInput, LocalSignInInput, OnlineSession } from '../types/auth'
 import type { LoginResult } from '../types/session'
@@ -152,6 +152,31 @@ export async function performLocalLogin(
       username: credentials.username,
       role: result.role || 'cashier',
       branch_id: result.branch_id || null,
+    }
+    return { result, user }
+  }
+
+  return { result, user: null }
+}
+
+export async function performPinUnlock(
+  userId: string,
+  pin: string,
+  apiClient: AuthApiClient,
+  existingBranchId?: string | null,
+): Promise<{ result: LoginResult; user: AuthenticatedUser | null }> {
+  const result = await apiClient.verifyPin(userId, pin)
+
+  if (result.success && result.session_id) {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.setItem(AUTH_STORAGE_KEYS.AUTH_MODE, 'local')
+      window.sessionStorage.setItem(AUTH_STORAGE_KEYS.SESSION_ID, result.session_id)
+    }
+    const resolvedBranchId = result.branch_id || existingBranchId || null
+    const user: AuthenticatedUser = {
+      id: result.user_id || userId,
+      role: result.role || 'cashier',
+      branch_id: resolvedBranchId,
     }
     return { result, user }
   }

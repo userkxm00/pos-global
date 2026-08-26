@@ -1,5 +1,5 @@
-// AuthContext managing authentication lifecycle, session restoration, and logout
-// F1.13 — Authentication screens and session lifecycle
+// AuthContext managing authentication lifecycle, session restoration, lock/unlock, and logout
+// F1.13 — Authentication screens and session lifecycle & F1.14 — Local PIN and Lock screen
 
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react'
 import type { AuthMode, AuthStatus, SignInInput, LocalSignInInput, OnlineSession } from '../types/auth'
@@ -11,6 +11,7 @@ import {
   evaluateStoredSession,
   performOnlineLogin,
   performLocalLogin,
+  performPinUnlock,
   performLogout,
 } from './authSession'
 
@@ -25,6 +26,8 @@ export interface AuthContextType {
   isAuthenticating: boolean
   loginOnline: (credentials: SignInInput) => Promise<OnlineSession>
   loginLocal: (credentials: LocalSignInInput) => Promise<LoginResult>
+  lock: () => void
+  unlockWithPin: (pin: string) => Promise<LoginResult>
   logout: () => Promise<void>
 }
 
@@ -112,6 +115,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     }
   }, [])
 
+  const lock = useCallback(() => {
+    setAuthStatus('locked')
+  }, [])
+
+  const unlockWithPin = useCallback(
+    async (pin: string): Promise<LoginResult> => {
+      if (!activeUser?.id) {
+        setAuthStatus('unauthenticated')
+        return { success: false }
+      }
+      setIsAuthenticating(true)
+      try {
+        const api = getAuthApi()
+        const { result, user } = await performPinUnlock(
+          activeUser.id,
+          pin,
+          api,
+          activeUser.branch_id,
+        )
+        if (result.success && result.session_id) {
+          setSessionId(result.session_id)
+          if (user) {
+            setActiveUser((prev) => (prev ? { ...prev, ...user } : user))
+          }
+          setAuthStatus('authenticated')
+        }
+        return result
+      } finally {
+        setIsAuthenticating(false)
+      }
+    },
+    [activeUser?.id, activeUser?.branch_id],
+  )
+
   const logout = useCallback(async (): Promise<void> => {
     const api = getAuthApi()
     await performLogout(sessionId, authMode, api)
@@ -130,6 +167,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       isAuthenticating,
       loginOnline,
       loginLocal,
+      lock,
+      unlockWithPin,
       logout,
     }),
     [
@@ -140,6 +179,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       isAuthenticating,
       loginOnline,
       loginLocal,
+      lock,
+      unlockWithPin,
       logout,
     ],
   )

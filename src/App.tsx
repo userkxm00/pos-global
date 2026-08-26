@@ -3,9 +3,11 @@ import { ShellProvider, useShell } from './context/ShellContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { AppShell } from './components/shell/AppShell'
 import { LoginScreen } from './components/auth/LoginScreen'
+import { LockScreen } from './components/lock/LockScreen'
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard'
 import { LoadingSkeleton } from './components/common/LoadingSkeleton'
 import { getOnboardingApi } from './services/onboardingApi'
+import { useInactivityTimeout } from './hooks/useInactivityTimeout'
 import type { Organization } from './types/organization'
 import type { Branch } from './types/branch'
 import type { Register } from './types/register'
@@ -23,8 +25,14 @@ export const AppContent: React.FC = () => {
     setActiveRoute,
   } = useShell()
 
-  const { authStatus, activeUser } = useAuth()
+  const { authStatus, activeUser, lock } = useAuth()
   const [isHydrating, setIsHydrating] = useState(false)
+
+  // Inactivity timeout handler
+  useInactivityTimeout({
+    onTimeout: lock,
+    isEnabled: authStatus === 'authenticated',
+  })
 
   // Clear stale shell context whenever authentication is lost or revoked
   useEffect(() => {
@@ -95,6 +103,11 @@ export const AppContent: React.FC = () => {
         <LoadingSkeleton cardsCount={3} />
       </main>
     )
+  }
+
+  // If terminal is locked, display LockScreen
+  if (authStatus === 'locked') {
+    return <LockScreen />
   }
 
   // If user is unauthenticated or session has expired, display the LoginScreen

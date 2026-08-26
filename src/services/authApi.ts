@@ -8,6 +8,7 @@ export interface AuthApiClient {
   onlineLogin(credentials: SignInInput, config?: SupabaseAuthConfig): Promise<OnlineSession>
   onlineLogout(token?: string | null, config?: SupabaseAuthConfig): Promise<void>
   localLogin(credentials: LocalSignInInput): Promise<LoginResult>
+  verifyPin(userId: string, pin: string): Promise<LoginResult>
   getAuthState(sessionId?: string | null): Promise<AuthState>
   logout(sessionId: string): Promise<void>
 }
@@ -83,6 +84,13 @@ class TauriAuthApiClient implements AuthApiClient {
     })
   }
 
+  async verifyPin(userId: string, pin: string): Promise<LoginResult> {
+    return this.invoke<LoginResult>('verify_pin', {
+      userId: userId.trim(),
+      pin: pin.trim(),
+    })
+  }
+
   async getAuthState(sessionId?: string | null): Promise<AuthState> {
     return this.invoke<AuthState>('auth_state', {
       sessionId: sessionId || null,
@@ -101,6 +109,7 @@ let mockSessionCounter = 0
 // In-Memory Mock Implementation for Deterministic Unit Tests & Local Dev Runs
 export class MockAuthApiClient implements AuthApiClient {
   public shouldFailWith: string | null = null
+  public isRateLimited: boolean = false
   public activeSessions: Map<string, AuthState> = new Map()
   public revokedCloudTokens: Set<string> = new Set()
 
@@ -165,6 +174,43 @@ export class MockAuthApiClient implements AuthApiClient {
       session_id: sessionId,
       user_id: userId,
       role: 'admin',
+      branch_id: 'br_default',
+    }
+  }
+
+  async verifyPin(userId: string, pin: string): Promise<LoginResult> {
+    if (this.shouldFailWith) throw new Error(this.shouldFailWith)
+    const trimmedUserId = userId.trim()
+    const trimmedPin = pin.trim()
+    if (!trimmedUserId || !trimmedPin) {
+      throw new Error('Validation error: User ID and PIN are required')
+    }
+    if (trimmedPin === '0000' || trimmedPin === 'wrong_pin') {
+      throw new Error('Invalid credentials: Invalid PIN')
+    }
+    if (trimmedPin === '9999' || this.isRateLimited) {
+      throw new Error(
+        'Invalid credentials: Too many failed attempts. Account is temporarily locked. Please try again later.',
+      )
+    }
+
+    mockSessionCounter += 1
+    const sessionId = `sess_pin_${trimmedUserId.toLowerCase()}_${mockSessionCounter}`
+    const authState: AuthState = {
+      authenticated: true,
+      session_id: sessionId,
+      user_id: trimmedUserId,
+      branch_id: 'br_default',
+      role: 'cashier',
+      organization_id: 'org_default',
+    }
+    this.activeSessions.set(sessionId, authState)
+
+    return {
+      success: true,
+      session_id: sessionId,
+      user_id: trimmedUserId,
+      role: 'cashier',
       branch_id: 'br_default',
     }
   }
