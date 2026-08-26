@@ -90,3 +90,58 @@ export function resolveRegisterOnBranchChange(
   )
   return match || null
 }
+
+/**
+ * State guard for tracking request sequence IDs to discard out-of-order responses.
+ */
+export interface CascadingSequenceGuard {
+  orgReqSeq: number
+  branchReqSeq: number
+}
+
+export function createCascadingSequenceGuard(): CascadingSequenceGuard {
+  return { orgReqSeq: 0, branchReqSeq: 0 }
+}
+
+/**
+ * Performs sequence-guarded organization branch fetching.
+ */
+export async function performGuardedOrgFetch(
+  fetchBranches: (orgId: string) => Promise<Branch[]>,
+  newOrgId: string,
+  guard: CascadingSequenceGuard,
+  onSuccess: (branches: Branch[], seq: number) => void,
+): Promise<number> {
+  const seq = ++guard.orgReqSeq
+  ++guard.branchReqSeq // Invalidate any pending register requests
+  if (!newOrgId) {
+    onSuccess([], seq)
+    return seq
+  }
+  const fetchedBranches = await fetchBranches(newOrgId)
+  if (seq === guard.orgReqSeq) {
+    onSuccess(fetchedBranches, seq)
+  }
+  return seq
+}
+
+/**
+ * Performs sequence-guarded branch register fetching.
+ */
+export async function performGuardedBranchFetch(
+  fetchRegisters: (branchId: string) => Promise<Register[]>,
+  newBranchId: string,
+  guard: CascadingSequenceGuard,
+  onSuccess: (registers: Register[], seq: number) => void,
+): Promise<number> {
+  const seq = ++guard.branchReqSeq
+  if (!newBranchId) {
+    onSuccess([], seq)
+    return seq
+  }
+  const fetchedRegisters = await fetchRegisters(newBranchId)
+  if (seq === guard.branchReqSeq) {
+    onSuccess(fetchedRegisters, seq)
+  }
+  return seq
+}

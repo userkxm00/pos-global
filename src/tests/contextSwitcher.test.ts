@@ -9,6 +9,9 @@ import {
   isRegisterCompatible,
   resolveBranchOnOrgChange,
   resolveRegisterOnBranchChange,
+  createCascadingSequenceGuard,
+  performGuardedOrgFetch,
+  performGuardedBranchFetch,
 } from '../context/contextSwitching.ts'
 import {
   MockContextApiClient,
@@ -310,50 +313,68 @@ describe('F1.15 Context Switcher Test Suite', () => {
     })
   })
 
-  // Test 11: Cascading Race-Condition Sequence Guard Simulation
-  it('11. Generation sequencing discards stale parent responses from overwriting newer selections', async () => {
-    let activeSeq = 0
+  // Test 11: Production performGuardedOrgFetch Discards Stale Cascading Responses
+  it('11. performGuardedOrgFetch discards stale parent responses from overwriting newer selections', async () => {
+    const guard = createCascadingSequenceGuard()
     let lastRenderedBranches: Branch[] = []
 
-    async function simulatedOrgChange(orgId: string, delay: number, branchesResult: Branch[]) {
-      const seq = ++activeSeq
+    async function slowFetch(orgId: string): Promise<Branch[]> {
+      const delay = orgId === 'org_a' ? 50 : 10
       await new Promise((resolve) => setTimeout(resolve, delay))
-      if (seq === activeSeq) {
-        lastRenderedBranches = branchesResult
-      }
+      return orgId === 'org_a' ? [branchA1, branchA2] : [branchB1]
     }
 
     // User triggers Org A (slow request: 50ms) then quickly triggers Org B (fast request: 10ms)
-    const p1 = simulatedOrgChange('org_a', 50, [branchA1, branchA2])
-    const p2 = simulatedOrgChange('org_b', 10, [branchB1])
+    const p1 = performGuardedOrgFetch(slowFetch, 'org_a', guard, (branches) => {
+      lastRenderedBranches = branches
+    })
+    const p2 = performGuardedOrgFetch(slowFetch, 'org_b', guard, (branches) => {
+      lastRenderedBranches = branches
+    })
 
     await Promise.all([p1, p2])
 
     // Org B's response must win and not be overwritten by Org A's delayed response
     assert.strictEqual(lastRenderedBranches.length, 1)
     assert.strictEqual(lastRenderedBranches[0].id, 'branch_b1')
+
+    // Test empty orgId handling
+    let emptyBranches: Branch[] = [branchA1]
+    await performGuardedOrgFetch(slowFetch, '', guard, (branches) => {
+      emptyBranches = branches
+    })
+    assert.strictEqual(emptyBranches.length, 0)
   })
 
-  // Test 12: Branch -> Register Sequencing Guard Simulation
-  it('12. Generation sequencing discards stale branch register responses', async () => {
-    let branchSeq = 0
+  // Test 12: Production performGuardedBranchFetch Discards Stale Register Responses
+  it('12. performGuardedBranchFetch discards stale branch register responses', async () => {
+    const guard = createCascadingSequenceGuard()
     let lastRenderedRegisters: Register[] = []
 
-    async function simulatedBranchChange(branchId: string, delay: number, regsResult: Register[]) {
-      const seq = ++branchSeq
+    async function slowFetch(branchId: string): Promise<Register[]> {
+      const delay = branchId === 'branch_a1' ? 40 : 10
       await new Promise((resolve) => setTimeout(resolve, delay))
-      if (seq === branchSeq) {
-        lastRenderedRegisters = regsResult
-      }
+      return branchId === 'branch_a1' ? [registerA1_1, registerA1_2] : [registerB1_1]
     }
 
-    const p1 = simulatedBranchChange('branch_a1', 40, [registerA1_1, registerA1_2])
-    const p2 = simulatedBranchChange('branch_b1', 10, [registerB1_1])
+    const p1 = performGuardedBranchFetch(slowFetch, 'branch_a1', guard, (regs) => {
+      lastRenderedRegisters = regs
+    })
+    const p2 = performGuardedBranchFetch(slowFetch, 'branch_b1', guard, (regs) => {
+      lastRenderedRegisters = regs
+    })
 
     await Promise.all([p1, p2])
 
     assert.strictEqual(lastRenderedRegisters.length, 1)
     assert.strictEqual(lastRenderedRegisters[0].id, 'reg_b1_1')
+
+    // Test empty branchId handling
+    let emptyRegisters: Register[] = [registerA1_1]
+    await performGuardedBranchFetch(slowFetch, '', guard, (regs) => {
+      emptyRegisters = regs
+    })
+    assert.strictEqual(emptyRegisters.length, 0)
   })
 
   // Test 13: Cascading Child Selection Preservation Integration
