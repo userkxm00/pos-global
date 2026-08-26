@@ -1,16 +1,18 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShell } from '../../context/ShellContext'
 import { useAuth } from '../../context/AuthContext'
 import { SyncIndicator } from '../common/SyncIndicator'
 import { PosIcon, LockIcon } from '../common/Icons'
 import { supportedLocales, SupportedLocale } from '../../i18n'
+import { ContextSwitcherModal } from './ContextSwitcherModal'
 
 export const Header: React.FC = () => {
   const { t } = useTranslation()
   const {
     organization,
     branch,
+    register,
     session,
     isOnline,
     isSyncing,
@@ -20,9 +22,11 @@ export const Header: React.FC = () => {
   } = useShell()
 
   const { lock, activeUser } = useAuth()
+  const [isSwitcherOpen, setIsSwitcherOpen] = useState(false)
 
   const orgName = organization?.name || 'Default Organization'
   const branchName = branch?.name || 'Main Branch'
+  const registerName = register?.name || 'Terminal 01'
   const userName = activeUser?.full_name || activeUser?.username || session?.full_name || 'Terminal Operator'
   const userRole = activeUser?.role || session?.role || 'cashier'
 
@@ -41,15 +45,36 @@ export const Header: React.FC = () => {
           <span>{t('app.name')}</span>
         </a>
 
-        {/* Tenant and Branch Context Indicator */}
-        <div className="tenant-badge">
+        {/* Tenant, Branch, and Register Context Switcher Trigger */}
+        <button
+          type="button"
+          className="tenant-badge tenant-badge--interactive"
+          onClick={() => setIsSwitcherOpen(true)}
+          title={`${t('contextSwitcher.trigger')}: ${orgName} / ${branchName} • ${registerName}`}
+          aria-label={t('contextSwitcher.triggerAriaLabel')}
+          aria-haspopup="dialog"
+          aria-expanded={isSwitcherOpen}
+          data-testid="header-context-switcher-btn"
+        >
           <span className="tenant-badge__org">{orgName}</span>
           <span className="tenant-badge__divider" aria-hidden="true">
             /
           </span>
           <span>{branchName}</span>
-        </div>
+          <span className="tenant-badge__divider" aria-hidden="true">
+            •
+          </span>
+          <span className="tenant-badge__register">{registerName}</span>
+          <span className="tenant-badge__icon" aria-hidden="true">
+            ▾
+          </span>
+        </button>
       </div>
+
+      <ContextSwitcherModal
+        isOpen={isSwitcherOpen}
+        onClose={() => setIsSwitcherOpen(false)}
+      />
 
       <div className="app-header__center">
         <SyncIndicator isOnline={isOnline} isSyncing={isSyncing} />
