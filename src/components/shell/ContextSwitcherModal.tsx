@@ -5,7 +5,11 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShell } from '../../context/ShellContext'
 import { getContextApi } from '../../services/contextApi'
-import { validateContextHierarchy } from '../../context/contextSwitching'
+import {
+  validateContextHierarchy,
+  resolveBranchOnOrgChange,
+  resolveRegisterOnBranchChange,
+} from '../../context/contextSwitching'
 import type { Organization } from '../../types/organization'
 import type { Branch } from '../../types/branch'
 import type { Register } from '../../types/register'
@@ -33,95 +37,22 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
 
-  const modalRef = useRef<HTMLDivElement>(null)
+  const modalRef = useRef<HTMLDialogElement>(null)
   const previousActiveElement = useRef<HTMLElement | null>(null)
 
-  // Initialize and load organizations when modal opens
+  // Request sequencing refs to avoid race conditions
+  const orgReqSeq = useRef<number>(0)
+  const branchReqSeq = useRef<number>(0)
+
+  // Focus management: track active element on open and restore exclusively on close
   useEffect(() => {
-    if (!isOpen) return
-
-    previousActiveElement.current = document.activeElement as HTMLElement | null
-    setSelectedOrgId(organization?.id || '')
-    setSelectedBranchId(branch?.id || '')
-    setSelectedRegisterId(register?.id || '')
-    setErrorMessage(null)
-
-    let isMounted = true
-    setIsLoadingOrgs(true)
-
-    async function loadInitialData() {
-      try {
-        const api = getContextApi()
-        const fetchedOrgs = await api.listOrganizations()
-        if (!isMounted) return
-        setOrgs(fetchedOrgs)
-
-        let activeOrgId = ''
-        if (organization?.id) {
-          activeOrgId = organization.id
-        } else if (fetchedOrgs.length > 0) {
-          activeOrgId = fetchedOrgs[0].id
-        }
-
-        if (activeOrgId) {
-          setSelectedOrgId(activeOrgId)
-          setIsLoadingBranches(true)
-          const fetchedBranches = await api.listBranches(activeOrgId)
-          if (!isMounted) return
-          setBranches(fetchedBranches)
-
-          let activeBranchId = ''
-          if (branch?.organization_id === activeOrgId) {
-            activeBranchId = branch.id
-          } else if (fetchedBranches.length > 0) {
-            activeBranchId = fetchedBranches[0].id
-          }
-
-          if (activeBranchId) {
-            setSelectedBranchId(activeBranchId)
-            setIsLoadingRegisters(true)
-            const fetchedRegisters = await api.listRegisters(activeBranchId)
-            if (!isMounted) return
-            setRegisters(fetchedRegisters)
-
-            let activeRegId = ''
-            if (register?.branch_id === activeBranchId) {
-              activeRegId = register.id
-            } else if (fetchedRegisters.length > 0) {
-              activeRegId = fetchedRegisters[0].id
-            }
-            setSelectedRegisterId(activeRegId)
-          } else {
-            setSelectedBranchId('')
-            setSelectedRegisterId('')
-            setRegisters([])
-          }
-        }
-      } catch (err) {
-        if (!isMounted) return
-        setErrorMessage(
-          err instanceof Error && err.message
-            ? err.message
-            : t('contextSwitcher.errors.loadFailed'),
-        )
-      } finally {
-        if (isMounted) {
-          setIsLoadingOrgs(false)
-          setIsLoadingBranches(false)
-          setIsLoadingRegisters(false)
-        }
-      }
+    if (isOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement | null
+    } else if (previousActiveElement.current) {
+      previousActiveElement.current.focus()
+      previousActiveElement.current = null
     }
-
-    void loadInitialData()
-
-    return () => {
-      isMounted = false
-      if (previousActiveElement.current) {
-        previousActiveElement.current.focus()
-      }
-    }
-  }, [isOpen, organization, branch, register, t])
+  }, [isOpen])
 
   // Handle Escape key to close
   useEffect(() => {
@@ -140,9 +71,45 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
     }
   }, [isOpen, onClose])
 
+  // Load registers for a specific branch with sequencing guard
+  const loadRegistersForBranch = useCallback(
+    async (orgId: string, branchId: string) => {
+      const seq = ++branchReqSeq.current
+      setIsLoadingRegisters(true)
+
+      try {
+        const api = getContextApi()
+        const fetchedRegisters = await api.listRegisters(branchId)
+        if (seq !== branchReqSeq.current) return
+
+        setRegisters(fetchedRegisters)
+        const preservedReg = resolveRegisterOnBranchChange(orgId, branchId, register, fetchedRegisters)
+        if (preservedReg) {
+          setSelectedRegisterId(preservedReg.id)
+        } else {
+          setSelectedRegisterId('')
+        }
+      } catch (err) {
+        if (seq === branchReqSeq.current) {
+          setErrorMessage(
+            err instanceof Error && err.message ? err.message : t('contextSwitcher.errors.loadFailed'),
+          )
+        }
+      } finally {
+        if (seq === branchReqSeq.current) {
+          setIsLoadingRegisters(false)
+        }
+      }
+    },
+    [register, t],
+  )
+
   // Handle Organization change: fetch branches and invalidate stale branch/register
   const handleOrgChange = useCallback(
     async (newOrgId: string) => {
+      const seq = ++orgReqSeq.current
+      ++branchReqSeq.current // Invalidate any in-flight branch registers request
+
       setSelectedOrgId(newOrgId)
       setSelectedBranchId('')
       setSelectedRegisterId('')
@@ -156,18 +123,27 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
       try {
         const api = getContextApi()
         const fetchedBranches = await api.listBranches(newOrgId)
+        if (seq !== orgReqSeq.current) return
+
         setBranches(fetchedBranches)
+        const preservedBranch = resolveBranchOnOrgChange(newOrgId, branch, fetchedBranches)
+        if (preservedBranch) {
+          setSelectedBranchId(preservedBranch.id)
+          void loadRegistersForBranch(newOrgId, preservedBranch.id)
+        }
       } catch (err) {
-        setErrorMessage(
-          err instanceof Error && err.message
-            ? err.message
-            : t('contextSwitcher.errors.loadFailed'),
-        )
+        if (seq === orgReqSeq.current) {
+          setErrorMessage(
+            err instanceof Error && err.message ? err.message : t('contextSwitcher.errors.loadFailed'),
+          )
+        }
       } finally {
-        setIsLoadingBranches(false)
+        if (seq === orgReqSeq.current) {
+          setIsLoadingBranches(false)
+        }
       }
     },
-    [t],
+    [branch, loadRegistersForBranch, t],
   )
 
   // Handle Branch change: fetch registers and invalidate stale register
@@ -178,24 +154,14 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
       setRegisters([])
       setErrorMessage(null)
 
-      if (!newBranchId) return
-
-      setIsLoadingRegisters(true)
-      try {
-        const api = getContextApi()
-        const fetchedRegisters = await api.listRegisters(newBranchId)
-        setRegisters(fetchedRegisters)
-      } catch (err) {
-        setErrorMessage(
-          err instanceof Error && err.message
-            ? err.message
-            : t('contextSwitcher.errors.loadFailed'),
-        )
-      } finally {
-        setIsLoadingRegisters(false)
+      if (!newBranchId) {
+        ++branchReqSeq.current
+        return
       }
+
+      await loadRegistersForBranch(selectedOrgId, newBranchId)
     },
-    [t],
+    [selectedOrgId, loadRegistersForBranch],
   )
 
   // Handle Register change
@@ -203,6 +169,72 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
     setSelectedRegisterId(newRegisterId)
     setErrorMessage(null)
   }, [])
+
+  // Initialize data on modal open
+  useEffect(() => {
+    if (!isOpen) return
+
+    let isMounted = true
+    setIsLoadingOrgs(true)
+    setErrorMessage(null)
+
+    async function loadInitial() {
+      try {
+        const api = getContextApi()
+        const fetchedOrgs = await api.listOrganizations()
+        if (!isMounted) return
+        setOrgs(fetchedOrgs)
+
+        const initialOrgId = organization?.id || (fetchedOrgs.length > 0 ? fetchedOrgs[0].id : '')
+        if (!initialOrgId) return
+
+        setSelectedOrgId(initialOrgId)
+        setIsLoadingBranches(true)
+
+        const fetchedBranches = await api.listBranches(initialOrgId)
+        if (!isMounted) return
+        setBranches(fetchedBranches)
+
+        const initialBranch = resolveBranchOnOrgChange(initialOrgId, branch, fetchedBranches)
+        const activeBranchId = initialBranch?.id || (fetchedBranches.length > 0 ? fetchedBranches[0].id : '')
+
+        if (!activeBranchId) return
+        setSelectedBranchId(activeBranchId)
+        setIsLoadingRegisters(true)
+
+        const fetchedRegisters = await api.listRegisters(activeBranchId)
+        if (!isMounted) return
+        setRegisters(fetchedRegisters)
+
+        const initialReg = resolveRegisterOnBranchChange(
+          initialOrgId,
+          activeBranchId,
+          register,
+          fetchedRegisters,
+        )
+        const activeRegId = initialReg?.id || (fetchedRegisters.length > 0 ? fetchedRegisters[0].id : '')
+        setSelectedRegisterId(activeRegId)
+      } catch (err) {
+        if (isMounted) {
+          setErrorMessage(
+            err instanceof Error && err.message ? err.message : t('contextSwitcher.errors.loadFailed'),
+          )
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingOrgs(false)
+          setIsLoadingBranches(false)
+          setIsLoadingRegisters(false)
+        }
+      }
+    }
+
+    void loadInitial()
+
+    return () => {
+      isMounted = false
+    }
+  }, [isOpen, organization, branch, register, t])
 
   // Handle Form Submit: Validate hierarchy and atomically switch ShellContext
   const handleSubmit = useCallback(
@@ -221,14 +253,11 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
 
       setIsSubmitting(true)
       try {
-        // Enforce atomic context switch in ShellContext
         switchContext(chosenOrg!, chosenBranch!, chosenRegister!)
         onClose()
       } catch (err) {
         setErrorMessage(
-          err instanceof Error && err.message
-            ? err.message
-            : t('contextSwitcher.errors.loadFailed'),
+          err instanceof Error && err.message ? err.message : t('contextSwitcher.errors.loadFailed'),
         )
       } finally {
         setIsSubmitting(false)
@@ -262,17 +291,15 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
   return (
     <div
       className="context-modal-backdrop"
-      role="presentation"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
       data-testid="context-switcher-backdrop"
     >
-      <div
+      <dialog
         ref={modalRef}
         className="context-modal"
-        role="dialog"
-        aria-modal="true"
+        open
         aria-labelledby="context-switcher-title"
         data-testid="context-switcher-modal"
       >
@@ -397,7 +424,7 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
             </button>
           </div>
         </form>
-      </div>
+      </dialog>
     </div>
   )
 }

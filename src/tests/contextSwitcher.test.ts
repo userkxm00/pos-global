@@ -309,4 +309,71 @@ describe('F1.15 Context Switcher Test Suite', () => {
       await tauriClient.listRegisters('branch_1')
     })
   })
+
+  // Test 11: Cascading Race-Condition Sequence Guard Simulation
+  it('11. Generation sequencing discards stale parent responses from overwriting newer selections', async () => {
+    let activeSeq = 0
+    let lastRenderedBranches: Branch[] = []
+
+    async function simulatedOrgChange(orgId: string, delay: number, branchesResult: Branch[]) {
+      const seq = ++activeSeq
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      if (seq === activeSeq) {
+        lastRenderedBranches = branchesResult
+      }
+    }
+
+    // User triggers Org A (slow request: 50ms) then quickly triggers Org B (fast request: 10ms)
+    const p1 = simulatedOrgChange('org_a', 50, [branchA1, branchA2])
+    const p2 = simulatedOrgChange('org_b', 10, [branchB1])
+
+    await Promise.all([p1, p2])
+
+    // Org B's response must win and not be overwritten by Org A's delayed response
+    assert.strictEqual(lastRenderedBranches.length, 1)
+    assert.strictEqual(lastRenderedBranches[0].id, 'branch_b1')
+  })
+
+  // Test 12: Branch -> Register Sequencing Guard Simulation
+  it('12. Generation sequencing discards stale branch register responses', async () => {
+    let branchSeq = 0
+    let lastRenderedRegisters: Register[] = []
+
+    async function simulatedBranchChange(branchId: string, delay: number, regsResult: Register[]) {
+      const seq = ++branchSeq
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      if (seq === branchSeq) {
+        lastRenderedRegisters = regsResult
+      }
+    }
+
+    const p1 = simulatedBranchChange('branch_a1', 40, [registerA1_1, registerA1_2])
+    const p2 = simulatedBranchChange('branch_b1', 10, [registerB1_1])
+
+    await Promise.all([p1, p2])
+
+    assert.strictEqual(lastRenderedRegisters.length, 1)
+    assert.strictEqual(lastRenderedRegisters[0].id, 'reg_b1_1')
+  })
+
+  // Test 13: Cascading Child Selection Preservation Integration
+  it('13. Cascading resolution preserves compatible child or resets incompatible child', () => {
+    // When switching org:
+    // If active branch belongs to the new org -> preserved
+    const preservedBranch = resolveBranchOnOrgChange('org_a', branchA1, [branchA1, branchA2])
+    assert.deepStrictEqual(preservedBranch, branchA1)
+
+    // If active branch does NOT belong to the new org -> reset to null
+    const resetBranch = resolveBranchOnOrgChange('org_b', branchA1, [branchB1])
+    assert.strictEqual(resetBranch, null)
+
+    // When switching branch:
+    // If active register belongs to the new branch -> preserved
+    const preservedReg = resolveRegisterOnBranchChange('org_a', 'branch_a1', registerA1_1, [registerA1_1, registerA1_2])
+    assert.deepStrictEqual(preservedReg, registerA1_1)
+
+    // If active register does NOT belong to the new branch -> reset to null
+    const resetReg = resolveRegisterOnBranchChange('org_a', 'branch_a2', registerA1_1, [])
+    assert.strictEqual(resetReg, null)
+  })
 })
