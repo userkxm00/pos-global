@@ -75,10 +75,8 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
       if (!dialogEl.open) {
         dialogEl.showModal()
       }
-    } else {
-      if (dialogEl.open) {
-        dialogEl.close()
-      }
+    } else if (dialogEl.open) {
+      dialogEl.close()
     }
   }, [isOpen])
 
