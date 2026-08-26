@@ -297,7 +297,7 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
           )}
 
           {/* Action Feedback Banner */}
-          {actionFeedback && actionFeedback.type === 'error' && (
+          {actionFeedback?.type === 'error' && (
             <div
               className="sync-popover-error"
               role="alert"
@@ -307,7 +307,7 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
             </div>
           )}
 
-          {actionFeedback && actionFeedback.type === 'success' && (
+          {actionFeedback?.type === 'success' && (
             <output
               className="sync-feedback-success"
               data-testid="sync-action-feedback"
