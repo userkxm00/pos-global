@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react'
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getDirectionForLocale, SupportedLocale, defaultLocale } from '../i18n'
 import type { Organization } from '../types/organization'
@@ -51,7 +51,7 @@ export interface ShellContextType {
   setLastSyncedAt: (timestamp: string | null) => void
   syncErrorMessage: string | null
   setSyncErrorMessage: (message: string | null) => void
-  triggerSync: () => Promise<void>
+  triggerSync: () => Promise<boolean>
   viewState: ViewState
   setViewState: (state: ViewState) => void
   errorMessage: string | null
@@ -101,6 +101,8 @@ export const ShellProvider: React.FC<ShellProviderProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [deniedPermission, setDeniedPermission] = useState<Permission | null>(null)
 
+  const syncRequestIdRef = useRef<number>(0)
+
   const direction = useMemo(() => getDirectionForLocale(locale), [locale])
 
   const handleLocaleChange = useCallback(
@@ -134,8 +136,33 @@ export const ShellProvider: React.FC<ShellProviderProps> = ({
     setViewState('idle')
   }, [])
 
-  const triggerSync = useCallback(async () => {
-    if (!isOnline || isSyncing) return
+  // Sync state loader when branch changes or on mount
+  useEffect(() => {
+    const currentRequestId = ++syncRequestIdRef.current
+    const api = getSyncApi()
+
+    api
+      .getSyncStatus(branch?.id)
+      .then((summary) => {
+        if (currentRequestId !== syncRequestIdRef.current) return
+        setIsOnline(summary.isOnline)
+        setIsSyncing(summary.isSyncing)
+        setSyncStatus(summary.status)
+        setPendingSyncCount(summary.pendingCount)
+        if (summary.lastSyncedAt !== null) {
+          setLastSyncedAt(summary.lastSyncedAt)
+        }
+        setSyncErrorMessage(summary.lastError)
+      })
+      .catch((err) => {
+        if (currentRequestId !== syncRequestIdRef.current) return
+        setSyncStatus('error')
+        setSyncErrorMessage(err instanceof Error ? err.message : 'Failed to fetch sync status')
+      })
+  }, [branch?.id])
+
+  const triggerSync = useCallback(async (): Promise<boolean> => {
+    if (!isOnline || isSyncing) return false
     setIsSyncing(true)
     setSyncStatus('syncing')
     setSyncErrorMessage(null)
@@ -148,13 +175,16 @@ export const ShellProvider: React.FC<ShellProviderProps> = ({
         setSyncStatus('online')
         setLastSyncedAt(new Date().toISOString())
         setSyncErrorMessage(null)
+        return true
       } else {
         setSyncStatus('error')
         setSyncErrorMessage(result.errorMessage || 'Sync failed')
+        return false
       }
     } catch (err) {
       setSyncStatus('error')
       setSyncErrorMessage(err instanceof Error ? err.message : 'Sync failed')
+      return false
     } finally {
       setIsSyncing(false)
     }

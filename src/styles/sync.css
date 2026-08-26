@@ -61,6 +61,11 @@
   box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2);
 }
 
+.sync-dot--paused {
+  background-color: var(--color-text-secondary, #64748b);
+  box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.2);
+}
+
 @keyframes sync-pulse {
   0% {
     transform: scale(0.95);
@@ -98,7 +103,7 @@
 }
 
 /* Popover Details Card */
-.sync-popover-card {
+dialog.sync-popover-card {
   position: absolute;
   top: calc(100% + var(--space-2));
   left: 50%;
@@ -110,13 +115,15 @@
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.15);
   z-index: 1000;
   padding: var(--space-4);
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  color: var(--color-text);
   animation: popover-slide-in 0.15s ease-out;
 }
 
-[dir="rtl"] .sync-popover-card {
+[dir="rtl"] dialog.sync-popover-card {
   left: auto;
   right: 50%;
   transform: translateX(50%);
@@ -227,6 +234,11 @@
 .sync-status-badge--error {
   background: rgba(220, 38, 38, 0.15);
   color: var(--color-danger, #dc2626);
+}
+
+.sync-status-badge--paused {
+  background: rgba(100, 116, 139, 0.15);
+  color: var(--color-text-secondary, #64748b);
 }
 
 .sync-popover-error {

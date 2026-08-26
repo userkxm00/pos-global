@@ -41,7 +41,7 @@ export class TauriSyncApiClient implements SyncApiClient {
         isSyncing: false,
         pendingCount,
         failedCount: 0,
-        lastSyncedAt: new Date().toISOString(),
+        lastSyncedAt: null,
         lastError: null,
         deviceId: null,
       }

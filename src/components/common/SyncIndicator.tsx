@@ -4,6 +4,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SyncStatus } from '../../types/sync'
+import {
+  computeEffectiveSyncStatus,
+  getSyncStatusLabel,
+  getSyncLifecycleText,
+  getSyncActionButtonText,
+} from './syncHelpers'
 
 export interface SyncIndicatorProps {
   isOnline: boolean
@@ -13,7 +19,7 @@ export interface SyncIndicatorProps {
   lastSyncedAt?: string | null
   lastError?: string | null
   deviceId?: string | null
-  onTriggerSync?: () => Promise<void>
+  onTriggerSync?: () => Promise<boolean | void>
 }
 
 export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
@@ -32,26 +38,20 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
   const [actionFeedback, setActionFeedback] = useState<string | null>(null)
 
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const popoverRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
 
-  // Derive active sync state
-  const effectiveStatus: SyncStatus = !isOnline
-    ? 'offline'
-    : isSyncing || isManualSyncing
-      ? 'syncing'
-      : syncStatus === 'error' || lastError
-        ? 'error'
-        : 'online'
+  const effectiveStatus = computeEffectiveSyncStatus(
+    isOnline,
+    isSyncing,
+    isManualSyncing,
+    syncStatus,
+    lastError,
+  )
 
-  // Localized status label
-  const statusLabel =
-    effectiveStatus === 'offline'
-      ? t('status.offline')
-      : effectiveStatus === 'syncing'
-        ? t('status.syncing')
-        : effectiveStatus === 'error'
-          ? t('sync.syncFailed')
-          : t('status.online')
+  const statusLabel = getSyncStatusLabel(effectiveStatus, t)
+  const lifecycleText = getSyncLifecycleText(effectiveStatus, pendingCount, t)
+  const isBusy = isSyncing || isManualSyncing
+  const actionButtonText = getSyncActionButtonText(isBusy, effectiveStatus, t)
 
   // Format last synced timestamp according to active locale
   const formattedLastSync = lastSyncedAt
@@ -61,7 +61,28 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
       }).format(new Date(lastSyncedAt))
     : t('sync.neverSynced')
 
-  // Keyboard navigation & click outside listener for popover dismissal
+  const pendingLabel = pendingCount > 0 ? `, ${t('sync.pendingCountLabel', { count: pendingCount })}` : ''
+  const triggerAriaLabel = `${t('sync.title')}: ${statusLabel}${pendingLabel}`
+  const triggerTitle = pendingCount > 0 ? `${statusLabel} (${pendingCount})` : statusLabel
+  const connectionBadgeClass = isOnline ? 'online' : 'offline'
+
+  // Manage native dialog visibility & events
+  useEffect(() => {
+    const dialogEl = dialogRef.current
+    if (!dialogEl) return
+
+    if (isOpen) {
+      if (!dialogEl.open) {
+        dialogEl.showModal()
+      }
+    } else {
+      if (dialogEl.open) {
+        dialogEl.close()
+      }
+    }
+  }, [isOpen])
+
+  // Handle Escape key and outside backdrop clicks
   useEffect(() => {
     if (!isOpen) return
 
@@ -73,9 +94,10 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
     }
 
     const handleClickOutside = (e: MouseEvent) => {
+      const dialogEl = dialogRef.current
       if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node) &&
+        dialogEl &&
+        !dialogEl.contains(e.target as Node) &&
         triggerRef.current &&
         !triggerRef.current.contains(e.target as Node)
       ) {
@@ -96,20 +118,29 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
     setIsOpen((prev) => !prev)
   }
 
+  const handleClose = () => {
+    setIsOpen(false)
+    triggerRef.current?.focus()
+  }
+
   const handleSyncClick = useCallback(async () => {
-    if (!onTriggerSync || !isOnline || isSyncing || isManualSyncing) return
+    if (!onTriggerSync || !isOnline || isBusy) return
 
     setIsManualSyncing(true)
     setActionFeedback(null)
     try {
-      await onTriggerSync()
-      setActionFeedback(t('sync.syncSuccess'))
+      const result = await onTriggerSync()
+      if (result === false) {
+        setActionFeedback(t('sync.syncError'))
+      } else {
+        setActionFeedback(t('sync.syncSuccess'))
+      }
     } catch {
       setActionFeedback(t('sync.syncError'))
     } finally {
       setIsManualSyncing(false)
     }
-  }, [onTriggerSync, isOnline, isSyncing, isManualSyncing, t])
+  }, [onTriggerSync, isOnline, isBusy, t])
 
   return (
     <div className="sync-indicator-wrapper" data-testid="sync-indicator-wrapper">
@@ -121,8 +152,8 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
         onClick={handleToggle}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
-        aria-label={`${t('sync.title')}: ${statusLabel}${pendingCount > 0 ? `, ${t('sync.pendingCountLabel', { count: pendingCount })}` : ''}`}
-        title={`${statusLabel}${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
+        aria-label={triggerAriaLabel}
+        title={triggerTitle}
         data-testid="sync-indicator-trigger"
       >
         <span
@@ -147,15 +178,17 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
         {statusLabel}
       </div>
 
-      {/* Popover Details Card */}
+      {/* Popover Details Dialog */}
       {isOpen && (
-        <div
-          ref={popoverRef}
-          role="dialog"
-          aria-modal="false"
+        <dialog
+          ref={dialogRef}
           aria-labelledby="sync-popover-heading"
           className="sync-popover-card"
           data-testid="sync-popover-card"
+          onCancel={(e) => {
+            e.preventDefault()
+            handleClose()
+          }}
         >
           <div className="sync-popover-header">
             <h3 id="sync-popover-heading" className="sync-popover-title">
@@ -164,10 +197,7 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
             <button
               type="button"
               className="sync-popover-close-btn"
-              onClick={() => {
-                setIsOpen(false)
-                triggerRef.current?.focus()
-              }}
+              onClick={handleClose}
               aria-label={t('sync.closeModal')}
               data-testid="sync-popover-close-btn"
             >
@@ -181,7 +211,7 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
               <span className="sync-popover-label">{t('sync.connectionStatus')}</span>
               <span className="sync-popover-value">
                 <span
-                  className={`sync-status-badge sync-status-badge--${isOnline ? 'online' : 'offline'}`}
+                  className={`sync-status-badge sync-status-badge--${connectionBadgeClass}`}
                 >
                   {isOnline ? t('status.online') : t('status.offline')}
                 </span>
@@ -193,13 +223,7 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
               <span className="sync-popover-label">{t('sync.syncLifecycle')}</span>
               <span className="sync-popover-value">
                 <span className={`sync-status-badge sync-status-badge--${effectiveStatus}`}>
-                  {effectiveStatus === 'syncing'
-                    ? t('sync.syncing')
-                    : effectiveStatus === 'error'
-                      ? t('sync.syncFailed')
-                      : pendingCount > 0
-                        ? t('status.pendingChanges_other', { count: pendingCount })
-                        : t('sync.synced')}
+                  {lifecycleText}
                 </span>
               </span>
             </div>
@@ -258,17 +282,13 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
               type="button"
               className="btn btn--primary btn--sm sync-action-btn"
               onClick={handleSyncClick}
-              disabled={!isOnline || isSyncing || isManualSyncing}
+              disabled={!isOnline || isBusy}
               data-testid="sync-now-btn"
             >
-              {isSyncing || isManualSyncing
-                ? t('sync.syncingAction')
-                : effectiveStatus === 'error'
-                  ? t('sync.retrySync')
-                  : t('sync.syncNow')}
+              {actionButtonText}
             </button>
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   )
