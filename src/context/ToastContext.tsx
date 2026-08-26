@@ -7,10 +7,10 @@ import type { ToastMessage, ToastVariant } from '../types/feedback'
 export interface ToastContextType {
   toasts: ToastMessage[]
   showToast: (toast: Omit<ToastMessage, 'id'>) => string
-  showError: (message: string, title?: string) => string
-  showWarning: (message: string, title?: string) => string
-  showSuccess: (message: string, title?: string) => string
-  showInfo: (message: string, title?: string) => string
+  showError: (message: string, title?: string, durationMs?: number) => string
+  showWarning: (message: string, title?: string, durationMs?: number) => string
+  showSuccess: (message: string, title?: string, durationMs?: number) => string
+  showInfo: (message: string, title?: string, durationMs?: number) => string
   dismissToast: (id: string) => void
   clearAllToasts: () => void
 }
@@ -43,10 +43,13 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({
     (toastInput: Omit<ToastMessage, 'id'>): string => {
       counterRef.current += 1
       const id = `toast_${Date.now()}_${counterRef.current}`
+      const durationMs =
+        toastInput.durationMs !== undefined ? toastInput.durationMs : defaultDurationMs
+
       const newToast: ToastMessage = {
-        id,
-        durationMs: defaultDurationMs,
         ...toastInput,
+        id,
+        durationMs,
       }
       setToasts((prev) => [...prev, newToast])
       return id
@@ -55,29 +58,29 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({
   )
 
   const showError = useCallback(
-    (message: string, title?: string): string => {
-      return showToast({ variant: 'error', message, title })
+    (message: string, title?: string, durationMs?: number): string => {
+      return showToast({ variant: 'error', message, title, durationMs })
     },
     [showToast],
   )
 
   const showWarning = useCallback(
-    (message: string, title?: string): string => {
-      return showToast({ variant: 'warning', message, title })
+    (message: string, title?: string, durationMs?: number): string => {
+      return showToast({ variant: 'warning', message, title, durationMs })
     },
     [showToast],
   )
 
   const showSuccess = useCallback(
-    (message: string, title?: string): string => {
-      return showToast({ variant: 'success', message, title })
+    (message: string, title?: string, durationMs?: number): string => {
+      return showToast({ variant: 'success', message, title, durationMs })
     },
     [showToast],
   )
 
   const showInfo = useCallback(
-    (message: string, title?: string): string => {
-      return showToast({ variant: 'info', message, title })
+    (message: string, title?: string, durationMs?: number): string => {
+      return showToast({ variant: 'info', message, title, durationMs })
     },
     [showToast],
   )

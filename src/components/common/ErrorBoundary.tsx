@@ -59,12 +59,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
       const title = i18n.t('errorBoundary.title')
       const defaultDesc = i18n.t('errorBoundary.description')
+      const retryLabel = i18n.t('errorBoundary.tryAgain')
+      const reloadLabel = i18n.t('errorBoundary.reloadApp')
 
       return (
         <ErrorState
           title={title}
           message={this.state.error?.message || defaultDesc}
           errorCode="ERR_RENDER_FAILURE"
+          retryLabel={retryLabel}
+          reportLabel={reloadLabel}
           onRetry={this.handleRetry}
           onReport={this.handleReload}
         />

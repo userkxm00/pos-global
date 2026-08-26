@@ -33,6 +33,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   const { t } = useTranslation()
   const [reason, setReason] = useState('')
   const [reasonError, setReasonError] = useState<string | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -44,6 +45,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
     if (isOpen) {
       setReason('')
       setReasonError(null)
+      setSubmitError(null)
       setIsSubmitting(false)
     }
   }, [isOpen])
@@ -72,21 +74,32 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
     onCancel()
   }, [isSubmitting, onCancel])
 
-  // Backdrop click listener
+  // Robust backdrop click listener:
+  // 1. Ensures event target is the dialog itself (the ::backdrop), NOT child buttons or content.
+  // 2. Ignores synthetic click events (e.detail === 0 or (0,0) coords from keyboard Enter/Space on buttons).
+  // 3. Verifies click coordinates lie outside dialog bounds.
   useEffect(() => {
     if (!isOpen) return
 
     const dialogEl = dialogRef.current
 
     const handleBackdropClick = (e: MouseEvent) => {
-      if (!dialogEl) return
+      if (!dialogEl || isSubmitting) return
+
+      // If click was on a child element (e.g. Confirm or Cancel button), never treat as backdrop
+      if (e.target !== dialogEl) return
+
+      // Synthetic events from keyboard activation on buttons often have clientX=0, clientY=0
+      if (e.clientX === 0 && e.clientY === 0 && e.detail === 0) return
+
       const rect = dialogEl.getBoundingClientRect()
-      const isInside =
-        e.clientX >= rect.left &&
-        e.clientX <= rect.right &&
-        e.clientY >= rect.top &&
-        e.clientY <= rect.bottom
-      if (!isInside) {
+      const isOutside =
+        e.clientX < rect.left ||
+        e.clientX > rect.right ||
+        e.clientY < rect.top ||
+        e.clientY > rect.bottom
+
+      if (isOutside) {
         handleClose()
       }
     }
@@ -96,7 +109,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
     return () => {
       dialogEl?.removeEventListener('click', handleBackdropClick)
     }
-  }, [isOpen, handleClose])
+  }, [isOpen, isSubmitting, handleClose])
 
   const handleConfirmClick = async () => {
     if (requireReason && !reason.trim()) {
@@ -105,9 +118,18 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
       return
     }
 
+    setSubmitError(null)
     setIsSubmitting(true)
     try {
       await onConfirm(reason.trim() || undefined)
+    } catch (err: unknown) {
+      const errorMsg =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+            ? err
+            : t('states.error.description')
+      setSubmitError(errorMsg)
     } finally {
       setIsSubmitting(false)
     }
@@ -165,6 +187,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
               onChange={(e) => {
                 setReason(e.target.value)
                 if (reasonError) setReasonError(null)
+                if (submitError) setSubmitError(null)
               }}
               disabled={isSubmitting}
               data-testid="confirmation-reason-input"
@@ -175,6 +198,12 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
               </p>
             )}
           </div>
+        )}
+
+        {submitError && (
+          <p className="form-error-text" role="alert" data-testid="confirmation-submit-error" style={{ marginBlockStart: 'var(--space-3)' }}>
+            {submitError}
+          </p>
         )}
       </div>
 

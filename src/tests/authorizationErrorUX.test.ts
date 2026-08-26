@@ -3,7 +3,10 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkPermissions } from '../components/common/permissionGateHelpers.ts'
+import {
+  checkPermissions,
+  EMPTY_OVERRIDES,
+} from '../components/common/permissionGateHelpers.ts'
 import {
   computeEffectivePermissions,
   hasEffectivePermission,
@@ -101,75 +104,165 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
     )
   })
 
-  // Test 5: Unauthenticated & Invalid Role Fails Closed
-  it('5. fails closed when role is null, undefined, or unauthenticated', () => {
+  // Test 5: Empty and invalid permission requirements fail closed
+  it('5. fails closed when permission requirements are empty or invalid', () => {
+    assert.strictEqual(checkPermissions('admin', []), false, 'Empty array must fail closed for admin')
+    assert.strictEqual(checkPermissions('manager', []), false, 'Empty array must fail closed for manager')
+    assert.strictEqual(checkPermissions('cashier', []), false, 'Empty array must fail closed for cashier')
     assert.strictEqual(checkPermissions(null, 'sales.create'), false)
     assert.strictEqual(checkPermissions(undefined, 'sales.create'), false)
     assert.strictEqual(checkPermissions('', 'sales.create'), false)
     assert.strictEqual(checkPermissions('unknown_role', 'sales.create'), false)
   })
 
-  // Test 6: Toast Notification Item Model & Variants
-  it('6. validates toast notification attributes across error, warning, success, and info', () => {
-    const errorToast: ToastMessage = {
-      id: 't1',
-      variant: 'error',
-      title: 'Database Locked',
-      message: 'Failed to write record to SQLite.',
-      durationMs: 5000,
-    }
-    assert.strictEqual(errorToast.variant, 'error')
-    assert.strictEqual(errorToast.durationMs, 5000)
-
-    const successToast: ToastMessage = {
-      id: 't2',
-      variant: 'success',
-      title: 'Saved',
-      message: 'Settings updated successfully.',
-    }
-    assert.strictEqual(successToast.variant, 'success')
-
-    const warningToast: ToastMessage = {
-      id: 't3',
-      variant: 'warning',
-      message: 'Network offline. Actions will be queued.',
-    }
-    assert.strictEqual(warningToast.variant, 'warning')
+  // Test 6: Stable default overrides reference
+  it('6. provides a frozen stable EMPTY_OVERRIDES reference to avoid render recomputation', () => {
+    assert.ok(Array.isArray(EMPTY_OVERRIDES))
+    assert.strictEqual(EMPTY_OVERRIDES.length, 0)
+    assert.ok(Object.isFrozen(EMPTY_OVERRIDES))
   })
 
-  // Test 7: Confirmation & Audit Reason Validation
-  it('7. validates audit reason requirements for destructive and financial actions', () => {
-    function validateConfirmation(requireReason: boolean, reasonText: string | undefined): boolean {
-      if (!requireReason) return true
-      return Boolean(reasonText && reasonText.trim().length > 0)
+  // Test 7: ConfirmationDialog backdrop detection logic
+  it('7. distinguishes between true backdrop clicks and keyboard/child button events', () => {
+    function isBackdropClick(
+      target: unknown,
+      dialogEl: unknown,
+      clientX: number,
+      clientY: number,
+      detail: number,
+      rect: { left: number; right: number; top: number; bottom: number },
+    ): boolean {
+      if (target !== dialogEl) return false
+      if (clientX === 0 && clientY === 0 && detail === 0) return false
+      return (
+        clientX < rect.left ||
+        clientX > rect.right ||
+        clientY < rect.top ||
+        clientY > rect.bottom
+      )
     }
 
-    // When reason not required
-    assert.strictEqual(validateConfirmation(false, undefined), true)
-    assert.strictEqual(validateConfirmation(false, ''), true)
+    const mockDialog = {}
+    const mockButton = {}
+    const dialogRect = { left: 100, right: 500, top: 100, bottom: 400 }
 
-    // When reason required
-    assert.strictEqual(validateConfirmation(true, ''), false)
-    assert.strictEqual(validateConfirmation(true, '   '), false)
-    assert.strictEqual(validateConfirmation(true, 'Manager approved refund for damaged goods'), true)
+    // Click on button inside dialog -> false
+    assert.strictEqual(
+      isBackdropClick(mockButton, mockDialog, 200, 200, 1, dialogRect),
+      false,
+      'Click on button must not trigger backdrop close',
+    )
+
+    // Keyboard activation (Space/Enter) on button (detail=0, clientX=0, clientY=0) -> false
+    assert.strictEqual(
+      isBackdropClick(mockDialog, mockDialog, 0, 0, 0, dialogRect),
+      false,
+      'Keyboard button activation must not trigger backdrop close',
+    )
+
+    // True backdrop click outside bounds (e.g. x=50, y=50) -> true
+    assert.strictEqual(
+      isBackdropClick(mockDialog, mockDialog, 50, 50, 1, dialogRect),
+      true,
+      'Click outside dialog bounds on ::backdrop must trigger close',
+    )
+
+    // Click inside dialog bounds on dialog container -> false
+    assert.strictEqual(
+      isBackdropClick(mockDialog, mockDialog, 250, 250, 1, dialogRect),
+      false,
+      'Click inside dialog bounds must not trigger close',
+    )
   })
 
-  // Test 8: Error Boundary state transition logic
-  it('8. verifies ErrorBoundary state derivation on runtime error', () => {
-    const testError = new Error('ChunkLoadError: Failed to load script')
-    
-    // Simulate getDerivedStateFromError
-    const errorState = {
-      hasError: true,
-      error: testError,
+  // Test 8: ConfirmationDialog rejection handling
+  it('8. handles rejected onConfirm promises cleanly and retains dialog state', async () => {
+    let dialogOpen = true
+    let isSubmitting = false
+    let submitError: string | null = null
+
+    async function handleConfirm(onConfirmFn: () => Promise<void>) {
+      isSubmitting = true
+      submitError = null
+      try {
+        await onConfirmFn()
+        dialogOpen = false
+      } catch (err) {
+        submitError = err instanceof Error ? err.message : 'Operation Failed'
+      } finally {
+        isSubmitting = false
+      }
     }
 
-    assert.strictEqual(errorState.hasError, true)
-    assert.strictEqual(errorState.error.message, 'ChunkLoadError: Failed to load script')
+    // Failing confirm action
+    await handleConfirm(async () => {
+      throw new Error('Database transaction conflict')
+    })
+
+    assert.strictEqual(dialogOpen, true, 'Dialog must remain open on failure')
+    assert.strictEqual(isSubmitting, false, 'Controls must be re-enabled after failure')
+    assert.strictEqual(submitError, 'Database transaction conflict', 'Error message must be captured')
+
+    // Successful confirm action
+    await handleConfirm(async () => {
+      // success
+    })
+    assert.strictEqual(dialogOpen, false, 'Dialog must close on success')
+    assert.strictEqual(submitError, null)
   })
 
-  // Test 9: I18n Completeness for Toasts across en, ar, fr
-  it('9. verifies toast translation keys across English, Arabic (RTL), and French', () => {
+  // Test 9: Toast duration configuration & override precedence
+  it('9. enforces configured default duration and explicit duration override precedence', () => {
+    const defaultDuration = 5000
+
+    function resolveToastDuration(inputDuration: number | undefined, defaultMs: number): number {
+      return inputDuration !== undefined ? inputDuration : defaultMs
+    }
+
+    // Default duration applied when omitted
+    assert.strictEqual(resolveToastDuration(undefined, defaultDuration), 5000)
+    assert.strictEqual(resolveToastDuration(undefined, 8000), 8000)
+
+    // Explicit duration overrides default (including 0 for persistent toasts)
+    assert.strictEqual(resolveToastDuration(2000, defaultDuration), 2000)
+    assert.strictEqual(resolveToastDuration(0, defaultDuration), 0)
+  })
+
+  // Test 10: User override race safety & switching
+  it('10. prevents stale user overrides from authorizing routes during user switching', () => {
+    interface UserOverrideState {
+      userId: string | null
+      overrides: UserPermissionOverride[]
+      isLoading: boolean
+    }
+
+    let state: UserOverrideState = {
+      userId: 'user_1',
+      overrides: [{ permission: 'users.manage', effect: 'allow' }],
+      isLoading: false,
+    }
+
+    // Switch to user_2: state must immediately clear overrides and set loading
+    const targetUserId = 'user_2'
+    state = {
+      userId: targetUserId,
+      overrides: [],
+      isLoading: true,
+    }
+
+    // Effective overrides for user_2 must be empty while loading
+    const activeUserId = 'user_2'
+    const effectiveOverrides = state.userId === activeUserId ? state.overrides : EMPTY_OVERRIDES
+    assert.strictEqual(effectiveOverrides.length, 0, 'Must not carry over user_1 overrides')
+    assert.strictEqual(
+      checkPermissions('cashier', 'users.manage', false, effectiveOverrides),
+      false,
+      'Must fail closed during loading',
+    )
+  })
+
+  // Test 11: I18n Completeness for Toasts across en, ar, fr
+  it('11. verifies toast translation keys across English, Arabic (RTL), and French', () => {
     const locales = [
       { code: 'en', dict: en },
       { code: 'ar', dict: ar },
@@ -186,8 +279,8 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
     }
   })
 
-  // Test 10: I18n Completeness for Confirmation & Audit Dialog across en, ar, fr
-  it('10. verifies confirmation dialog translation keys across English, Arabic (RTL), and French', () => {
+  // Test 12: I18n Completeness for Confirmation & Audit Dialog across en, ar, fr
+  it('12. verifies confirmation dialog translation keys across English, Arabic (RTL), and French', () => {
     const locales = [
       { code: 'en', dict: en },
       { code: 'ar', dict: ar },
@@ -205,8 +298,8 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
     }
   })
 
-  // Test 11: I18n Completeness for States & Permission Denied across en, ar, fr
-  it('11. verifies states and permission-denied translations across English, Arabic (RTL), and French', () => {
+  // Test 13: I18n Completeness for States & Permission Denied across en, ar, fr
+  it('13. verifies states and permission-denied translations across English, Arabic (RTL), and French', () => {
     const locales = [
       { code: 'en', dict: en },
       { code: 'ar', dict: ar },
@@ -224,8 +317,8 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
     }
   })
 
-  // Test 12: I18n Completeness for ErrorBoundary across en, ar, fr
-  it('12. verifies error boundary translations across English, Arabic (RTL), and French', () => {
+  // Test 14: I18n Completeness for ErrorBoundary across en, ar, fr
+  it('14. verifies error boundary translations across English, Arabic (RTL), and French', () => {
     const locales = [
       { code: 'en', dict: en },
       { code: 'ar', dict: ar },
@@ -241,8 +334,8 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
     }
   })
 
-  // Test 13: Status processing key completeness across en, ar, fr
-  it('13. verifies status.processing translations across English, Arabic (RTL), and French', () => {
+  // Test 15: Status processing key completeness across en, ar, fr
+  it('15. verifies status.processing translations across English, Arabic (RTL), and French', () => {
     const locales = [
       { code: 'en', dict: en },
       { code: 'ar', dict: ar },

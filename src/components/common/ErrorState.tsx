@@ -10,6 +10,8 @@ export interface ErrorStateProps {
   message?: string | null
   errorCode?: string | null
   correlationId?: string | null
+  retryLabel?: string
+  reportLabel?: string
   onRetry?: () => void
   onReport?: () => void
   icon?: React.ReactNode
@@ -20,6 +22,8 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
   message,
   errorCode,
   correlationId,
+  retryLabel,
+  reportLabel,
   onRetry,
   onReport,
   icon,
@@ -53,12 +57,12 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
       <div style={{ display: 'flex', gap: 'var(--space-3)', marginBlockStart: 'var(--space-4)' }}>
         {onRetry && (
           <button type="button" className="btn btn--primary" onClick={onRetry} data-testid="error-retry-btn">
-            {t('states.error.retry')}
+            {retryLabel || t('states.error.retry')}
           </button>
         )}
         {onReport && (
           <button type="button" className="btn btn--secondary" onClick={onReport} data-testid="error-report-btn">
-            {t('states.error.contactSupport')}
+            {reportLabel || t('states.error.contactSupport')}
           </button>
         )}
       </div>

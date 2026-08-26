@@ -14,10 +14,11 @@ export function checkPermissions(
 ): boolean {
   if (!role) return false
 
-  const effective = computeEffectivePermissions(role, overrides as UserPermissionOverride[])
   const reqList = Array.isArray(required) ? required : [required]
+  // Fail closed when permission requirements are empty or invalid
+  if (reqList.length === 0) return false
 
-  if (reqList.length === 0) return true
+  const effective = computeEffectivePermissions(role, overrides as UserPermissionOverride[])
 
   if (requireAll) {
     return reqList.every((p) => effective.includes(p))

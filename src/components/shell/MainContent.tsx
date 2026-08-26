@@ -7,6 +7,7 @@ import { useShell, NavigationRoute } from '../../context/ShellContext'
 import { useAuth } from '../../context/AuthContext'
 import type { Permission, UserPermissionOverride } from '../../types/permission'
 import { getPermissionApi } from '../../services/permissionApi'
+import { EMPTY_OVERRIDES } from '../common/permissionGateHelpers'
 import { OfflineBanner } from '../common/OfflineBanner'
 import { LoadingSkeleton } from '../common/LoadingSkeleton'
 import { EmptyState } from '../common/EmptyState'
@@ -26,6 +27,12 @@ export const ROUTE_PERMISSIONS: Record<NavigationRoute, Permission | undefined> 
   settings: 'settings.manage',
 }
 
+export interface UserOverrideState {
+  userId: string | null
+  overrides: UserPermissionOverride[]
+  isLoading: boolean
+}
+
 export const MainContent: React.FC = () => {
   const { t } = useTranslation()
   const {
@@ -40,26 +47,41 @@ export const MainContent: React.FC = () => {
   } = useShell()
 
   const { activeUser } = useAuth()
-  const [activeOverrides, setActiveOverrides] = useState<UserPermissionOverride[]>([])
+  const [overrideState, setOverrideState] = useState<UserOverrideState>({
+    userId: null,
+    overrides: [],
+    isLoading: false,
+  })
 
   useEffect(() => {
     let isMounted = true
+    const currentUserId = activeUser?.id ?? null
+
+    if (!currentUserId) {
+      setOverrideState({ userId: null, overrides: [], isLoading: false })
+      return
+    }
+
+    // Immediately clear previous-user overrides and indicate loading on user change
+    setOverrideState({ userId: currentUserId, overrides: [], isLoading: true })
+
     async function loadOverrides() {
-      if (!activeUser?.id) {
-        setActiveOverrides([])
-        return
-      }
       try {
         const api = getPermissionApi()
-        const overrides = await api.listUserPermissionOverrides(activeUser.id)
+        const overrides = await api.listUserPermissionOverrides(currentUserId!)
         if (isMounted) {
-          setActiveOverrides(overrides)
+          setOverrideState({ userId: currentUserId, overrides, isLoading: false })
         }
       } catch {
-        if (isMounted) setActiveOverrides([])
+        if (isMounted) {
+          // Fail-closed on error with empty overrides
+          setOverrideState({ userId: currentUserId, overrides: [], isLoading: false })
+        }
       }
     }
+
     void loadOverrides()
+
     return () => {
       isMounted = false
     }
@@ -73,6 +95,10 @@ export const MainContent: React.FC = () => {
   const routeTitleKey = `nav.items.${activeRoute}`
   const routeTitle = t(routeTitleKey)
   const requiredPermission = ROUTE_PERMISSIONS[activeRoute]
+
+  const isOverrideForActiveUser = overrideState.userId === activeUser?.id
+  const effectiveOverrides = isOverrideForActiveUser ? overrideState.overrides : EMPTY_OVERRIDES
+  const isAuthHydrating = requiredPermission && overrideState.isLoading
 
   return (
     <main
@@ -112,29 +138,27 @@ export const MainContent: React.FC = () => {
         </div>
 
         {/* Dynamic State Management */}
-        {viewState === 'loading' && <LoadingSkeleton />}
-        {viewState === 'empty' && (
+        {viewState === 'loading' || isAuthHydrating ? (
+          <LoadingSkeleton />
+        ) : viewState === 'empty' ? (
           <EmptyState
             onAction={() => setViewState('idle')}
           />
-        )}
-        {viewState === 'error' && (
+        ) : viewState === 'error' ? (
           <ErrorState
             message={errorMessage}
             onRetry={() => setViewState('idle')}
           />
-        )}
-        {viewState === 'permission-denied' && (
+        ) : viewState === 'permission-denied' ? (
           <PermissionDeniedState
             permission={deniedPermission || requiredPermission}
             onAction={handleReturnToSafeRoute}
           />
-        )}
-        {viewState === 'idle' && (
+        ) : (
           requiredPermission ? (
             <PermissionGate
               permission={requiredPermission}
-              overrides={activeOverrides}
+              overrides={effectiveOverrides}
               fallback={
                 <PermissionDeniedState
                   permission={requiredPermission}
