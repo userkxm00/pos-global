@@ -162,6 +162,8 @@ export function computeEffectivePermissions(
   return AUTHORITATIVE_PERMISSIONS.filter((p) => effective.has(p))
 }
 
+export const EMPTY_OVERRIDES: readonly UserPermissionOverride[] = Object.freeze([])
+
 /**
  * Deterministic permission check helper for presentation gating.
  * Backend Rust middleware remains authoritative for actual transaction authorization.
@@ -169,10 +171,35 @@ export function computeEffectivePermissions(
 export function hasEffectivePermission(
   roleStr: string,
   requiredPermission: Permission,
-  overrides: UserPermissionOverride[] = [],
+  overrides: readonly UserPermissionOverride[] = EMPTY_OVERRIDES,
 ): boolean {
-  const effective = computeEffectivePermissions(roleStr, overrides)
+  const effective = computeEffectivePermissions(roleStr, overrides as UserPermissionOverride[])
   return effective.includes(requiredPermission)
+}
+
+/**
+ * Evaluates single or multi-permission requirements against active user role and overrides.
+ * Fails closed for unauthenticated roles and empty permission requirement arrays.
+ */
+export function checkPermissions(
+  role: string | undefined | null,
+  required: Permission | Permission[],
+  requireAll = false,
+  overrides: readonly UserPermissionOverride[] = EMPTY_OVERRIDES,
+): boolean {
+  if (!role) return false
+
+  const reqList = Array.isArray(required) ? required : [required]
+  // Fail closed when permission requirements are empty or invalid
+  if (reqList.length === 0) return false
+
+  const effective = computeEffectivePermissions(role, overrides as UserPermissionOverride[])
+
+  if (requireAll) {
+    return reqList.every((p) => effective.includes(p))
+  }
+
+  return reqList.some((p) => effective.includes(p))
 }
 
 /**

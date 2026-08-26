@@ -2,6 +2,8 @@
 @import './shell.css';
 @import './admin.css';
 @import './sync.css';
+@import './toast.css';
+@import './dialog.css';
 
 * {
   box-sizing: border-box;

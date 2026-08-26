@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { ShellProvider, useShell } from './context/ShellContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { ToastProvider } from './context/ToastContext'
+import { ToastContainer } from './components/common/ToastContainer'
+import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { AppShell } from './components/shell/AppShell'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { LockScreen } from './components/lock/LockScreen'
@@ -133,10 +136,15 @@ export const AppContent: React.FC = () => {
 
 export default function App() {
   return (
-    <ShellProvider>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
-    </ShellProvider>
+    <ErrorBoundary>
+      <ShellProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <AppContent />
+            <ToastContainer />
+          </ToastProvider>
+        </AuthProvider>
+      </ShellProvider>
+    </ErrorBoundary>
   )
 }
