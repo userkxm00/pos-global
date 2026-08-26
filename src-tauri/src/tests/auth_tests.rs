@@ -415,4 +415,9 @@ fn refresh_token_input_constructs_and_deserializes() {
     let deserialized: RefreshTokenInput =
         serde_json::from_str(json).expect("should deserialize alias");
     assert_eq!(deserialized.refresh_token, "aliased_token_999");
+
+    let snake_json = r#"{"refresh_token":"snake_token_111"}"#;
+    let snake: RefreshTokenInput =
+        serde_json::from_str(snake_json).expect("should deserialize snake_case field");
+    assert_eq!(snake.refresh_token, "snake_token_111");
 }

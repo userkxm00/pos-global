@@ -76,7 +76,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       const api = getAuthApi()
       const { session, user } = await performTokenRefresh(storedRefreshToken, api, activeUser)
       setActiveUser(user)
-      setSessionId(session.user.id)
+      setSessionId(user.id)
       setAuthMode('online')
       setAuthStatus('authenticated')
       return session
@@ -112,11 +112,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
         // If restored token is already expired or expiring soon, evaluate immediately
         if (restored.status === 'expired' || isTokenExpiringSoon(restored.expiresAt)) {
           if (restored.refreshToken) {
+            isRefreshingRef.current = true
             try {
               const { session, user } = await performTokenRefresh(restored.refreshToken, api, restored.user)
               if (isMounted) {
                 setActiveUser(user)
-                setSessionId(session.user.id)
+                setSessionId(user.id)
                 setAuthMode('online')
                 setAuthStatus('authenticated')
               }
@@ -124,22 +125,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
             } catch (err: unknown) {
               const typedErr = classifyAuthError(err)
               if (isMounted) {
-                if (typedErr.code === 'network_error') {
-                  // On network failure during startup refresh, fail closed for cloud session while preserving local capability
-                  setAuthStatus('unauthenticated')
-                  setActiveUser(null)
-                  setSessionId(null)
-                } else {
+                if (typedErr.code === 'session_expired' || typedErr.code === 'invalid_credentials') {
                   clearStoredAuth()
                   setAuthStatus('expired')
                   setActiveUser(null)
                   setSessionId(null)
+                } else if (restored.status === 'expired') {
+                  clearStoredAuth()
+                  setAuthStatus('expired')
+                  setActiveUser(null)
+                  setSessionId(null)
+                } else {
+                  // Transient error on a token that was merely expiring soon:
+                  // keep the still-valid restored session rather than forcing logout
+                  setActiveUser(restored.user)
+                  setSessionId(restored.sessionId)
+                  setAuthMode('online')
+                  setAuthStatus('authenticated')
                 }
               }
               return
+            } finally {
+              isRefreshingRef.current = false
             }
-          } else {
-            // Expired with no refresh token: fail closed
+          } else if (restored.status === 'expired') {
+            // Already expired in past with no refresh token: fail closed
             clearStoredAuth()
             if (isMounted) {
               setAuthStatus('expired')

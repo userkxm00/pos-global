@@ -64,6 +64,18 @@ export function createTypedAuthError(code: AuthErrorCode, message: string): Type
   return err
 }
 
+const VALID_AUTH_ERROR_CODES: Set<AuthErrorCode> = new Set([
+  'invalid_credentials',
+  'session_expired',
+  'rate_limit',
+  'network_error',
+  'service_unavailable',
+  'unconfigured',
+  'validation_error',
+  'security_violation',
+  'unknown',
+])
+
 /**
  * Classifies an unknown error into a structured TypedAuthError.
  */
@@ -73,6 +85,7 @@ export function classifyAuthError(err: unknown): TypedAuthError {
     typeof err === 'object' &&
     'code' in err &&
     typeof (err as { code: unknown }).code === 'string' &&
+    VALID_AUTH_ERROR_CODES.has((err as { code: unknown }).code as AuthErrorCode) &&
     'message' in err &&
     typeof (err as { message: unknown }).message === 'string'
   ) {

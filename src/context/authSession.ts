@@ -251,10 +251,12 @@ export async function performTokenRefresh(
   currentUser?: AuthenticatedUser | null,
 ): Promise<{ session: OnlineSession; user: AuthenticatedUser }> {
   const onlineSession = await apiClient.refreshOnlineSession(refreshToken)
+  const resolvedId = onlineSession.user?.id || currentUser?.id || 'usr_online'
+  const resolvedEmail = onlineSession.user?.email || currentUser?.email || ''
   const user: AuthenticatedUser = {
-    id: onlineSession.user?.id || currentUser?.id || 'usr_online',
-    email: onlineSession.user?.email || currentUser?.email || '',
-    full_name: (onlineSession.user?.email || currentUser?.email || '').split('@')[0],
+    id: resolvedId,
+    email: resolvedEmail,
+    full_name: resolvedEmail ? resolvedEmail.split('@')[0] : 'User',
     role: currentUser?.role || 'owner',
     branch_id: currentUser?.branch_id || null,
     organization_id: currentUser?.organization_id || null,

@@ -601,6 +601,9 @@ describe('F1.13 Authentication & Session Lifecycle Test Suite', () => {
 
     const user = { id: 'usr_store_1', email: 'store@example.com', role: 'owner' }
 
+    // Seed a stale refresh token so the removal branch is observable
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN, 'stale_ref')
+
     // Session with only expires_in
     storeOnlineSession(
       {
