@@ -8,7 +8,6 @@ import {
   AUTHORITATIVE_ROLES,
   PERMISSION_CATALOG,
   ROLE_CATALOG,
-  ROLE_DEFAULT_PERMISSIONS,
   CATEGORY_ORDER,
   getRoleDefaultPermissions,
   computeEffectivePermissions,
@@ -24,7 +23,7 @@ import {
 } from '../services/permissionApi.ts'
 import { en, ar, fr, getDirectionForLocale } from '../i18n/index.ts'
 import type { User, CreateUserInput } from '../types/user.ts'
-import type { Permission, UserPermissionOverride } from '../types/permission.ts'
+import type { UserPermissionOverride } from '../types/permission.ts'
 
 describe('F1.16 Roles & Permissions Administration Test Suite', () => {
   const sampleAdmin: User = {
@@ -141,7 +140,7 @@ describe('F1.16 Roles & Permissions Administration Test Suite', () => {
   })
 
   // Test 3: Effective Permission Computation & Deny Precedence
-  it('3. computeEffectivePermissions correctly applies overrides with deny precedence', () => {
+  it('3. computeEffectivePermissions correctly applies overrides with order-independent deny precedence', () => {
     // Base cashier has 5 permissions
     const baseCashierPerms = computeEffectivePermissions('cashier')
     assert.strictEqual(baseCashierPerms.length, 5)
@@ -164,30 +163,36 @@ describe('F1.16 Roles & Permissions Administration Test Suite', () => {
     assert.strictEqual(withDeny.length, 4)
     assert.strictEqual(withDeny.includes('sales.create'), false)
 
-    // Deny takes precedence if both exist for same permission
-    const contradictory: UserPermissionOverride[] = [
+    // Order 1: [allow, deny] -> deny must win
+    const order1: UserPermissionOverride[] = [
       { permission: 'sales.create', effect: 'allow' },
       { permission: 'sales.create', effect: 'deny' },
     ]
-    const withContradictory = computeEffectivePermissions('cashier', contradictory)
-    assert.strictEqual(withContradictory.includes('sales.create'), false)
+    assert.strictEqual(computeEffectivePermissions('cashier', order1).includes('sales.create'), false)
+
+    // Order 2: [deny, allow] -> deny must STILL win
+    const order2: UserPermissionOverride[] = [
+      { permission: 'sales.create', effect: 'deny' },
+      { permission: 'sales.create', effect: 'allow' },
+    ]
+    assert.strictEqual(computeEffectivePermissions('cashier', order2).includes('sales.create'), false)
   })
 
   // Test 4: Presentation Gating Helper
   it('4. hasEffectivePermission accurately gates UI capabilities', () => {
     // Admin has users.manage
-    assert.strictEqual(hasEffectivePermission('admin', [], 'users.manage'), true)
+    assert.strictEqual(hasEffectivePermission('admin', 'users.manage'), true)
 
     // Default cashier lacks users.manage
-    assert.strictEqual(hasEffectivePermission('cashier', [], 'users.manage'), false)
+    assert.strictEqual(hasEffectivePermission('cashier', 'users.manage'), false)
 
     // Cashier with custom allow override has users.manage
     const cashierGranted: UserPermissionOverride[] = [{ permission: 'users.manage', effect: 'allow' }]
-    assert.strictEqual(hasEffectivePermission('cashier', cashierGranted, 'users.manage'), true)
+    assert.strictEqual(hasEffectivePermission('cashier', 'users.manage', cashierGranted), true)
 
     // Admin with custom deny override lacks users.manage
     const adminDenied: UserPermissionOverride[] = [{ permission: 'users.manage', effect: 'deny' }]
-    assert.strictEqual(hasEffectivePermission('admin', adminDenied, 'users.manage'), false)
+    assert.strictEqual(hasEffectivePermission('admin', 'users.manage', adminDenied), false)
   })
 
   // Test 5: Branch Scoping & User Listing Isolation
@@ -391,6 +396,11 @@ describe('F1.16 Roles & Permissions Administration Test Suite', () => {
     assert.ok(en.admin.matrix.title)
     assert.ok(ar.admin.matrix.title)
     assert.ok(fr.admin.matrix.title)
+
+    // Check placeholders exist
+    assert.ok(en.admin.users.placeholders.pin)
+    assert.ok(ar.admin.users.placeholders.pin)
+    assert.ok(fr.admin.users.placeholders.pin)
 
     // Check RTL direction helper
     assert.strictEqual(getDirectionForLocale('ar'), 'rtl')

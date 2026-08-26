@@ -1,13 +1,14 @@
 // Roles / Permissions Administration Main Component
 // F1.16 — Roles / Permissions Administration UI
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShell } from '../../context/ShellContext'
 import { useAuth } from '../../context/AuthContext'
 import { getPermissionApi } from '../../services/permissionApi'
 import { hasEffectivePermission } from '../../context/permissionEvaluation'
 import type { User } from '../../types/user'
+import type { UserPermissionOverride } from '../../types/permission'
 import { UserManagementView } from './UserManagementView'
 import { RoleMatrixView } from './RoleMatrixView'
 import { PermissionDeniedState } from '../common/PermissionDeniedState'
@@ -23,31 +24,70 @@ export const RolesPermissionsAdmin: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<AdminTab>('users')
   const [users, setUsers] = useState<User[]>([])
+  const [activeUserOverrides, setActiveUserOverrides] = useState<UserPermissionOverride[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const activeBranchRequestRef = useRef<number>(0)
+
+  // Load active user's overrides to evaluate accurate authorization
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadActiveOverrides() {
+      if (!activeUser?.id) return
+      try {
+        const api = getPermissionApi()
+        const overrides = await api.listUserPermissionOverrides(activeUser.id)
+        if (isMounted) {
+          setActiveUserOverrides(overrides)
+        }
+      } catch {
+        // Fail-closed on error; proceed with default role permissions
+      }
+    }
+
+    void loadActiveOverrides()
+
+    return () => {
+      isMounted = false
+    }
+  }, [activeUser?.id])
 
   // Verify that active user is authorized to manage users & permissions
   // Presentation gating only: Rust backend remains authoritative
   const isAuthorized = Boolean(
     activeUser?.role &&
-      hasEffectivePermission(activeUser.role, [], 'users.manage'),
+      hasEffectivePermission(activeUser.role, 'users.manage', activeUserOverrides),
   )
 
   const loadBranchUsers = useCallback(async () => {
-    if (!branch?.id) return
+    if (!branch?.id) {
+      setIsLoading(false)
+      setUsers([])
+      return
+    }
+
+    const currentRequestId = ++activeBranchRequestRef.current
     setIsLoading(true)
     setErrorMessage(null)
 
     try {
       const api = getPermissionApi()
       const fetched = await api.listUsers(branch.id)
-      setUsers(fetched)
+      if (activeBranchRequestRef.current === currentRequestId) {
+        setUsers(fetched)
+      }
     } catch (err) {
-      setErrorMessage(
-        err instanceof Error && err.message ? err.message : t('admin.users.errors.loadUsersFailed'),
-      )
+      if (activeBranchRequestRef.current === currentRequestId) {
+        setErrorMessage(
+          err instanceof Error && err.message ? err.message : t('admin.users.errors.loadUsersFailed'),
+        )
+      }
     } finally {
-      setIsLoading(false)
+      if (activeBranchRequestRef.current === currentRequestId) {
+        setIsLoading(false)
+      }
     }
   }, [branch?.id, t])
 
@@ -132,7 +172,7 @@ export const RolesPermissionsAdmin: React.FC = () => {
       >
         {activeTab === 'users' && (
           <UserManagementView
-            branchId={branch?.id || ''}
+            branchId={branch?.id ?? ''}
             users={users}
             onUsersChange={setUsers}
           />

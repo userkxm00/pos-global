@@ -195,6 +195,7 @@ export const en = {
       placeholders: {
         fullName: 'e.g. John Doe',
         username: 'e.g. jdoe',
+        pin: '4-8 numeric digits',
         password: 'Enter secure password',
       },
       errors: {
@@ -575,6 +576,7 @@ export const ar = {
       placeholders: {
         fullName: 'مثال: أحمد محمد',
         username: 'مثال: ahmed',
+        pin: 'رمز من 4 إلى 8 أرقام',
         password: 'أدخل كلمة مرور قوية',
       },
       errors: {
@@ -951,6 +953,7 @@ export const fr = {
       placeholders: {
         fullName: 'Ex. Jean Dupont',
         username: 'Ex. jdupont',
+        pin: '4 à 8 chiffres',
         password: 'Mot de passe sécurisé',
       },
       errors: {

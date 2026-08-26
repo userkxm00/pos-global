@@ -81,6 +81,7 @@
 
 /* Alerts */
 .admin-alert {
+  display: block;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
   font-size: var(--font-size-sm);
@@ -90,7 +91,7 @@
 .admin-alert--success {
   background-color: rgba(16, 185, 129, 0.12);
   border: 1px solid var(--color-success, #10b981);
-  color: var(--color-success, #10b981);
+  color: #065f46;
 }
 
 /* Users Layout */
@@ -201,12 +202,12 @@
 
 .status-badge--active {
   background-color: rgba(16, 185, 129, 0.15);
-  color: #059669;
+  color: #065f46;
 }
 
 .status-badge--inactive {
   background-color: rgba(239, 68, 68, 0.15);
-  color: #dc2626;
+  color: #991b1b;
 }
 
 .role-badge {
@@ -220,17 +221,17 @@
 
 .role-badge--admin {
   background-color: rgba(99, 102, 241, 0.15);
-  color: #4f46e5;
+  color: #312e81;
 }
 
 .role-badge--manager {
   background-color: rgba(14, 165, 233, 0.15);
-  color: #0284c7;
+  color: #075985;
 }
 
 .role-badge--cashier {
   background-color: rgba(245, 158, 11, 0.15);
-  color: #d97706;
+  color: #92400e;
 }
 
 /* User Detail Drawer */
@@ -364,12 +365,12 @@
 
 .status-indicator--allowed {
   background-color: rgba(16, 185, 129, 0.2);
-  color: #059669;
+  color: #065f46;
 }
 
 .status-indicator--denied {
   background-color: rgba(239, 68, 68, 0.2);
-  color: #dc2626;
+  color: #991b1b;
 }
 
 .override-select {
@@ -498,9 +499,9 @@
 }
 
 .status-icon--allowed {
-  color: #059669;
+  color: #065f46;
 }
 
 .status-icon--denied {
-  color: var(--color-text-tertiary, #94a3b8);
+  color: #475569;
 }

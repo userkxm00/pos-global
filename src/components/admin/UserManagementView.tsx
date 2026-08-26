@@ -27,6 +27,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   onUsersChange,
 }) => {
   const { t } = useTranslation()
+  const totalCount = AUTHORITATIVE_PERMISSIONS.length
 
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
@@ -37,6 +38,10 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
 
+  const handleCloseCreateModal = useCallback(() => {
+    setIsCreateModalOpen(false)
+  }, [])
+
   // Filter users by search query
   const filteredUsers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -44,7 +49,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     return users.filter(
       (u) =>
         u.full_name.toLowerCase().includes(q) ||
-        (u.username && u.username.toLowerCase().includes(q)) ||
+        Boolean(u.username?.toLowerCase().includes(q)) ||
         u.role.toLowerCase().includes(q),
     )
   }, [users, searchQuery])
@@ -218,9 +223,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
         </div>
       )}
       {actionSuccess && (
-        <div role="status" className="admin-alert admin-alert--success" data-testid="admin-action-success">
-          <span>{actionSuccess}</span>
-        </div>
+        <output className="admin-alert admin-alert--success" data-testid="admin-action-success">
+          {actionSuccess}
+        </output>
       )}
 
       {/* Main Content Layout: Table + Detail Panel */}
@@ -346,7 +351,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
               </div>
               <div className="meta-item">
                 <span className="meta-label">{t('admin.users.effectiveCount')}:</span>
-                <span className="meta-value">{effectivePermissions.length} / 17</span>
+                <span className="meta-value">{effectivePermissions.length} / {totalCount}</span>
               </div>
             </div>
 
@@ -410,7 +415,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       <CreateUserModal
         isOpen={isCreateModalOpen}
         branchId={branchId}
-        onClose={() => setIsCreateModalOpen(false)}
+        onClose={handleCloseCreateModal}
         onUserCreated={handleUserCreated}
       />
     </div>

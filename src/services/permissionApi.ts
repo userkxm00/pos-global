@@ -4,6 +4,12 @@
 
 import type { User, CreateUserInput, UpdateUserInput } from '../types/user'
 import type { Permission, Role, PermissionEffect, UserPermissionOverride } from '../types/permission'
+import {
+  AUTHORITATIVE_PERMISSIONS,
+  ROLE_DEFAULT_PERMISSIONS,
+  getRoleDefaultPermissions,
+  computeEffectivePermissions,
+} from '../context/permissionEvaluation'
 
 export interface PermissionApiClient {
   listUsers(branchId: string): Promise<User[]>
@@ -21,66 +27,6 @@ export function extractInvokeErrorMessage(err: unknown): string {
   if (typeof err === 'string') return err
   if (err instanceof Error) return err.message
   return String(err)
-}
-
-const FALLBACK_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
-  admin: [
-    'sales.create',
-    'sales.refund',
-    'sales.void',
-    'inventory.adjust',
-    'inventory.transfer',
-    'products.manage',
-    'purchases.manage',
-    'customers.manage',
-    'debts.manage',
-    'cash.open',
-    'cash.close',
-    'cash.adjust',
-    'reports.view',
-    'reports.export',
-    'users.manage',
-    'settings.manage',
-    'license.manage',
-  ],
-  manager: [
-    'sales.create',
-    'sales.refund',
-    'sales.void',
-    'inventory.adjust',
-    'inventory.transfer',
-    'products.manage',
-    'purchases.manage',
-    'customers.manage',
-    'debts.manage',
-    'cash.open',
-    'cash.close',
-    'cash.adjust',
-    'reports.view',
-    'reports.export',
-    'settings.manage',
-  ],
-  cashier: [
-    'sales.create',
-    'customers.manage',
-    'reports.view',
-    'cash.open',
-    'cash.close',
-  ],
-}
-
-function computeFallbackEffective(role: string, overrides: UserPermissionOverride[]): Permission[] {
-  const normalized = role.trim().toLowerCase() as Role
-  const defaults = FALLBACK_ROLE_PERMISSIONS[normalized] || []
-  const set = new Set<Permission>(defaults)
-  for (const o of overrides) {
-    if (o.effect === 'deny') {
-      set.delete(o.permission)
-    } else if (o.effect === 'allow') {
-      set.add(o.permission)
-    }
-  }
-  return FALLBACK_ROLE_PERMISSIONS.admin.filter((p) => set.has(p))
 }
 
 // Real Tauri IPC Implementation
@@ -114,7 +60,7 @@ export class TauriPermissionApiClient implements PermissionApiClient {
     try {
       return await this.invoke<Permission[]>('list_role_permissions', { role })
     } catch {
-      return [...(FALLBACK_ROLE_PERMISSIONS[role] || [])]
+      return getRoleDefaultPermissions(role)
     }
   }
 
@@ -140,7 +86,25 @@ export class TauriPermissionApiClient implements PermissionApiClient {
     } catch {
       const user = await this.getUser(userId)
       const overrides = await this.listUserPermissionOverrides(userId)
-      return computeFallbackEffective(user.role, overrides)
+      return computeEffectivePermissions(user.role, overrides)
+    }
+  }
+}
+
+let mockIdCounter = 0
+
+function generateMockUserId(): string {
+  mockIdCounter += 1
+  return `usr_${Date.now()}_${mockIdCounter}`
+}
+
+function validateNameInput(name: string | null | undefined): void {
+  if (name !== undefined) {
+    if (!name || name.trim().length === 0) {
+      throw new Error('Full name cannot be empty')
+    }
+    if (name.length > 255) {
+      throw new Error('Full name cannot exceed 255 characters')
     }
   }
 }
@@ -189,22 +153,20 @@ export class MockPermissionApiClient implements PermissionApiClient {
       throw new Error('User role cannot be empty')
     }
 
-    if (input.username && input.username.trim().length > 0) {
-      const exists = this.users.some((u) => u.username === input.username?.trim())
-      if (exists) {
-        throw new Error(`Username '${input.username}' already exists`)
-      }
+    const trimmedUsername = input.username?.trim()
+    if (trimmedUsername && this.users.some((u) => u.username === trimmedUsername)) {
+      throw new Error(`Username '${input.username}' already exists`)
     }
 
     const newUser: User = {
-      id: `usr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: generateMockUserId(),
       branch_id: input.branch_id,
       full_name: input.full_name.trim(),
-      username: input.username?.trim() || null,
+      username: trimmedUsername ?? null,
       role: input.role.trim().toLowerCase(),
       is_active: true,
-      supabase_user_id: input.supabase_user_id || null,
-      auth_provider: input.auth_provider || 'local',
+      supabase_user_id: input.supabase_user_id ?? null,
+      auth_provider: input.auth_provider ?? 'local',
       created_at: new Date().toISOString(),
     }
     this.users.push(newUser)
@@ -217,34 +179,25 @@ export class MockPermissionApiClient implements PermissionApiClient {
     const idx = this.users.findIndex((u) => u.id === userId)
     if (idx === -1) throw new Error(`User '${userId}' not found`)
 
-    if (input.full_name !== undefined) {
-      if (!input.full_name || input.full_name.trim().length === 0) {
-        throw new Error('Full name cannot be empty')
-      }
-      if (input.full_name.length > 255) {
-        throw new Error('Full name cannot exceed 255 characters')
-      }
-    }
+    validateNameInput(input.full_name)
 
     if (input.role !== undefined && (!input.role || input.role.trim().length === 0)) {
       throw new Error('Role cannot be empty')
     }
 
-    if (input.username && input.username.trim().length > 0) {
-      const exists = this.users.some((u) => u.username === input.username?.trim() && u.id !== userId)
-      if (exists) {
-        throw new Error(`Username '${input.username}' already exists`)
-      }
+    const trimmedUsername = input.username?.trim()
+    if (trimmedUsername && this.users.some((u) => u.username === trimmedUsername && u.id !== userId)) {
+      throw new Error(`Username '${input.username}' already exists`)
     }
 
     const current = this.users[idx]
     const updated: User = {
       ...current,
-      full_name: input.full_name !== undefined ? input.full_name.trim() : current.full_name,
-      username: input.username !== undefined ? input.username?.trim() || null : current.username,
-      role: input.role !== undefined ? input.role.trim().toLowerCase() : current.role,
-      is_active: input.is_active !== undefined && input.is_active !== null ? input.is_active : current.is_active,
-      supabase_user_id: input.supabase_user_id !== undefined ? input.supabase_user_id : current.supabase_user_id,
+      full_name: input.full_name !== undefined && input.full_name !== null ? input.full_name.trim() : current.full_name,
+      username: input.username !== undefined ? trimmedUsername ?? null : current.username,
+      role: input.role !== undefined && input.role !== null ? input.role.trim().toLowerCase() : current.role,
+      is_active: input.is_active ?? current.is_active,
+      supabase_user_id: input.supabase_user_id ?? current.supabase_user_id,
     }
     this.users[idx] = updated
     return { ...updated }
@@ -253,7 +206,7 @@ export class MockPermissionApiClient implements PermissionApiClient {
   async listRolePermissions(role: Role): Promise<Permission[]> {
     await this.maybeDelay()
     if (this.shouldFailWith) throw new Error(this.shouldFailWith)
-    return [...(FALLBACK_ROLE_PERMISSIONS[role] || [])]
+    return getRoleDefaultPermissions(role)
   }
 
   async listUserPermissionOverrides(userId: string): Promise<UserPermissionOverride[]> {
@@ -288,7 +241,7 @@ export class MockPermissionApiClient implements PermissionApiClient {
     if (this.shouldFailWith) throw new Error(this.shouldFailWith)
     const user = await this.getUser(userId)
     const userOverrides = await this.listUserPermissionOverrides(userId)
-    return computeFallbackEffective(user.role, userOverrides)
+    return computeEffectivePermissions(user.role, userOverrides)
   }
 }
 

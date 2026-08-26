@@ -4,6 +4,7 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  AUTHORITATIVE_PERMISSIONS,
   AUTHORITATIVE_ROLES,
   CATEGORY_ORDER,
   PERMISSION_CATALOG,
@@ -14,6 +15,7 @@ import type { PermissionCategory, Permission } from '../../types/permission'
 
 export const RoleMatrixView: React.FC = () => {
   const { t } = useTranslation()
+  const totalCount = AUTHORITATIVE_PERMISSIONS.length
 
   return (
     <div className="admin-matrix-view" data-testid="role-matrix-view">
@@ -31,7 +33,7 @@ export const RoleMatrixView: React.FC = () => {
                 {t(r.titleKey)}
               </span>
               <span className="role-summary-card__count">
-                {r.defaultPermissions.length} / 17 {t('admin.matrix.permissions')}
+                {r.defaultPermissions.length} / {totalCount} {t('admin.matrix.permissions')}
               </span>
             </div>
             <p className="role-summary-card__desc">{t(r.descriptionKey)}</p>
@@ -79,21 +81,25 @@ export const RoleMatrixView: React.FC = () => {
                       </td>
                       {AUTHORITATIVE_ROLES.map((role) => {
                         const hasPerm = ROLE_DEFAULT_PERMISSIONS[role].includes(perm.code as Permission)
+                        const roleTitle = t(`roles.${role}.title`)
+                        const statusTitle = hasPerm ? t('common.allowed') : t('common.denied')
+                        const cellAriaLabel = `${roleTitle}: ${statusTitle}`
+
                         return (
                           <td key={`${role}-${perm.code}`} className="matrix-cell-status">
                             {hasPerm ? (
                               <span
                                 className="status-icon status-icon--allowed"
-                                aria-label={`${t(`roles.${role}.title`)}: ${t('common.allowed')}`}
-                                title={`${t(`roles.${role}.title`)}: ${t('common.allowed')}`}
+                                aria-label={cellAriaLabel}
+                                title={cellAriaLabel}
                               >
                                 ✓
                               </span>
                             ) : (
                               <span
                                 className="status-icon status-icon--denied"
-                                aria-label={`${t(`roles.${role}.title`)}: ${t('common.denied')}`}
-                                title={`${t(`roles.${role}.title`)}: ${t('common.denied')}`}
+                                aria-label={cellAriaLabel}
+                                title={cellAriaLabel}
                               >
                                 —
                               </span>

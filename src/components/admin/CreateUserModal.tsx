@@ -241,7 +241,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
               className="form-input"
               value={pin}
               onChange={(e) => setPin(e.target.value)}
-              placeholder="4-8 digits"
+              placeholder={t('admin.users.placeholders.pin')}
               maxLength={8}
               disabled={isSubmitting}
               data-testid="create-user-pin-input"

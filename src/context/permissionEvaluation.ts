@@ -216,7 +216,8 @@ export function getRoleDefaultPermissions(roleStr: string): Permission[] {
 
 /**
  * Computes effective permissions for a user given their role and explicit overrides.
- * Deny overrides take precedence over role defaults and allow overrides.
+ * Deny overrides take strict precedence over allow overrides and role defaults,
+ * regardless of array order.
  */
 export function computeEffectivePermissions(
   roleStr: string,
@@ -225,14 +226,17 @@ export function computeEffectivePermissions(
   const defaults = getRoleDefaultPermissions(roleStr)
   const effective = new Set<Permission>(defaults)
 
-  // Apply explicit overrides
+  // 1. Apply allow overrides
+  for (const override of overrides) {
+    if (override.effect === 'allow' && AUTHORITATIVE_PERMISSIONS.includes(override.permission)) {
+      effective.add(override.permission)
+    }
+  }
+
+  // 2. Apply deny overrides (deny strictly wins)
   for (const override of overrides) {
     if (override.effect === 'deny') {
       effective.delete(override.permission)
-    } else if (override.effect === 'allow') {
-      if (AUTHORITATIVE_PERMISSIONS.includes(override.permission)) {
-        effective.add(override.permission)
-      }
     }
   }
 
@@ -245,8 +249,8 @@ export function computeEffectivePermissions(
  */
 export function hasEffectivePermission(
   roleStr: string,
-  overrides: UserPermissionOverride[] = [],
   requiredPermission: Permission,
+  overrides: UserPermissionOverride[] = [],
 ): boolean {
   const effective = computeEffectivePermissions(roleStr, overrides)
   return effective.includes(requiredPermission)
