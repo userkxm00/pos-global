@@ -110,52 +110,28 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
   // Request sequencing guard to discard out-of-order race conditions
   const guardRef = useRef<CascadingSequenceGuard>(createCascadingSequenceGuard())
 
-  // Dialog lifecycle and native modal open/close handling
+  // Native modal dialog lifecycle and focus restoration
   useEffect(() => {
     const dialog = modalRef.current
+    if (!dialog) return
+
     if (isOpen) {
       previousActiveElement.current = document.activeElement as HTMLElement | null
-      if (dialog && typeof dialog.showModal === 'function' && !dialog.open) {
+      if (typeof dialog.showModal === 'function' && !dialog.open) {
         dialog.showModal()
       }
-    } else if (previousActiveElement.current) {
+    }
+
+    return () => {
       if (dialog && typeof dialog.close === 'function' && dialog.open) {
         dialog.close()
       }
-      previousActiveElement.current.focus()
-      previousActiveElement.current = null
+      if (previousActiveElement.current) {
+        previousActiveElement.current.focus()
+        previousActiveElement.current = null
+      }
     }
   }, [isOpen])
-
-  // Handle Escape key and outside click to close, excluding trigger badge
-  useEffect(() => {
-    if (!isOpen) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
-    }
-
-    const handleOutsideClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null
-      if (target?.closest('[data-testid="header-context-switcher-btn"]')) {
-        return
-      }
-      if (modalRef.current && !modalRef.current.contains(target as Node)) {
-        onClose()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    document.addEventListener('mousedown', handleOutsideClick)
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      document.removeEventListener('mousedown', handleOutsideClick)
-    }
-  }, [isOpen, onClose])
 
   // Load registers for a specific branch with sequence guard
   const loadRegistersForBranch = useCallback(
@@ -366,9 +342,17 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
       <dialog
         ref={modalRef}
         className="context-modal"
-        open
         aria-modal="true"
         aria-labelledby="context-switcher-title"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            onClose()
+          }
+        }}
+        onCancel={(e) => {
+          e.preventDefault()
+          onClose()
+        }}
         data-testid="context-switcher-modal"
       >
         <header className="context-modal__header">

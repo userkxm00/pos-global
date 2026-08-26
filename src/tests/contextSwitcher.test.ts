@@ -397,4 +397,31 @@ describe('F1.15 Context Switcher Test Suite', () => {
     const resetReg = resolveRegisterOnBranchChange('org_a', 'branch_a2', registerA1_1, [])
     assert.strictEqual(resetReg, null)
   })
+
+  // Test 14: Native Modal Dialog Backdrop Click Target Discrimination
+  it('14. Native dialog dismiss triggers only when target equals currentTarget', () => {
+    let closed = false
+    const onClose = () => {
+      closed = true
+    }
+
+    function handleDialogClick(target: unknown, currentTarget: unknown) {
+      if (target === currentTarget) {
+        onClose()
+      }
+    }
+
+    const dialogObj = { id: 'dialog' }
+    const childObj = { id: 'button' }
+
+    // Clicking child form control: target !== currentTarget -> must NOT close
+    closed = false
+    handleDialogClick(childObj, dialogObj)
+    assert.strictEqual(closed, false)
+
+    // Clicking native dialog backdrop: target === currentTarget -> MUST close
+    closed = false
+    handleDialogClick(dialogObj, dialogObj)
+    assert.strictEqual(closed, true)
+  })
 })
