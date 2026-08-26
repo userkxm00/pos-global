@@ -333,14 +333,14 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
     function testFindSafeRoute(
       role: string | undefined | null,
       overrides: readonly UserPermissionOverride[] = EMPTY_OVERRIDES,
-    ): string {
+    ): string | null {
       for (const route of routesOrder) {
         const required = routePermissions[route]
         if (!required || checkPermissions(role, required, false, overrides)) {
           return route
         }
       }
-      return 'pos'
+      return null
     }
 
     // Default admin / cashier has sales.create -> 'pos'
@@ -368,5 +368,9 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
       'inventory',
       'Manager safely routes to inventory',
     )
+
+    // Unauthenticated role or empty permissions -> returns null
+    assert.strictEqual(testFindSafeRoute(null), null)
+    assert.strictEqual(testFindSafeRoute('invalid_role'), null)
   })
 })

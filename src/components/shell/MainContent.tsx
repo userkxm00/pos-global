@@ -40,19 +40,19 @@ export const NAVIGATION_ROUTES_ORDER: readonly NavigationRoute[] = [
 
 /**
  * Finds the first accessible safe navigation route for the active user role and overrides.
- * Prevents redirecting a permission-denied user to another restricted route.
+ * Returns null if no navigation routes are permitted for the current user.
  */
 export function findSafeNavigationRoute(
   role: string | undefined | null,
   overrides: readonly UserPermissionOverride[] = EMPTY_OVERRIDES,
-): NavigationRoute {
+): NavigationRoute | null {
   for (const route of NAVIGATION_ROUTES_ORDER) {
     const required = ROUTE_PERMISSIONS[route]
     if (!required || checkPermissions(role, required, false, overrides)) {
       return route
     }
   }
-  return 'pos'
+  return null
 }
 
 export interface UserOverrideState {
@@ -169,8 +169,12 @@ export const MainContent: React.FC = () => {
 
   const handleReturnToSafeRoute = useCallback(() => {
     const safeRoute = findSafeNavigationRoute(activeUser?.role, effectiveOverrides)
-    setActiveRoute(safeRoute)
-    setViewState('idle')
+    if (safeRoute) {
+      setActiveRoute(safeRoute)
+      setViewState('idle')
+    } else {
+      setViewState('permission-denied')
+    }
   }, [activeUser?.role, effectiveOverrides, setActiveRoute, setViewState])
 
   const renderDynamicContent = () => {
