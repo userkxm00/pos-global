@@ -1,14 +1,14 @@
 // AuthContext managing authentication lifecycle, session restoration, lock/unlock, logout, and token refresh
 // F1.13 — Authentication screens and session lifecycle & F1.14 — Local PIN and Lock screen & F1.19 — Supabase Auth adapter hardening
-
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import type { AuthMode, AuthStatus, SignInInput, LocalSignInInput, OnlineSession } from '../types/auth'
 import type { LoginResult } from '../types/session'
-import { getAuthApi } from '../services/authApi'
+import { getAuthApi, classifyAuthError } from '../services/authApi'
 import { DEFAULT_AUTH_MODE } from '../components/auth/constants'
 import {
   AUTH_STORAGE_KEYS,
   AuthenticatedUser,
+  clearStoredAuth,
   evaluateStoredSession,
   isTokenExpiringSoon,
   performOnlineLogin,
@@ -60,33 +60,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
 
   const isRefreshingRef = useRef<boolean>(false)
 
-  // Restore session on startup
-  useEffect(() => {
-    let isMounted = true
-
-    async function initSession() {
-      if (initialUser && initialSessionId) {
-        if (isMounted) setAuthStatus('authenticated')
-        return
-      }
-
-      const api = getAuthApi()
-      const restored = await evaluateStoredSession(api)
-      if (isMounted) {
-        setAuthStatus(restored.status)
-        setActiveUser(restored.user)
-        setSessionId(restored.sessionId)
-        setAuthMode(restored.mode)
-      }
-    }
-
-    void initSession()
-
-    return () => {
-      isMounted = false
-    }
-  }, [initialUser, initialSessionId])
-
   const refreshSession = useCallback(async (): Promise<OnlineSession | null> => {
     if (isRefreshingRef.current) return null
     if (typeof window === 'undefined' || !window.sessionStorage) return null
@@ -108,9 +81,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       setAuthStatus('authenticated')
       return session
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err)
-      const lower = errMsg.toLowerCase()
-      if (lower.includes('expired') || lower.includes('invalid') || lower.includes('session expired')) {
+      const typedErr = classifyAuthError(err)
+      if (typedErr.code === 'session_expired' || typedErr.code === 'invalid_credentials') {
+        clearStoredAuth()
         setAuthStatus('expired')
         setActiveUser(null)
         setSessionId(null)
@@ -120,6 +93,78 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       isRefreshingRef.current = false
     }
   }, [activeUser])
+
+  // Restore session on startup with immediate expiry evaluation
+  useEffect(() => {
+    let isMounted = true
+
+    async function initSession() {
+      if (initialUser && initialSessionId) {
+        if (isMounted) setAuthStatus('authenticated')
+        return
+      }
+
+      const api = getAuthApi()
+      const restored = await evaluateStoredSession(api)
+      if (!isMounted) return
+
+      if (restored.mode === 'online' && restored.user && restored.sessionId) {
+        // If restored token is already expired or expiring soon, evaluate immediately
+        if (restored.status === 'expired' || isTokenExpiringSoon(restored.expiresAt)) {
+          if (restored.refreshToken) {
+            try {
+              const { session, user } = await performTokenRefresh(restored.refreshToken, api, restored.user)
+              if (isMounted) {
+                setActiveUser(user)
+                setSessionId(session.user.id)
+                setAuthMode('online')
+                setAuthStatus('authenticated')
+              }
+              return
+            } catch (err: unknown) {
+              const typedErr = classifyAuthError(err)
+              if (isMounted) {
+                if (typedErr.code === 'network_error') {
+                  // On network failure during startup refresh, fail closed for cloud session while preserving local capability
+                  setAuthStatus('unauthenticated')
+                  setActiveUser(null)
+                  setSessionId(null)
+                } else {
+                  clearStoredAuth()
+                  setAuthStatus('expired')
+                  setActiveUser(null)
+                  setSessionId(null)
+                }
+              }
+              return
+            }
+          } else {
+            // Expired with no refresh token: fail closed
+            clearStoredAuth()
+            if (isMounted) {
+              setAuthStatus('expired')
+              setActiveUser(null)
+              setSessionId(null)
+            }
+            return
+          }
+        }
+      }
+
+      if (isMounted) {
+        setAuthStatus(restored.status)
+        setActiveUser(restored.user)
+        setSessionId(restored.sessionId)
+        setAuthMode(restored.mode)
+      }
+    }
+
+    void initSession()
+
+    return () => {
+      isMounted = false
+    }
+  }, [initialUser, initialSessionId])
 
   // Proactive token refresh check on window focus / visibility change
   useEffect(() => {
@@ -136,6 +181,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       }
     }
 
+    handleVisibilityCheck()
     document.addEventListener('visibilitychange', handleVisibilityCheck)
     window.addEventListener('focus', handleVisibilityCheck)
 

@@ -4,7 +4,6 @@
 import type { AuthMode, AuthStatus, SignInInput, LocalSignInInput, OnlineSession } from '../types/auth'
 import type { LoginResult } from '../types/session'
 import type { AuthApiClient } from '../services/authApi'
-
 export const AUTH_STORAGE_KEYS = {
   SESSION_ID: 'pos_global_session_id',
   AUTH_MODE: 'pos_global_auth_mode',
@@ -15,6 +14,7 @@ export const AUTH_STORAGE_KEYS = {
 } as const
 
 export const DEFAULT_AUTH_MODE = 'online' as const
+
 export const DEFAULT_EXPIRY_THRESHOLD_SECONDS = 300 // 5 minutes proactive refresh window
 
 export interface AuthenticatedUser {
@@ -43,7 +43,9 @@ export function isTokenExpiringSoon(
   expiresAt: number | undefined | null,
   thresholdSeconds = DEFAULT_EXPIRY_THRESHOLD_SECONDS,
 ): boolean {
-  if (expiresAt === undefined || expiresAt === null) return true
+  if (expiresAt === undefined || expiresAt === null || Number.isNaN(expiresAt) || expiresAt <= 0) {
+    return true
+  }
   const nowSeconds = Math.floor(Date.now() / 1000)
   return expiresAt - nowSeconds <= thresholdSeconds
 }
@@ -63,30 +65,57 @@ export function clearStoredAuth(): void {
 }
 
 /**
- * Persists active online session state to tab sessionStorage.
+ * Persists active online session state to tab sessionStorage without retaining stale tokens or writing "null".
  */
 export function storeOnlineSession(session: OnlineSession, user: AuthenticatedUser): void {
   if (typeof window !== 'undefined' && window.sessionStorage) {
     window.sessionStorage.setItem(AUTH_STORAGE_KEYS.AUTH_MODE, 'online')
     window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN, session.access_token)
-    if (session.refresh_token) {
-      window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN, session.refresh_token)
+
+    if (
+      session.refresh_token &&
+      typeof session.refresh_token === 'string' &&
+      session.refresh_token.trim().length > 0 &&
+      session.refresh_token !== 'null' &&
+      session.refresh_token !== 'undefined'
+    ) {
+      window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN, session.refresh_token.trim())
+    } else {
+      window.sessionStorage.removeItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN)
     }
-    if (session.expires_at !== undefined) {
-      window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT, String(session.expires_at))
+
+    let resolvedExpiresAt: number | null = null
+    if (session.expires_at !== undefined && session.expires_at !== null && !Number.isNaN(session.expires_at)) {
+      resolvedExpiresAt = session.expires_at
+    } else if (
+      session.expires_in !== undefined &&
+      session.expires_in !== null &&
+      !Number.isNaN(session.expires_in)
+    ) {
+      resolvedExpiresAt = Math.floor(Date.now() / 1000) + session.expires_in
     }
+
+    if (resolvedExpiresAt !== null && !Number.isNaN(resolvedExpiresAt) && resolvedExpiresAt > 0) {
+      window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT, String(resolvedExpiresAt))
+    } else {
+      window.sessionStorage.removeItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT)
+    }
+
     window.sessionStorage.setItem(AUTH_STORAGE_KEYS.SESSION_ID, user.id)
     window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_USER, JSON.stringify(user))
   }
 }
 
+/**
+ * Evaluates stored online session credentials, parsing expiration timestamps and enforcing fail-closed expired status.
+ */
 export async function restoreOnlineSession(
   token: string,
   rawUser: string | null,
   refreshToken?: string | null,
   expiresAtStr?: string | null,
 ): Promise<RestoredSessionData> {
-  if (!token || !rawUser) {
+  if (!token || !rawUser || token === 'null' || token === 'undefined') {
     clearStoredAuth()
     return { status: 'unauthenticated', user: null, sessionId: null, mode: 'online' }
   }
@@ -94,14 +123,38 @@ export async function restoreOnlineSession(
   try {
     const parsedUser = JSON.parse(rawUser) as AuthenticatedUser
     if (parsedUser?.id && parsedUser?.email) {
-      const expiresAt = expiresAtStr ? Number(expiresAtStr) : null
+      const cleanExpiresAtStr =
+        expiresAtStr && expiresAtStr !== 'null' && expiresAtStr !== 'undefined' ? expiresAtStr : null
+      const parsedExpiresAt = cleanExpiresAtStr ? Number(cleanExpiresAtStr) : null
+      const validExpiresAt =
+        parsedExpiresAt !== null && !Number.isNaN(parsedExpiresAt) && parsedExpiresAt > 0
+          ? parsedExpiresAt
+          : null
+
+      const cleanRefreshToken =
+        refreshToken && refreshToken !== 'null' && refreshToken !== 'undefined'
+          ? refreshToken.trim()
+          : null
+
+      const nowSeconds = Math.floor(Date.now() / 1000)
+      if (validExpiresAt !== null && validExpiresAt <= nowSeconds) {
+        return {
+          status: 'expired',
+          user: parsedUser,
+          sessionId: parsedUser.id,
+          mode: 'online',
+          refreshToken: cleanRefreshToken,
+          expiresAt: validExpiresAt,
+        }
+      }
+
       return {
         status: 'authenticated',
         user: parsedUser,
         sessionId: parsedUser.id,
         mode: 'online',
-        refreshToken: refreshToken || null,
-        expiresAt: expiresAt && !Number.isNaN(expiresAt) ? expiresAt : null,
+        refreshToken: cleanRefreshToken,
+        expiresAt: validExpiresAt,
       }
     }
   } catch {
@@ -112,6 +165,9 @@ export async function restoreOnlineSession(
   return { status: 'expired', user: null, sessionId: null, mode: 'online' }
 }
 
+/**
+ * Restores active local session from local SQLite backend.
+ */
 export async function restoreLocalSession(
   sessionId: string,
   apiClient: AuthApiClient,
@@ -141,6 +197,9 @@ export async function restoreLocalSession(
   return { status: 'expired', user: null, sessionId: null, mode: 'local' }
 }
 
+/**
+ * Reads tab sessionStorage and restores active session according to stored authentication mode.
+ */
 export async function evaluateStoredSession(apiClient: AuthApiClient): Promise<RestoredSessionData> {
   if (typeof window === 'undefined' || !window.sessionStorage) {
     return { status: 'unauthenticated', user: null, sessionId: null, mode: DEFAULT_AUTH_MODE }
@@ -164,6 +223,9 @@ export async function evaluateStoredSession(apiClient: AuthApiClient): Promise<R
   return { status: 'unauthenticated', user: null, sessionId: null, mode: DEFAULT_AUTH_MODE }
 }
 
+/**
+ * Performs online authentication against Supabase Auth and persists active session tokens.
+ */
 export async function performOnlineLogin(
   credentials: SignInInput,
   apiClient: AuthApiClient,
@@ -180,6 +242,9 @@ export async function performOnlineLogin(
   return { session: onlineSession, user }
 }
 
+/**
+ * Performs online token refresh against Supabase Auth, updating session storage atomically.
+ */
 export async function performTokenRefresh(
   refreshToken: string,
   apiClient: AuthApiClient,
@@ -187,9 +252,9 @@ export async function performTokenRefresh(
 ): Promise<{ session: OnlineSession; user: AuthenticatedUser }> {
   const onlineSession = await apiClient.refreshOnlineSession(refreshToken)
   const user: AuthenticatedUser = {
-    id: onlineSession.user.id || currentUser?.id || 'usr_online',
-    email: onlineSession.user.email || currentUser?.email || '',
-    full_name: (onlineSession.user.email || currentUser?.email || '').split('@')[0],
+    id: onlineSession.user?.id || currentUser?.id || 'usr_online',
+    email: onlineSession.user?.email || currentUser?.email || '',
+    full_name: (onlineSession.user?.email || currentUser?.email || '').split('@')[0],
     role: currentUser?.role || 'owner',
     branch_id: currentUser?.branch_id || null,
     organization_id: currentUser?.organization_id || null,
@@ -199,6 +264,9 @@ export async function performTokenRefresh(
   return { session: onlineSession, user }
 }
 
+/**
+ * Performs local username/password authentication against local SQLite backend.
+ */
 export async function performLocalLogin(
   credentials: LocalSignInInput,
   apiClient: AuthApiClient,
@@ -222,6 +290,9 @@ export async function performLocalLogin(
   return { result, user: null }
 }
 
+/**
+ * Verifies local POS operator PIN and restores terminal session.
+ */
 export async function performPinUnlock(
   userId: string,
   pin: string,
@@ -270,6 +341,9 @@ async function revokeLocalSession(apiClient: AuthApiClient, sessionId: string): 
   }
 }
 
+/**
+ * Performs complete session logout, invalidating cloud or local sessions and clearing storage.
+ */
 export async function performLogout(
   sessionId: string | null,
   authMode: AuthMode,

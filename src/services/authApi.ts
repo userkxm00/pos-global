@@ -1,7 +1,15 @@
 // Authoritative Tauri IPC & Supabase Auth Client for Authentication and Session Lifecycle
 // Invokes production Tauri commands in src-tauri/src/commands/auth.rs and cloud auth revocation
+// F1.04 — Supabase Auth adapter & F1.13 — Auth screens & F1.14 — Local PIN and Lock screen & F1.19 — Supabase Auth adapter hardening
 
-import type { SupabaseAuthConfig, OnlineSession, SignInInput, LocalSignInInput } from '../types/auth'
+import type {
+  SupabaseAuthConfig,
+  OnlineSession,
+  SignInInput,
+  LocalSignInInput,
+  AuthErrorCode,
+  TypedAuthError,
+} from '../types/auth'
 import type { AuthState, LoginResult } from '../types/session'
 
 export interface AuthApiClient {
@@ -14,12 +22,18 @@ export interface AuthApiClient {
   logout(sessionId: string): Promise<void>
 }
 
+/**
+ * Extracts a human-readable error message from unknown error objects.
+ */
 export function extractInvokeErrorMessage(err: unknown): string {
   if (typeof err === 'string') return err
   if (err instanceof Error) return err.message
   return String(err)
 }
 
+/**
+ * Strips all trailing slashes from endpoint URLs.
+ */
 export function stripTrailingSlash(url: string): string {
   let clean = url.trim()
   while (clean.endsWith('/')) {
@@ -28,6 +42,9 @@ export function stripTrailingSlash(url: string): string {
   return clean
 }
 
+/**
+ * Returns default Supabase Auth configuration from environment variables or mock defaults.
+ */
 export function getDefaultSupabaseConfig(): SupabaseAuthConfig {
   const url = import.meta.env?.VITE_SUPABASE_URL ?? 'https://pos-global-mock.supabase.co'
   const publishableKey = import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY ?? 'mock_publishable_key'
@@ -37,6 +54,89 @@ export function getDefaultSupabaseConfig(): SupabaseAuthConfig {
   }
 }
 
+/**
+ * Creates a typed authentication error adhering to the domain AuthErrorCode contract.
+ */
+export function createTypedAuthError(code: AuthErrorCode, message: string): TypedAuthError {
+  const err = new Error(message) as TypedAuthError
+  err.code = code
+  err.name = 'TypedAuthError'
+  return err
+}
+
+/**
+ * Classifies an unknown error into a structured TypedAuthError.
+ */
+export function classifyAuthError(err: unknown): TypedAuthError {
+  if (
+    err &&
+    typeof err === 'object' &&
+    'code' in err &&
+    typeof (err as { code: unknown }).code === 'string' &&
+    'message' in err &&
+    typeof (err as { message: unknown }).message === 'string'
+  ) {
+    return err as TypedAuthError
+  }
+
+  const msg = err instanceof Error ? err.message : String(err)
+  const lower = msg.toLowerCase()
+
+  if (
+    lower.includes('session expired') ||
+    lower.includes('invalid refresh token') ||
+    lower.includes('refresh token is invalid') ||
+    lower.includes('refresh token not found') ||
+    lower.includes('refresh_token_not_found') ||
+    lower.includes('already used') ||
+    lower.includes('jwt expired') ||
+    lower.includes('session has expired')
+  ) {
+    return createTypedAuthError('session_expired', msg)
+  }
+
+  if (lower.includes('rate limit') || lower.includes('too many')) {
+    return createTypedAuthError('rate_limit', msg)
+  }
+
+  if (
+    lower.includes('network') ||
+    lower.includes('unable to reach') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('connection refused')
+  ) {
+    return createTypedAuthError('network_error', msg)
+  }
+
+  if (
+    lower.includes('invalid credentials') ||
+    lower.includes('invalid login credentials') ||
+    lower.includes('invalid email') ||
+    lower.includes('user not found') ||
+    lower.includes('does not match')
+  ) {
+    return createTypedAuthError('invalid_credentials', msg)
+  }
+
+  if (lower.includes('unavailable') || lower.includes('service unavailable')) {
+    return createTypedAuthError('service_unavailable', msg)
+  }
+
+  if (lower.includes('security violation') || lower.includes('forbidden') || lower.includes('secret key')) {
+    return createTypedAuthError('security_violation', msg)
+  }
+
+  if (lower.includes('unconfigured') || lower.includes('missing configuration')) {
+    return createTypedAuthError('unconfigured', msg)
+  }
+
+  if (lower.includes('validation')) {
+    return createTypedAuthError('validation_error', msg)
+  }
+
+  return createTypedAuthError('unknown', msg)
+}
+
 // Real Tauri IPC & Cloud Auth Implementation
 class TauriAuthApiClient implements AuthApiClient {
   private async invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -44,7 +144,7 @@ class TauriAuthApiClient implements AuthApiClient {
       const { invoke } = await import('@tauri-apps/api/core')
       return await invoke<T>(cmd, args)
     } catch (err) {
-      throw new Error(extractInvokeErrorMessage(err))
+      throw classifyAuthError(err)
     }
   }
 
@@ -63,7 +163,9 @@ class TauriAuthApiClient implements AuthApiClient {
     const activeConfig = config || getDefaultSupabaseConfig()
     return this.invoke<OnlineSession>('refresh_online_session', {
       config: activeConfig,
-      refreshToken: refreshToken.trim(),
+      input: {
+        refresh_token: refreshToken.trim(),
+      },
     })
   }
 
@@ -113,13 +215,13 @@ export class MockAuthApiClient implements AuthApiClient {
   public revokedCloudTokens: Set<string> = new Set()
 
   async onlineLogin(credentials: SignInInput, _config?: SupabaseAuthConfig): Promise<OnlineSession> {
-    if (this.shouldFailWith) throw new Error(this.shouldFailWith)
+    if (this.shouldFailWith) throw classifyAuthError(this.shouldFailWith)
     const trimmedEmail = credentials.email.trim().toLowerCase()
     if (!trimmedEmail || !credentials.password) {
-      throw new Error('Invalid credentials: Email and password are required')
+      throw classifyAuthError('Invalid credentials: Email and password are required')
     }
     if (credentials.password === 'wrong_password') {
-      throw new Error('Invalid credentials: Invalid email or password')
+      throw classifyAuthError('Invalid credentials: Invalid email or password')
     }
 
     const userId = `usr_cloud_${trimmedEmail.replace(/[^a-z0-9]/g, '_')}`
@@ -139,19 +241,22 @@ export class MockAuthApiClient implements AuthApiClient {
   }
 
   async refreshOnlineSession(refreshToken: string, _config?: SupabaseAuthConfig): Promise<OnlineSession> {
-    if (this.shouldFailWith) throw new Error(this.shouldFailWith)
+    if (this.shouldFailWith) throw classifyAuthError(this.shouldFailWith)
     const trimmedToken = refreshToken.trim()
     if (!trimmedToken) {
-      throw new Error('Validation error: Refresh token cannot be empty')
+      throw classifyAuthError('Validation error: Refresh token cannot be empty')
     }
     if (trimmedToken === 'invalid_refresh' || trimmedToken === 'expired_refresh') {
-      throw new Error('Session expired: Refresh token is invalid or has already been used. Please sign in again.')
+      throw classifyAuthError('Session expired: Refresh token is invalid or has already been used. Please sign in again.')
     }
     if (trimmedToken === 'rate_limited') {
-      throw new Error('Rate limit exceeded: Too many authentication requests. Please wait a moment and try again.')
+      throw classifyAuthError('Rate limit exceeded: Too many authentication requests. Please wait a moment and try again.')
     }
     if (trimmedToken === 'network_error') {
-      throw new Error('Network error: Unable to reach Supabase authentication service')
+      throw classifyAuthError('Network error: Unable to reach Supabase authentication service')
+    }
+    if (trimmedToken === 'unknown_error') {
+      throw classifyAuthError('Internal unclassified error')
     }
 
     const userId = 'usr_cloud_123'
@@ -171,20 +276,20 @@ export class MockAuthApiClient implements AuthApiClient {
   }
 
   async onlineLogout(token?: string | null, _config?: SupabaseAuthConfig): Promise<void> {
-    if (this.shouldFailWith) throw new Error(this.shouldFailWith)
+    if (this.shouldFailWith) throw classifyAuthError(this.shouldFailWith)
     if (token) {
       this.revokedCloudTokens.add(token)
     }
   }
 
   async localLogin(credentials: LocalSignInInput): Promise<LoginResult> {
-    if (this.shouldFailWith) throw new Error(this.shouldFailWith)
+    if (this.shouldFailWith) throw classifyAuthError(this.shouldFailWith)
     const trimmedUsername = credentials.username.trim()
     if (!trimmedUsername || !credentials.password) {
-      throw new Error('Invalid credentials: Username and password are required')
+      throw classifyAuthError('Invalid credentials: Username and password are required')
     }
     if (credentials.password === 'wrong_password') {
-      throw new Error('Invalid credentials: Username or password does not match')
+      throw classifyAuthError('Invalid credentials: Username or password does not match')
     }
 
     mockSessionCounter += 1
@@ -210,17 +315,17 @@ export class MockAuthApiClient implements AuthApiClient {
   }
 
   async verifyPin(userId: string, pin: string): Promise<LoginResult> {
-    if (this.shouldFailWith) throw new Error(this.shouldFailWith)
+    if (this.shouldFailWith) throw classifyAuthError(this.shouldFailWith)
     const trimmedUserId = userId.trim()
     const trimmedPin = pin.trim()
     if (!trimmedUserId || !trimmedPin) {
-      throw new Error('Validation error: User ID and PIN are required')
+      throw classifyAuthError('Validation error: User ID and PIN are required')
     }
     if (trimmedPin === '0000' || trimmedPin === 'wrong_pin') {
-      throw new Error('Invalid credentials: Invalid PIN')
+      throw classifyAuthError('Invalid credentials: Invalid PIN')
     }
     if (trimmedPin === '9999' || this.isRateLimited) {
-      throw new Error(
+      throw classifyAuthError(
         'Invalid credentials: Too many failed attempts. Account is temporarily locked. Please try again later.',
       )
     }
@@ -247,7 +352,7 @@ export class MockAuthApiClient implements AuthApiClient {
   }
 
   async getAuthState(sessionId?: string | null): Promise<AuthState> {
-    if (this.shouldFailWith) throw new Error(this.shouldFailWith)
+    if (this.shouldFailWith) throw classifyAuthError(this.shouldFailWith)
     if (!sessionId) {
       return { authenticated: false }
     }
@@ -259,7 +364,7 @@ export class MockAuthApiClient implements AuthApiClient {
   }
 
   async logout(sessionId: string): Promise<void> {
-    if (this.shouldFailWith) throw new Error(this.shouldFailWith)
+    if (this.shouldFailWith) throw classifyAuthError(this.shouldFailWith)
     this.activeSessions.delete(sessionId)
   }
 }

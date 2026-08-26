@@ -316,6 +316,39 @@ pub fn parse_token_response(json_str: &str) -> Result<OnlineSession, AuthError> 
     })
 }
 
+fn classify_status_400(err_msg: &str, lower: &str) -> AuthError {
+    let is_refresh_error = lower.contains("invalid refresh token")
+        || lower.contains("refresh_token_not_found")
+        || lower.contains("already used");
+
+    if is_refresh_error {
+        AuthError::SessionExpired(
+            "Refresh token is invalid or has already been used. Please sign in again.".into(),
+        )
+    } else if lower.contains("invalid login credentials")
+        || lower.contains("invalid_grant")
+        || lower.contains("invalid credentials")
+        || lower.contains("email not confirmed")
+        || lower.contains("user not found")
+    {
+        AuthError::InvalidCredentials("Invalid email or password".into())
+    } else {
+        AuthError::Validation(err_msg.to_string())
+    }
+}
+
+fn classify_status_401(lower: &str) -> AuthError {
+    let is_expired = lower.contains("jwt expired")
+        || lower.contains("session expired")
+        || lower.contains("token expired");
+
+    if is_expired {
+        AuthError::SessionExpired("Session has expired. Please sign in again.".into())
+    } else {
+        AuthError::InvalidCredentials("Authentication credentials are invalid or expired".into())
+    }
+}
+
 /// Maps Supabase error response JSON into typed domain AuthError without leaking secrets.
 pub fn parse_error_response(status_code: u16, json_str: &str) -> AuthError {
     if status_code == 429 {
@@ -332,7 +365,6 @@ pub fn parse_error_response(status_code: u16, json_str: &str) -> AuthError {
     }
 
     let error_body: Result<RawSupabaseErrorResponse, _> = serde_json::from_str(json_str);
-
     let err_msg = match error_body {
         Ok(err) => err
             .error_description
@@ -348,39 +380,11 @@ pub fn parse_error_response(status_code: u16, json_str: &str) -> AuthError {
     };
 
     let lower = err_msg.to_lowercase();
-
-    if status_code == 400 {
-        if lower.contains("invalid refresh token")
-            || lower.contains("refresh_token_not_found")
-            || lower.contains("already used")
-        {
-            AuthError::SessionExpired(
-                "Refresh token is invalid or has already been used. Please sign in again.".into(),
-            )
-        } else if lower.contains("invalid login credentials")
-            || lower.contains("invalid_grant")
-            || lower.contains("invalid credentials")
-            || lower.contains("email not confirmed")
-            || lower.contains("user not found")
-        {
-            AuthError::InvalidCredentials("Invalid email or password".into())
-        } else {
-            AuthError::Validation(err_msg)
-        }
-    } else if status_code == 401 {
-        if lower.contains("jwt expired")
-            || lower.contains("session expired")
-            || lower.contains("token expired")
-        {
-            AuthError::SessionExpired("Session has expired. Please sign in again.".into())
-        } else {
-            AuthError::InvalidCredentials(
-                "Authentication credentials are invalid or expired".into(),
-            )
-        }
-    } else {
-        AuthError::InvalidResponse(format!(
+    match status_code {
+        400 => classify_status_400(&err_msg, &lower),
+        401 => classify_status_401(&lower),
+        _ => AuthError::InvalidResponse(format!(
             "Unexpected authentication error (HTTP {status_code}): {err_msg}"
-        ))
+        )),
     }
 }

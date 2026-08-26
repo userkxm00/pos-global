@@ -4,7 +4,7 @@
 
 use crate::auth::{
     parse_error_response, parse_token_response, validate_config, validate_credentials, AuthError,
-    OnlineSession, SignInInput, SupabaseAuthConfig,
+    OnlineSession, RefreshTokenInput, SignInInput, SupabaseAuthConfig,
 };
 use crate::db::DbState;
 use crate::user;
@@ -132,10 +132,11 @@ pub async fn online_login(
 #[tauri::command]
 pub async fn refresh_online_session(
     config: SupabaseAuthConfig,
-    refresh_token: String,
+    input: RefreshTokenInput,
 ) -> Result<OnlineSession, String> {
     validate_config(&config).map_err(|e| e.to_string())?;
-    let token = crate::auth::validate_refresh_token(&refresh_token).map_err(|e| e.to_string())?;
+    let token =
+        crate::auth::validate_refresh_token(&input.refresh_token).map_err(|e| e.to_string())?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))

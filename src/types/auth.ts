@@ -49,7 +49,7 @@ export type AuthErrorCode =
   | 'security_violation'
   | 'unknown'
 
-export interface TypedAuthError {
+export interface TypedAuthError extends Error {
   code: AuthErrorCode
   message: string
 }

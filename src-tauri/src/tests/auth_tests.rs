@@ -401,3 +401,18 @@ fn parse_token_response_handles_successful_refresh_payload() {
     assert_eq!(session.user.id, "usr_online_refresh_1");
     assert_eq!(session.user.email, "refreshed@example.com");
 }
+
+#[test]
+fn refresh_token_input_constructs_and_deserializes() {
+    use crate::auth::RefreshTokenInput;
+
+    let input = RefreshTokenInput {
+        refresh_token: "test_refresh_token_12345".into(),
+    };
+    assert_eq!(input.refresh_token, "test_refresh_token_12345");
+
+    let json = r#"{"refreshToken":"aliased_token_999"}"#;
+    let deserialized: RefreshTokenInput =
+        serde_json::from_str(json).expect("should deserialize alias");
+    assert_eq!(deserialized.refresh_token, "aliased_token_999");
+}

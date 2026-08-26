@@ -16,11 +16,12 @@ import {
   getDefaultSupabaseConfig,
   stripTrailingSlash,
 } from '../services/authApi.ts'
-import { AUTH_STORAGE_KEYS } from '../components/auth/constants.ts'
 import {
+  AUTH_STORAGE_KEYS,
   performOnlineLogin,
   performTokenRefresh,
   isTokenExpiringSoon,
+  storeOnlineSession,
   performLocalLogin,
   performLogout,
   evaluateStoredSession,
@@ -28,6 +29,7 @@ import {
   restoreLocalSession,
   clearStoredAuth,
 } from '../context/authSession.ts'
+import { classifyAuthError, createTypedAuthError } from '../services/authApi.ts'
 import { en, ar, fr, getDirectionForLocale } from '../i18n/index.ts'
 
 // Polyfill minimal browser-like sessionStorage for Node.js test environment
@@ -561,5 +563,106 @@ describe('F1.13 Authentication & Session Lifecycle Test Suite', () => {
     assert.ok(mockApi.revokedCloudTokens.has('token_to_revoke_123'))
     assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN), null)
     assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.AUTH_MODE), null)
+  })
+
+  // 19. restoreOnlineSession handles valid, expired, missing, and malformed expiration timestamps (F1.19)
+  it('19. restoreOnlineSession handles valid, expired, missing, null, and malformed expiration values', async () => {
+    const validUser = JSON.stringify({ id: 'usr_1', email: 'u@example.com', role: 'owner' })
+    const nowSeconds = Math.floor(Date.now() / 1000)
+
+    // Valid future expiration -> authenticated
+    const future = await restoreOnlineSession('tok_123', validUser, 'ref_123', String(nowSeconds + 3600))
+    assert.strictEqual(future.status, 'authenticated')
+    assert.strictEqual(future.expiresAt, nowSeconds + 3600)
+    assert.strictEqual(future.refreshToken, 'ref_123')
+
+    // Already expired in past -> expired (fail-closed)
+    const past = await restoreOnlineSession('tok_123', validUser, 'ref_123', String(nowSeconds - 100))
+    assert.strictEqual(past.status, 'expired')
+
+    // Missing / null string / undefined string -> authenticated with null expiresAt
+    const nullStr = await restoreOnlineSession('tok_123', validUser, 'ref_123', 'null')
+    assert.strictEqual(nullStr.status, 'authenticated')
+    assert.strictEqual(nullStr.expiresAt, null)
+
+    const undefStr = await restoreOnlineSession('tok_123', validUser, 'ref_123', 'undefined')
+    assert.strictEqual(undefStr.status, 'authenticated')
+    assert.strictEqual(undefStr.expiresAt, null)
+
+    // Non-numeric / NaN -> null expiresAt
+    const invalidNum = await restoreOnlineSession('tok_123', validUser, 'ref_123', 'not_a_number')
+    assert.strictEqual(invalidNum.status, 'authenticated')
+    assert.strictEqual(invalidNum.expiresAt, null)
+  })
+
+  // 20. storeOnlineSession derives expires_at from expires_in and clears omitted fields (F1.19)
+  it('20. storeOnlineSession derives expires_at from expires_in and cleans up omitted fields without storing null', () => {
+    window.sessionStorage.clear()
+
+    const user = { id: 'usr_store_1', email: 'store@example.com', role: 'owner' }
+
+    // Session with only expires_in
+    storeOnlineSession(
+      {
+        access_token: 'tok_in_only',
+        expires_in: 1800,
+        user: { id: 'usr_store_1', email: 'store@example.com' },
+      },
+      user,
+    )
+
+    const storedExpiresAt = window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT)
+    assert.ok(storedExpiresAt)
+    assert.ok(Number(storedExpiresAt) > Math.floor(Date.now() / 1000))
+    assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN), null)
+
+    // Subsequent session omitting expiration removes CLOUD_EXPIRES_AT
+    storeOnlineSession(
+      {
+        access_token: 'tok_no_exp',
+        user: { id: 'usr_store_1', email: 'store@example.com' },
+      },
+      user,
+    )
+
+    assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT), null)
+  })
+
+  // 21. TypedAuthError classification (F1.19)
+  it('21. classifyAuthError deterministically maps error structures and messages to AuthErrorCode', () => {
+    const preclassified = createTypedAuthError('rate_limit', 'Too many requests')
+    assert.strictEqual(classifyAuthError(preclassified).code, 'rate_limit')
+
+    assert.strictEqual(classifyAuthError('Session expired: Please sign in again').code, 'session_expired')
+    assert.strictEqual(classifyAuthError('Invalid Refresh Token: Refresh Token Not Found').code, 'session_expired')
+    assert.strictEqual(classifyAuthError('Refresh token has already used').code, 'session_expired')
+    assert.strictEqual(classifyAuthError('Rate limit exceeded: Please wait').code, 'rate_limit')
+    assert.strictEqual(classifyAuthError('Network error: Unable to reach Supabase').code, 'network_error')
+    assert.strictEqual(classifyAuthError('Invalid email or password').code, 'invalid_credentials')
+    assert.strictEqual(classifyAuthError('Service unavailable (HTTP 503)').code, 'service_unavailable')
+    assert.strictEqual(classifyAuthError('Forbidden secret key in config').code, 'security_violation')
+    assert.strictEqual(classifyAuthError('Some completely unknown failure').code, 'unknown')
+  })
+
+  // 22. evaluateStoredSession immediately marks expired sessions on startup (F1.19)
+  it('22. evaluateStoredSession returns expired status when stored timestamp is past', async () => {
+    const mockApi = new MockAuthApiClient()
+    setAuthApi(mockApi)
+    window.sessionStorage.clear()
+
+    const nowSeconds = Math.floor(Date.now() / 1000)
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.AUTH_MODE, 'online')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN, 'tok_expired')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN, 'ref_expired')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT, String(nowSeconds - 500))
+    window.sessionStorage.setItem(
+      AUTH_STORAGE_KEYS.CLOUD_USER,
+      JSON.stringify({ id: 'usr_past', email: 'past@example.com', role: 'owner' }),
+    )
+
+    const evaluated = await evaluateStoredSession(mockApi)
+    assert.strictEqual(evaluated.status, 'expired')
+    assert.strictEqual(evaluated.mode, 'online')
+    assert.strictEqual(evaluated.refreshToken, 'ref_expired')
   })
 })
