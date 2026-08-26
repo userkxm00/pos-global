@@ -7,5 +7,5 @@ export function resolveToastDuration(
   inputDuration: number | undefined,
   defaultDurationMs: number = DEFAULT_TOAST_DURATION,
 ): number {
-  return inputDuration !== undefined ? inputDuration : defaultDurationMs
+  return inputDuration ?? defaultDurationMs
 }

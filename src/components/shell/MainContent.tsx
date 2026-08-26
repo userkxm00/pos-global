@@ -33,6 +33,51 @@ export interface UserOverrideState {
   isLoading: boolean
 }
 
+interface WorkspaceModuleViewProps {
+  activeRoute: NavigationRoute
+  routeTitle: string
+  systemReadyText: string
+}
+
+const WorkspaceModuleView: React.FC<WorkspaceModuleViewProps> = ({
+  activeRoute,
+  routeTitle,
+  systemReadyText,
+}) => {
+  if (activeRoute === 'users') {
+    return <RolesPermissionsAdmin />
+  }
+
+  return (
+    <div
+      className="state-container"
+      style={{ minHeight: '400px', justifyContent: 'flex-start', alignItems: 'stretch' }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-secondary)' }}>
+          {systemReadyText} — {routeTitle}
+        </span>
+      </div>
+      <div
+        style={{
+          marginBlockStart: 'var(--space-6)',
+          padding: 'var(--space-4)',
+          backgroundColor: 'var(--color-bg-surface-sunken)',
+          borderRadius: 'var(--radius-md)',
+          fontSize: 'var(--font-size-sm)',
+          color: 'var(--color-text-secondary)',
+          lineHeight: 'var(--line-height-relaxed)',
+        }}
+      >
+        <p style={{ margin: 0 }}>
+          <strong>Foundation Workspace</strong>: Module <code>{activeRoute}</code> active.
+          Authorization, multi-tenant boundaries, and local SQLite data layers are verified and enforced.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export const MainContent: React.FC = () => {
   const { t } = useTranslation()
   const {
@@ -100,6 +145,63 @@ export const MainContent: React.FC = () => {
   const effectiveOverrides = isOverrideForActiveUser ? overrideState.overrides : EMPTY_OVERRIDES
   const isAuthHydrating = requiredPermission && overrideState.isLoading
 
+  const renderDynamicContent = () => {
+    if (viewState === 'loading' || isAuthHydrating) {
+      return <LoadingSkeleton />
+    }
+
+    if (viewState === 'empty') {
+      return <EmptyState onAction={() => setViewState('idle')} />
+    }
+
+    if (viewState === 'error') {
+      return <ErrorState message={errorMessage} onRetry={() => setViewState('idle')} />
+    }
+
+    if (viewState === 'permission-denied') {
+      return (
+        <PermissionDeniedState
+          permission={deniedPermission || requiredPermission}
+          onAction={handleReturnToSafeRoute}
+        />
+      )
+    }
+
+    if (!requiredPermission) {
+      return (
+        <div
+          className="state-container"
+          style={{ minHeight: '400px', justifyContent: 'flex-start', alignItems: 'stretch' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-secondary)' }}>
+              {t('status.systemReady')} — {routeTitle}
+            </span>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <PermissionGate
+        permission={requiredPermission}
+        overrides={effectiveOverrides}
+        fallback={
+          <PermissionDeniedState
+            permission={requiredPermission}
+            onAction={handleReturnToSafeRoute}
+          />
+        }
+      >
+        <WorkspaceModuleView
+          activeRoute={activeRoute}
+          routeTitle={routeTitle}
+          systemReadyText={t('status.systemReady')}
+        />
+      </PermissionGate>
+    )
+  }
+
   return (
     <main
       id="main-content"
@@ -138,78 +240,7 @@ export const MainContent: React.FC = () => {
         </div>
 
         {/* Dynamic State Management */}
-        {viewState === 'loading' || isAuthHydrating ? (
-          <LoadingSkeleton />
-        ) : viewState === 'empty' ? (
-          <EmptyState
-            onAction={() => setViewState('idle')}
-          />
-        ) : viewState === 'error' ? (
-          <ErrorState
-            message={errorMessage}
-            onRetry={() => setViewState('idle')}
-          />
-        ) : viewState === 'permission-denied' ? (
-          <PermissionDeniedState
-            permission={deniedPermission || requiredPermission}
-            onAction={handleReturnToSafeRoute}
-          />
-        ) : (
-          requiredPermission ? (
-            <PermissionGate
-              permission={requiredPermission}
-              overrides={effectiveOverrides}
-              fallback={
-                <PermissionDeniedState
-                  permission={requiredPermission}
-                  onAction={handleReturnToSafeRoute}
-                />
-              }
-            >
-              {activeRoute === 'users' ? (
-                <RolesPermissionsAdmin />
-              ) : (
-                <div
-                  className="state-container"
-                  style={{ minHeight: '400px', justifyContent: 'flex-start', alignItems: 'stretch' }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-secondary)' }}>
-                      {t('status.systemReady')} — {routeTitle}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      marginBlockStart: 'var(--space-6)',
-                      padding: 'var(--space-4)',
-                      backgroundColor: 'var(--color-bg-surface-sunken)',
-                      borderRadius: 'var(--radius-md)',
-                      fontSize: 'var(--font-size-sm)',
-                      color: 'var(--color-text-secondary)',
-                      lineHeight: 'var(--line-height-relaxed)',
-                    }}
-                  >
-                    <p style={{ margin: 0 }}>
-                      <strong>Foundation Workspace</strong>: Module <code>{activeRoute}</code> active.
-                      Authorization, multi-tenant boundaries, and local SQLite data layers are verified and enforced.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </PermissionGate>
-          ) : (
-            <div
-              className="state-container"
-              style={{ minHeight: '400px', justifyContent: 'flex-start', alignItems: 'stretch' }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-secondary)' }}>
-                  {t('status.systemReady')} — {routeTitle}
-                </span>
-              </div>
-            </div>
-          )
-        )}
+        {renderDynamicContent()}
       </div>
     </main>
   )

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useRef } from 'react'
-import type { ToastMessage, ToastVariant } from '../types/feedback'
+import type { ToastMessage } from '../types/feedback'
 import { DEFAULT_TOAST_DURATION, resolveToastDuration } from './toastHelpers'
 
 export interface ToastContextType {

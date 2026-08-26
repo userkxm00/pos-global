@@ -108,12 +108,12 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
     try {
       await onConfirm(reason.trim() || undefined)
     } catch (err: unknown) {
-      const errorMsg =
-        err instanceof Error
-          ? err.message
-          : typeof err === 'string'
-            ? err
-            : t('states.error.description')
+      let errorMsg = t('states.error.description')
+      if (err instanceof Error) {
+        errorMsg = err.message
+      } else if (typeof err === 'string') {
+        errorMsg = err
+      }
       setSubmitError(errorMsg)
     } finally {
       setIsSubmitting(false)
@@ -124,8 +124,10 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
     return null
   }
 
-  const effectiveConfirmLabel =
-    confirmLabel || (isDestructive ? t('confirmation.delete') : t('confirmation.confirm'))
+  let effectiveConfirmLabel = confirmLabel
+  if (!effectiveConfirmLabel) {
+    effectiveConfirmLabel = isDestructive ? t('confirmation.delete') : t('confirmation.confirm')
+  }
   const effectiveCancelLabel = cancelLabel || t('confirmation.cancel')
 
   return (
