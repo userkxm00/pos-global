@@ -45,24 +45,43 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
     setIsSubmitting(false)
   }, [])
 
-  // Synchronize modal presentation and restore focus
+  // Native modal dialog lifecycle and DOM event listeners
   useEffect(() => {
     const dialogNode = dialogElementRef.current
     if (!dialogNode) return
+
+    const onBackdropClick = (evt: MouseEvent) => {
+      if (evt.target === dialogNode) {
+        onClose()
+      }
+    }
+
+    const onCancelModal = (evt: Event) => {
+      evt.preventDefault()
+      onClose()
+    }
 
     if (isOpen) {
       triggerElementRef.current = document.activeElement as HTMLElement | null
       if (!dialogNode.open && typeof dialogNode.showModal === 'function') {
         dialogNode.showModal()
       }
-    } else if (dialogNode.open && typeof dialogNode.close === 'function') {
-      dialogNode.close()
+      dialogNode.addEventListener('click', onBackdropClick)
+      dialogNode.addEventListener('cancel', onCancelModal)
+    }
+
+    return () => {
+      dialogNode.removeEventListener('click', onBackdropClick)
+      dialogNode.removeEventListener('cancel', onCancelModal)
+      if (dialogNode.open && typeof dialogNode.close === 'function') {
+        dialogNode.close()
+      }
       if (triggerElementRef.current) {
         triggerElementRef.current.focus()
         triggerElementRef.current = null
       }
     }
-  }, [isOpen])
+  }, [isOpen, onClose])
 
   // Reset form when opened
   useEffect(() => {
@@ -128,15 +147,6 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
         className="context-modal"
         aria-modal="true"
         aria-labelledby="create-user-title"
-        onClick={(e) => {
-          if (e.target === dialogElementRef.current) {
-            onClose()
-          }
-        }}
-        onCancel={(e) => {
-          e.preventDefault()
-          onClose()
-        }}
         data-testid="create-user-modal"
       >
         <header className="context-modal__header">
