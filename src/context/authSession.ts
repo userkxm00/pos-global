@@ -242,6 +242,8 @@ export async function performOnlineLogin(
   return { session: onlineSession, user }
 }
 
+let activeRefreshPromise: Promise<{ session: OnlineSession; user: AuthenticatedUser }> | null = null
+
 /**
  * Performs online token refresh against Supabase Auth, updating session storage atomically.
  */
@@ -264,6 +266,31 @@ export async function performTokenRefresh(
 
   storeOnlineSession(onlineSession, user)
   return { session: onlineSession, user }
+}
+
+/**
+ * Performs single-flight token refresh against Supabase Auth, sharing the active promise
+ * across concurrent callers to prevent duplicate token rotation requests.
+ */
+export async function performSingleFlightRefresh(
+  refreshToken: string,
+  apiClient: AuthApiClient,
+  currentUser?: AuthenticatedUser | null,
+): Promise<{ session: OnlineSession; user: AuthenticatedUser }> {
+  if (activeRefreshPromise) {
+    return activeRefreshPromise
+  }
+
+  const refreshPromise = (async () => {
+    try {
+      return await performTokenRefresh(refreshToken, apiClient, currentUser)
+    } finally {
+      activeRefreshPromise = null
+    }
+  })()
+
+  activeRefreshPromise = refreshPromise
+  return refreshPromise
 }
 
 /**

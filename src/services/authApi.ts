@@ -92,7 +92,28 @@ export function classifyAuthError(err: unknown): TypedAuthError {
     return err as TypedAuthError
   }
 
-  const msg = err instanceof Error ? err.message : String(err)
+  let msg = ''
+  if (err instanceof Error) {
+    msg = err.message
+  } else if (err && typeof err === 'object') {
+    const obj = err as Record<string, unknown>
+    if (typeof obj.message === 'string') {
+      msg = obj.message
+    } else if (typeof obj.error_description === 'string') {
+      msg = obj.error_description
+    } else if (typeof obj.error === 'string') {
+      msg = obj.error
+    } else {
+      try {
+        msg = JSON.stringify(err)
+      } catch {
+        msg = String(err)
+      }
+    }
+  } else {
+    msg = String(err ?? '')
+  }
+
   const lower = msg.toLowerCase()
 
   if (
@@ -226,6 +247,8 @@ export class MockAuthApiClient implements AuthApiClient {
   public isRateLimited: boolean = false
   public activeSessions: Map<string, AuthState> = new Map()
   public revokedCloudTokens: Set<string> = new Set()
+  public refreshCount: number = 0
+  public refreshDelayMs: number = 0
 
   async onlineLogin(credentials: SignInInput, _config?: SupabaseAuthConfig): Promise<OnlineSession> {
     if (this.shouldFailWith) throw classifyAuthError(this.shouldFailWith)
@@ -254,6 +277,10 @@ export class MockAuthApiClient implements AuthApiClient {
   }
 
   async refreshOnlineSession(refreshToken: string, _config?: SupabaseAuthConfig): Promise<OnlineSession> {
+    this.refreshCount += 1
+    if (this.refreshDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.refreshDelayMs))
+    }
     if (this.shouldFailWith) throw classifyAuthError(this.shouldFailWith)
     const trimmedToken = refreshToken.trim()
     if (!trimmedToken) {

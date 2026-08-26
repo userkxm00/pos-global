@@ -20,6 +20,7 @@ import {
   AUTH_STORAGE_KEYS,
   performOnlineLogin,
   performTokenRefresh,
+  performSingleFlightRefresh,
   isTokenExpiringSoon,
   storeOnlineSession,
   performLocalLogin,
@@ -667,5 +668,135 @@ describe('F1.13 Authentication & Session Lifecycle Test Suite', () => {
     assert.strictEqual(evaluated.status, 'expired')
     assert.strictEqual(evaluated.mode, 'online')
     assert.strictEqual(evaluated.refreshToken, 'ref_expired')
+  })
+
+  // 23. Single-Flight Concurrent Refresh Regression Test (F1.19 CodeRabbit & Mutex Safety)
+  it('23. concurrent refresh triggers share single-flight promise and issue exactly ONE refresh API call', async () => {
+    const mockApi = new MockAuthApiClient()
+    mockApi.refreshDelayMs = 25 // Artificial delay to ensure overlap
+    setAuthApi(mockApi)
+    window.sessionStorage.clear()
+
+    const nowSeconds = Math.floor(Date.now() / 1000)
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.AUTH_MODE, 'online')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN, 'tok_expiring')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN, 'ref_single_flight')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT, String(nowSeconds + 60))
+    window.sessionStorage.setItem(
+      AUTH_STORAGE_KEYS.CLOUD_USER,
+      JSON.stringify({ id: 'usr_sf', email: 'sf@example.com', role: 'owner' }),
+    )
+
+    const user = { id: 'usr_sf', email: 'sf@example.com', role: 'owner' }
+
+    // Trigger 2 concurrent refresh calls simultaneously
+    const [res1, res2] = await Promise.all([
+      performSingleFlightRefresh('ref_single_flight', mockApi, user),
+      performSingleFlightRefresh('ref_single_flight', mockApi, user),
+    ])
+
+    assert.ok(res1)
+    assert.ok(res2)
+    assert.strictEqual(res1.session.access_token, res2.session.access_token)
+    assert.strictEqual(res1.session.refresh_token, res2.session.refresh_token)
+    assert.strictEqual(mockApi.refreshCount, 1)
+
+    // Subsequent call after completion starts a new single-flight
+    const res3 = await performSingleFlightRefresh('ref_single_flight', mockApi, user)
+    assert.ok(res3)
+    assert.strictEqual(mockApi.refreshCount, 2)
+  })
+
+  // 24. Single-Flight Concurrent Refresh Error Propagation (F1.19)
+  it('24. concurrent refresh triggers both reject when refresh fails with invalid_grant', async () => {
+    const mockApi = new MockAuthApiClient()
+    mockApi.refreshDelayMs = 25
+    setAuthApi(mockApi)
+
+    const user = { id: 'usr_err', email: 'err@example.com', role: 'owner' }
+
+    const results = await Promise.allSettled([
+      performSingleFlightRefresh('invalid_refresh', mockApi, user),
+      performSingleFlightRefresh('invalid_refresh', mockApi, user),
+    ])
+
+    assert.strictEqual(results[0].status, 'rejected')
+    assert.strictEqual(results[1].status, 'rejected')
+    assert.strictEqual(mockApi.refreshCount, 1)
+  })
+
+  // 25. Transient network failure on expiring soon session leaves credentials intact in storage (F1.19)
+  it('25. transient error on expiring soon token leaves credentials in storage', async () => {
+    const mockApi = new MockAuthApiClient()
+    mockApi.shouldFailWith = 'Network error: Unable to reach Supabase authentication service'
+    setAuthApi(mockApi)
+    window.sessionStorage.clear()
+
+    const nowSeconds = Math.floor(Date.now() / 1000)
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.AUTH_MODE, 'online')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN, 'tok_still_valid')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN, 'ref_still_valid')
+    window.sessionStorage.setItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT, String(nowSeconds + 120)) // 2 min remaining
+    window.sessionStorage.setItem(
+      AUTH_STORAGE_KEYS.CLOUD_USER,
+      JSON.stringify({ id: 'usr_valid', email: 'valid@example.com', role: 'owner' }),
+    )
+
+    const user = { id: 'usr_valid', email: 'valid@example.com', role: 'owner' }
+    await assert.rejects(
+      () => performSingleFlightRefresh('ref_still_valid', mockApi, user),
+      (err: unknown) => {
+        const typed = classifyAuthError(err)
+        assert.strictEqual(typed.code, 'network_error')
+        return true
+      },
+    )
+
+    // Storage is preserved because failure was transient network error
+    assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN), 'tok_still_valid')
+    assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN), 'ref_still_valid')
+  })
+
+  // 26. MockAuthApiClient comprehensive edge branches (F1.19)
+  it('26. MockAuthApiClient handles empty refresh tokens, rate limits, and unclassified errors', async () => {
+    const mockApi = new MockAuthApiClient()
+
+    await assert.rejects(
+      () => mockApi.refreshOnlineSession('   '),
+      (err: unknown) => {
+        const typed = classifyAuthError(err)
+        assert.strictEqual(typed.code, 'validation_error')
+        return true
+      },
+    )
+
+    await assert.rejects(
+      () => mockApi.refreshOnlineSession('rate_limited'),
+      (err: unknown) => {
+        const typed = classifyAuthError(err)
+        assert.strictEqual(typed.code, 'rate_limit')
+        return true
+      },
+    )
+
+    await assert.rejects(
+      () => mockApi.refreshOnlineSession('unknown_error'),
+      (err: unknown) => {
+        const typed = classifyAuthError(err)
+        assert.strictEqual(typed.code, 'unknown')
+        return true
+      },
+    )
+  })
+
+  // 27. classifyAuthError covers unconfigured, validation, and object payloads (F1.19)
+  it('27. classifyAuthError handles unconfigured, validation, non-error objects, and primitives', () => {
+    assert.strictEqual(classifyAuthError('Missing configuration for Supabase url').code, 'unconfigured')
+    assert.strictEqual(classifyAuthError('Validation failed: payload invalid').code, 'validation_error')
+    assert.strictEqual(classifyAuthError({ message: 'Rate limit hit' }).code, 'rate_limit')
+    assert.strictEqual(classifyAuthError({ error_description: 'Invalid login credentials' }).code, 'invalid_credentials')
+    assert.strictEqual(classifyAuthError({ error: 'Service unavailable' }).code, 'service_unavailable')
+    assert.strictEqual(classifyAuthError(12345).code, 'unknown')
+    assert.strictEqual(classifyAuthError(null).code, 'unknown')
   })
 })
