@@ -59,6 +59,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId)
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false)
 
+  // Stable ref for activeUser to decouple callback identity from auth state updates
+  const activeUserRef = useRef<AuthenticatedUser | null>(activeUser)
+  useEffect(() => {
+    activeUserRef.current = activeUser
+  }, [activeUser])
+
   // Single-flight promise ref ensuring unified concurrency guard across startup, focus, and visibility events
   const inFlightRefreshPromiseRef = useRef<Promise<OnlineSession | null> | null>(null)
 
@@ -78,7 +84,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     const refreshPromise = (async () => {
       try {
         const api = getAuthApi()
-        const { session, user } = await performSingleFlightRefresh(storedRefreshToken, api, activeUser)
+        const { session, user } = await performSingleFlightRefresh(
+          storedRefreshToken,
+          api,
+          activeUserRef.current,
+        )
         setActiveUser(user)
         setSessionId(user.id)
         setAuthMode('online')
@@ -100,7 +110,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
 
     inFlightRefreshPromiseRef.current = refreshPromise
     return refreshPromise
-  }, [activeUser])
+  }, [])
 
   // Restore session on startup with immediate expiry evaluation and unified single-flight refresh
   useEffect(() => {
