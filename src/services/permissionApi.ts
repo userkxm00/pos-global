@@ -23,26 +23,28 @@ export function extractInvokeErrorMessage(err: unknown): string {
   return String(err)
 }
 
-const FALLBACK_DEFAULT_PERMISSIONS: Record<Role, readonly Permission[]> = {
-  admin: [
-    'sales.create',
-    'sales.refund',
-    'sales.void',
-    'inventory.adjust',
-    'inventory.transfer',
-    'products.manage',
-    'purchases.manage',
-    'customers.manage',
-    'debts.manage',
-    'cash.open',
-    'cash.close',
-    'cash.adjust',
-    'reports.view',
-    'reports.export',
-    'users.manage',
-    'settings.manage',
-    'license.manage',
-  ],
+export const FALLBACK_AUTHORITATIVE_PERMISSIONS: readonly Permission[] = [
+  'sales.create',
+  'sales.refund',
+  'sales.void',
+  'inventory.adjust',
+  'inventory.transfer',
+  'products.manage',
+  'purchases.manage',
+  'customers.manage',
+  'debts.manage',
+  'cash.open',
+  'cash.close',
+  'cash.adjust',
+  'reports.view',
+  'reports.export',
+  'users.manage',
+  'settings.manage',
+  'license.manage',
+] as const
+
+export const FALLBACK_DEFAULT_PERMISSIONS: Record<Role, readonly Permission[]> = {
+  admin: FALLBACK_AUTHORITATIVE_PERMISSIONS,
   manager: [
     'sales.create',
     'sales.refund',
@@ -86,7 +88,7 @@ function computeFallbackEffective(roleStr: string, overrides: UserPermissionOver
     }
   }
 
-  return FALLBACK_DEFAULT_PERMISSIONS.admin.filter((p) => effective.has(p))
+  return FALLBACK_AUTHORITATIVE_PERMISSIONS.filter((p) => effective.has(p))
 }
 
 // Real Tauri IPC Implementation

@@ -82,8 +82,9 @@ export const RoleMatrixView: React.FC = () => {
                       {AUTHORITATIVE_ROLES.map((role) => {
                         const hasPerm = ROLE_DEFAULT_PERMISSIONS[role].includes(perm.code as Permission)
                         const roleTitle = t(`roles.${role}.title`)
+                        const permTitle = t(perm.titleKey)
                         const statusTitle = hasPerm ? t('common.allowed') : t('common.denied')
-                        const cellAriaLabel = `${roleTitle}: ${statusTitle}`
+                        const cellAriaLabel = `${permTitle} - ${roleTitle}: ${statusTitle}`
 
                         return (
                           <td key={`${role}-${perm.code}`} className="matrix-cell-status">

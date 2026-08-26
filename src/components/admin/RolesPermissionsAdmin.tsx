@@ -25,6 +25,7 @@ export const RolesPermissionsAdmin: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AdminTab>('users')
   const [users, setUsers] = useState<User[]>([])
   const [activeUserOverrides, setActiveUserOverrides] = useState<UserPermissionOverride[]>([])
+  const [overrideLoadError, setOverrideLoadError] = useState<boolean>(false)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -41,9 +42,13 @@ export const RolesPermissionsAdmin: React.FC = () => {
         const overrides = await api.listUserPermissionOverrides(activeUser.id)
         if (isMounted) {
           setActiveUserOverrides(overrides)
+          setOverrideLoadError(false)
         }
       } catch {
-        // Fail-closed on error; proceed with default role permissions
+        if (isMounted) {
+          // Strictly fail-closed: deny presentation access when override verification fails
+          setOverrideLoadError(true)
+        }
       }
     }
 
@@ -57,7 +62,8 @@ export const RolesPermissionsAdmin: React.FC = () => {
   // Verify that active user is authorized to manage users & permissions
   // Presentation gating only: Rust backend remains authoritative
   const isAuthorized = Boolean(
-    activeUser?.role &&
+    !overrideLoadError &&
+      activeUser?.role &&
       hasEffectivePermission(activeUser.role, 'users.manage', activeUserOverrides),
   )
 

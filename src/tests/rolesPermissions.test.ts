@@ -9,6 +9,7 @@ import {
   PERMISSION_CATALOG,
   ROLE_CATALOG,
   CATEGORY_ORDER,
+  ROLE_DEFAULT_PERMISSIONS,
   getRoleDefaultPermissions,
   computeEffectivePermissions,
   hasEffectivePermission,
@@ -17,6 +18,8 @@ import {
 import {
   MockPermissionApiClient,
   TauriPermissionApiClient,
+  FALLBACK_AUTHORITATIVE_PERMISSIONS,
+  FALLBACK_DEFAULT_PERMISSIONS,
   extractInvokeErrorMessage,
   getPermissionApi,
   setPermissionApi,
@@ -408,5 +411,13 @@ describe('F1.16 Roles & Permissions Administration Test Suite', () => {
     assert.strictEqual(getDirectionForLocale('ar_EG'), 'rtl')
     assert.strictEqual(getDirectionForLocale('en'), 'ltr')
     assert.strictEqual(getDirectionForLocale('fr'), 'ltr')
+  })
+
+  // Test 14: Fallback Catalog Invariant Verification
+  it('14. FALLBACK permission catalogs are strictly identical to authoritative definitions', () => {
+    assert.deepStrictEqual(FALLBACK_AUTHORITATIVE_PERMISSIONS, AUTHORITATIVE_PERMISSIONS)
+    assert.deepStrictEqual(FALLBACK_DEFAULT_PERMISSIONS.admin, ROLE_DEFAULT_PERMISSIONS.admin)
+    assert.deepStrictEqual(FALLBACK_DEFAULT_PERMISSIONS.manager, ROLE_DEFAULT_PERMISSIONS.manager)
+    assert.deepStrictEqual(FALLBACK_DEFAULT_PERMISSIONS.cashier, ROLE_DEFAULT_PERMISSIONS.cashier)
   })
 })
