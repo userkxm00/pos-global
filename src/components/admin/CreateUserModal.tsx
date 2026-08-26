@@ -31,8 +31,8 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const modalRef = useRef<HTMLDialogElement>(null)
-  const previousActiveElement = useRef<HTMLElement | null>(null)
+  const dialogElementRef = useRef<HTMLDialogElement>(null)
+  const triggerElementRef = useRef<HTMLElement | null>(null)
 
   // Reset form fields
   const resetForm = useCallback(() => {
@@ -45,45 +45,26 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
     setIsSubmitting(false)
   }, [])
 
-  // Native modal dialog lifecycle and focus restoration
+  // Synchronize modal presentation and restore focus
   useEffect(() => {
-    const dialog = modalRef.current
-    if (!dialog) return
-
-    const handleDialogClick = (e: MouseEvent) => {
-      if (e.target === dialog) {
-        onClose()
-      }
-    }
-
-    const handleCancel = (e: Event) => {
-      e.preventDefault()
-      onClose()
-    }
+    const dialogNode = dialogElementRef.current
+    if (!dialogNode) return
 
     if (isOpen) {
-      previousActiveElement.current = document.activeElement as HTMLElement | null
-      if (typeof dialog.showModal === 'function' && !dialog.open) {
-        dialog.showModal()
+      triggerElementRef.current = document.activeElement as HTMLElement | null
+      if (!dialogNode.open && typeof dialogNode.showModal === 'function') {
+        dialogNode.showModal()
       }
-      dialog.addEventListener('click', handleDialogClick)
-      dialog.addEventListener('cancel', handleCancel)
-    }
-
-    return () => {
-      dialog.removeEventListener('click', handleDialogClick)
-      dialog.removeEventListener('cancel', handleCancel)
-      if (typeof dialog.close === 'function' && dialog.open) {
-        dialog.close()
-      }
-      if (previousActiveElement.current) {
-        previousActiveElement.current.focus()
-        previousActiveElement.current = null
+    } else if (dialogNode.open && typeof dialogNode.close === 'function') {
+      dialogNode.close()
+      if (triggerElementRef.current) {
+        triggerElementRef.current.focus()
+        triggerElementRef.current = null
       }
     }
-  }, [isOpen, onClose])
+  }, [isOpen])
 
-  // Reset form on open/close transition
+  // Reset form when opened
   useEffect(() => {
     if (isOpen) {
       resetForm()
@@ -143,10 +124,19 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
   return (
     <div className="context-modal-backdrop" data-testid="create-user-backdrop">
       <dialog
-        ref={modalRef}
+        ref={dialogElementRef}
         className="context-modal"
         aria-modal="true"
         aria-labelledby="create-user-title"
+        onClick={(e) => {
+          if (e.target === dialogElementRef.current) {
+            onClose()
+          }
+        }}
+        onCancel={(e) => {
+          e.preventDefault()
+          onClose()
+        }}
         data-testid="create-user-modal"
       >
         <header className="context-modal__header">

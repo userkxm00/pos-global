@@ -32,117 +32,36 @@ export const AUTHORITATIVE_PERMISSIONS: readonly Permission[] = [
 
 export const AUTHORITATIVE_ROLES: readonly Role[] = ['admin', 'manager', 'cashier'] as const
 
-export const PERMISSION_CATALOG: readonly PermissionCatalogEntry[] = [
-  // Sales
-  {
-    code: 'sales.create',
-    category: 'sales',
-    titleKey: 'permissions.items.salesCreate.title',
-    descriptionKey: 'permissions.items.salesCreate.description',
-  },
-  {
-    code: 'sales.refund',
-    category: 'sales',
-    titleKey: 'permissions.items.salesRefund.title',
-    descriptionKey: 'permissions.items.salesRefund.description',
-  },
-  {
-    code: 'sales.void',
-    category: 'sales',
-    titleKey: 'permissions.items.salesVoid.title',
-    descriptionKey: 'permissions.items.salesVoid.description',
-  },
-  // Inventory
-  {
-    code: 'inventory.adjust',
-    category: 'inventory',
-    titleKey: 'permissions.items.inventoryAdjust.title',
-    descriptionKey: 'permissions.items.inventoryAdjust.description',
-  },
-  {
-    code: 'inventory.transfer',
-    category: 'inventory',
-    titleKey: 'permissions.items.inventoryTransfer.title',
-    descriptionKey: 'permissions.items.inventoryTransfer.description',
-  },
-  {
-    code: 'products.manage',
-    category: 'inventory',
-    titleKey: 'permissions.items.productsManage.title',
-    descriptionKey: 'permissions.items.productsManage.description',
-  },
-  // Purchases
-  {
-    code: 'purchases.manage',
-    category: 'purchases',
-    titleKey: 'permissions.items.purchasesManage.title',
-    descriptionKey: 'permissions.items.purchasesManage.description',
-  },
-  // Customers & Debts
-  {
-    code: 'customers.manage',
-    category: 'customers',
-    titleKey: 'permissions.items.customersManage.title',
-    descriptionKey: 'permissions.items.customersManage.description',
-  },
-  {
-    code: 'debts.manage',
-    category: 'customers',
-    titleKey: 'permissions.items.debtsManage.title',
-    descriptionKey: 'permissions.items.debtsManage.description',
-  },
-  // Cash Management
-  {
-    code: 'cash.open',
-    category: 'cash',
-    titleKey: 'permissions.items.cashOpen.title',
-    descriptionKey: 'permissions.items.cashOpen.description',
-  },
-  {
-    code: 'cash.close',
-    category: 'cash',
-    titleKey: 'permissions.items.cashClose.title',
-    descriptionKey: 'permissions.items.cashClose.description',
-  },
-  {
-    code: 'cash.adjust',
-    category: 'cash',
-    titleKey: 'permissions.items.cashAdjust.title',
-    descriptionKey: 'permissions.items.cashAdjust.description',
-  },
-  // Reports
-  {
-    code: 'reports.view',
-    category: 'reports',
-    titleKey: 'permissions.items.reportsView.title',
-    descriptionKey: 'permissions.items.reportsView.description',
-  },
-  {
-    code: 'reports.export',
-    category: 'reports',
-    titleKey: 'permissions.items.reportsExport.title',
-    descriptionKey: 'permissions.items.reportsExport.description',
-  },
-  // Administration
-  {
-    code: 'users.manage',
-    category: 'administration',
-    titleKey: 'permissions.items.usersManage.title',
-    descriptionKey: 'permissions.items.usersManage.description',
-  },
-  {
-    code: 'settings.manage',
-    category: 'administration',
-    titleKey: 'permissions.items.settingsManage.title',
-    descriptionKey: 'permissions.items.settingsManage.description',
-  },
-  {
-    code: 'license.manage',
-    category: 'administration',
-    titleKey: 'permissions.items.licenseManage.title',
-    descriptionKey: 'permissions.items.licenseManage.description',
-  },
+type RawPermDef = readonly [Permission, PermissionCategory, string]
+
+const RAW_PERM_ENTRIES: readonly RawPermDef[] = [
+  ['sales.create', 'sales', 'salesCreate'],
+  ['sales.refund', 'sales', 'salesRefund'],
+  ['sales.void', 'sales', 'salesVoid'],
+  ['inventory.adjust', 'inventory', 'inventoryAdjust'],
+  ['inventory.transfer', 'inventory', 'inventoryTransfer'],
+  ['products.manage', 'inventory', 'productsManage'],
+  ['purchases.manage', 'purchases', 'purchasesManage'],
+  ['customers.manage', 'customers', 'customersManage'],
+  ['debts.manage', 'customers', 'debtsManage'],
+  ['cash.open', 'cash', 'cashOpen'],
+  ['cash.close', 'cash', 'cashClose'],
+  ['cash.adjust', 'cash', 'cashAdjust'],
+  ['reports.view', 'reports', 'reportsView'],
+  ['reports.export', 'reports', 'reportsExport'],
+  ['users.manage', 'administration', 'usersManage'],
+  ['settings.manage', 'administration', 'settingsManage'],
+  ['license.manage', 'administration', 'licenseManage'],
 ] as const
+
+export const PERMISSION_CATALOG: readonly PermissionCatalogEntry[] = RAW_PERM_ENTRIES.map(
+  ([code, category, keyPrefix]) => ({
+    code,
+    category,
+    titleKey: `permissions.items.${keyPrefix}.title`,
+    descriptionKey: `permissions.items.${keyPrefix}.description`,
+  }),
+)
 
 export const ROLE_DEFAULT_PERMISSIONS: Record<Role, readonly Permission[]> = {
   admin: AUTHORITATIVE_PERMISSIONS,
