@@ -1,9 +1,7 @@
-// Confirmation and Audit Reason Dialog Component
-// F1.18 — Authorization and Error-State UX & UI_CLOUD_EXECUTION_PLAN.md Rule 4
-
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertIcon, WarningTriangleIcon } from './Icons'
+import { isBackdropClick, validateConfirmationReason } from './confirmationDialogHelpers'
 
 export interface ConfirmationDialogProps {
   isOpen: boolean
@@ -85,21 +83,8 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
 
     const handleBackdropClick = (e: MouseEvent) => {
       if (!dialogEl || isSubmitting) return
-
-      // If click was on a child element (e.g. Confirm or Cancel button), never treat as backdrop
-      if (e.target !== dialogEl) return
-
-      // Synthetic events from keyboard activation on buttons often have clientX=0, clientY=0
-      if (e.clientX === 0 && e.clientY === 0 && e.detail === 0) return
-
       const rect = dialogEl.getBoundingClientRect()
-      const isOutside =
-        e.clientX < rect.left ||
-        e.clientX > rect.right ||
-        e.clientY < rect.top ||
-        e.clientY > rect.bottom
-
-      if (isOutside) {
+      if (isBackdropClick(e.target, dialogEl, e.clientX, e.clientY, e.detail, rect)) {
         handleClose()
       }
     }
@@ -112,7 +97,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   }, [isOpen, isSubmitting, handleClose])
 
   const handleConfirmClick = async () => {
-    if (requireReason && !reason.trim()) {
+    if (requireReason && !validateConfirmationReason(true, reason)) {
       setReasonError(t('confirmation.reasonRequired'))
       reasonInputRef.current?.focus()
       return

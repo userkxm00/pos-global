@@ -8,6 +8,14 @@ import {
   EMPTY_OVERRIDES,
 } from '../components/common/permissionGateHelpers.ts'
 import {
+  isBackdropClick,
+  validateConfirmationReason,
+} from '../components/common/confirmationDialogHelpers.ts'
+import {
+  resolveToastDuration,
+  DEFAULT_TOAST_DURATION,
+} from '../context/toastHelpers.ts'
+import {
   computeEffectivePermissions,
   hasEffectivePermission,
   AUTHORITATIVE_PERMISSIONS,
@@ -122,26 +130,8 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
     assert.ok(Object.isFrozen(EMPTY_OVERRIDES))
   })
 
-  // Test 7: ConfirmationDialog backdrop detection logic
-  it('7. distinguishes between true backdrop clicks and keyboard/child button events', () => {
-    function isBackdropClick(
-      target: unknown,
-      dialogEl: unknown,
-      clientX: number,
-      clientY: number,
-      detail: number,
-      rect: { left: number; right: number; top: number; bottom: number },
-    ): boolean {
-      if (target !== dialogEl) return false
-      if (clientX === 0 && clientY === 0 && detail === 0) return false
-      return (
-        clientX < rect.left ||
-        clientX > rect.right ||
-        clientY < rect.top ||
-        clientY > rect.bottom
-      )
-    }
-
+  // Test 7: ConfirmationDialog backdrop detection helper
+  it('7. distinguishes between true backdrop clicks and keyboard/child button events using shipped isBackdropClick helper', () => {
     const mockDialog = {}
     const mockButton = {}
     const dialogRect = { left: 100, right: 500, top: 100, bottom: 400 }
@@ -175,57 +165,27 @@ describe('F1.18 Authorization & Error-State UX Test Suite', () => {
     )
   })
 
-  // Test 8: ConfirmationDialog rejection handling
-  it('8. handles rejected onConfirm promises cleanly and retains dialog state', async () => {
-    let dialogOpen = true
-    let isSubmitting = false
-    let submitError: string | null = null
+  // Test 8: ConfirmationDialog reason validator helper
+  it('8. validates confirmation reason requirements with shipped validateConfirmationReason helper', () => {
+    // When reason not required
+    assert.strictEqual(validateConfirmationReason(false, undefined), true)
+    assert.strictEqual(validateConfirmationReason(false, ''), true)
 
-    async function handleConfirm(onConfirmFn: () => Promise<void>) {
-      isSubmitting = true
-      submitError = null
-      try {
-        await onConfirmFn()
-        dialogOpen = false
-      } catch (err) {
-        submitError = err instanceof Error ? err.message : 'Operation Failed'
-      } finally {
-        isSubmitting = false
-      }
-    }
-
-    // Failing confirm action
-    await handleConfirm(async () => {
-      throw new Error('Database transaction conflict')
-    })
-
-    assert.strictEqual(dialogOpen, true, 'Dialog must remain open on failure')
-    assert.strictEqual(isSubmitting, false, 'Controls must be re-enabled after failure')
-    assert.strictEqual(submitError, 'Database transaction conflict', 'Error message must be captured')
-
-    // Successful confirm action
-    await handleConfirm(async () => {
-      // success
-    })
-    assert.strictEqual(dialogOpen, false, 'Dialog must close on success')
-    assert.strictEqual(submitError, null)
+    // When reason required
+    assert.strictEqual(validateConfirmationReason(true, ''), false)
+    assert.strictEqual(validateConfirmationReason(true, '   '), false)
+    assert.strictEqual(validateConfirmationReason(true, 'Manager approved discount for damaged item'), true)
   })
 
-  // Test 9: Toast duration configuration & override precedence
-  it('9. enforces configured default duration and explicit duration override precedence', () => {
-    const defaultDuration = 5000
-
-    function resolveToastDuration(inputDuration: number | undefined, defaultMs: number): number {
-      return inputDuration !== undefined ? inputDuration : defaultMs
-    }
-
+  // Test 9: Toast duration configuration & override precedence helper
+  it('9. enforces configured default duration and explicit duration override precedence via resolveToastDuration', () => {
     // Default duration applied when omitted
-    assert.strictEqual(resolveToastDuration(undefined, defaultDuration), 5000)
+    assert.strictEqual(resolveToastDuration(undefined, DEFAULT_TOAST_DURATION), 5000)
     assert.strictEqual(resolveToastDuration(undefined, 8000), 8000)
 
     // Explicit duration overrides default (including 0 for persistent toasts)
-    assert.strictEqual(resolveToastDuration(2000, defaultDuration), 2000)
-    assert.strictEqual(resolveToastDuration(0, defaultDuration), 0)
+    assert.strictEqual(resolveToastDuration(2000, DEFAULT_TOAST_DURATION), 2000)
+    assert.strictEqual(resolveToastDuration(0, DEFAULT_TOAST_DURATION), 0)
   })
 
   // Test 10: User override race safety & switching

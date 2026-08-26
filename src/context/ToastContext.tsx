@@ -1,8 +1,6 @@
-// Toast Notification Context & Hook
-// F1.18 — Authorization and Error-State UX & UI_SPEC.md
-
 import React, { createContext, useContext, useState, useCallback, useMemo, useRef } from 'react'
 import type { ToastMessage, ToastVariant } from '../types/feedback'
+import { DEFAULT_TOAST_DURATION, resolveToastDuration } from './toastHelpers'
 
 export interface ToastContextType {
   toasts: ToastMessage[]
@@ -21,8 +19,6 @@ export interface ToastProviderProps {
   children: React.ReactNode
   defaultDurationMs?: number
 }
-
-const DEFAULT_TOAST_DURATION = 5000
 
 export const ToastProvider: React.FC<ToastProviderProps> = ({
   children,
@@ -43,8 +39,7 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({
     (toastInput: Omit<ToastMessage, 'id'>): string => {
       counterRef.current += 1
       const id = `toast_${Date.now()}_${counterRef.current}`
-      const durationMs =
-        toastInput.durationMs !== undefined ? toastInput.durationMs : defaultDurationMs
+      const durationMs = resolveToastDuration(toastInput.durationMs, defaultDurationMs)
 
       const newToast: ToastMessage = {
         ...toastInput,
