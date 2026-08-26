@@ -40,7 +40,8 @@ async function fetchInitialOrgContext(
   currentRegister: Register | null,
 ): Promise<InitialContextResult> {
   const fetchedOrgs = await api.listOrganizations()
-  const activeOrgId = currentOrg?.id || (fetchedOrgs[0]?.id ?? '')
+  const retainedOrg = currentOrg && fetchedOrgs.find((org) => org.id === currentOrg.id)
+  const activeOrgId = retainedOrg?.id || (fetchedOrgs[0]?.id ?? '')
   if (!activeOrgId) {
     return {
       orgs: fetchedOrgs,
@@ -206,8 +207,6 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
       setRegisters([])
       setErrorMessage(null)
 
-      if (!newOrgId) return
-
       setIsLoadingBranches(true)
       const currentSeq = guardRef.current.orgReqSeq + 1
 
@@ -250,11 +249,6 @@ export const ContextSwitcherModal: React.FC<ContextSwitcherModalProps> = ({ isOp
       setSelectedRegisterId('')
       setRegisters([])
       setErrorMessage(null)
-
-      if (!newBranchId) {
-        ++guardRef.current.branchReqSeq
-        return
-      }
 
       await loadRegistersForBranch(selectedOrgId, newBranchId)
     },
