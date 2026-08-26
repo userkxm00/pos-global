@@ -94,6 +94,8 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
   useEffect(() => {
     if (!isOpen) return
 
+    const dialogEl = dialogRef.current
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         handleClose()
@@ -101,7 +103,6 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
     }
 
     const handleClickOutside = (e: MouseEvent) => {
-      const dialogEl = dialogRef.current
       if (
         dialogEl &&
         !dialogEl.contains(e.target as Node) &&
@@ -112,32 +113,32 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
       }
     }
 
+    const handleBackdropClick = (e: MouseEvent) => {
+      if (!dialogEl) return
+      const rect = dialogEl.getBoundingClientRect()
+      const isInside =
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom
+      if (!isInside) {
+        handleClose()
+      }
+    }
+
     document.addEventListener('keydown', handleKeyDown)
     document.addEventListener('mousedown', handleClickOutside)
+    dialogEl?.addEventListener('click', handleBackdropClick)
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
       document.removeEventListener('mousedown', handleClickOutside)
+      dialogEl?.removeEventListener('click', handleBackdropClick)
     }
   }, [isOpen, handleClose])
 
   const handleToggle = () => {
     setIsOpen((prev) => !prev)
-  }
-
-  const handleDialogClick = (e: React.MouseEvent<HTMLDialogElement>) => {
-    const dialogEl = dialogRef.current
-    if (!dialogEl) return
-    const rect = dialogEl.getBoundingClientRect()
-    const isInside = (
-      e.clientX >= rect.left &&
-      e.clientX <= rect.right &&
-      e.clientY >= rect.top &&
-      e.clientY <= rect.bottom
-    )
-    if (!isInside) {
-      handleClose()
-    }
   }
 
   const handleSyncClick = useCallback(async () => {
@@ -200,9 +201,9 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
       </button>
 
       {/* Screen Reader Live Region */}
-      <div className="sr-only" role="status" aria-live="polite" data-testid="sync-live-region">
+      <output className="sr-only" aria-live="polite" data-testid="sync-live-region">
         {statusLabel}
-      </div>
+      </output>
 
       {/* Popover Details Dialog */}
       {isOpen && (
@@ -211,7 +212,6 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
           aria-labelledby="sync-popover-heading"
           className="sync-popover-card"
           data-testid="sync-popover-card"
-          onClick={handleDialogClick}
           onCancel={(e) => {
             e.preventDefault()
             handleClose()
@@ -297,18 +297,23 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
           )}
 
           {/* Action Feedback Banner */}
-          {actionFeedback && (
+          {actionFeedback && actionFeedback.type === 'error' && (
             <div
-              className={
-                actionFeedback.type === 'success'
-                  ? 'sync-feedback-success'
-                  : 'sync-popover-error'
-              }
-              role={actionFeedback.type === 'error' ? 'alert' : 'status'}
+              className="sync-popover-error"
+              role="alert"
               data-testid="sync-action-feedback"
             >
               <span>{actionFeedback.message}</span>
             </div>
+          )}
+
+          {actionFeedback && actionFeedback.type === 'success' && (
+            <output
+              className="sync-feedback-success"
+              data-testid="sync-action-feedback"
+            >
+              <span>{actionFeedback.message}</span>
+            </output>
           )}
 
           {/* Actions */}
