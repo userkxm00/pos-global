@@ -34,6 +34,7 @@ $$;
 -- Grant permissions to test roles
 GRANT USAGE ON SCHEMA public, auth TO authenticated, anon;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth TO authenticated, anon;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public, auth TO authenticated, anon;
 
@@ -259,7 +260,7 @@ DECLARE
     deleted_cnt INTEGER := 0;
 BEGIN
     -- First, add second owner (elevated fixture setup)
-    RESET ROLE;
+    SET LOCAL ROLE NONE;
     INSERT INTO public.organization_members (organization_id, user_id, role)
     VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '12121212-1212-1212-1212-121212121212', 'owner')
     ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'owner';
@@ -277,7 +278,8 @@ BEGIN
         RAISE EXCEPTION 'RLS FAIL: Co-owner should be permitted to leave when another owner remains (deleted % rows)', deleted_cnt;
     END IF;
 
-    -- Primary owner A must still be present
+    -- Switch back to Primary owner A context to verify under authenticated role
+    PERFORM set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', true);
     IF NOT EXISTS (
         SELECT 1 FROM public.organization_members
         WHERE organization_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
