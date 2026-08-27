@@ -76,7 +76,7 @@ jobs:
       - name: Run Rust and migration tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
 
