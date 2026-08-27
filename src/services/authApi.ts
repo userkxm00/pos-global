@@ -33,17 +33,19 @@ export function extractInvokeErrorMessage(err: unknown): string {
 
 export function getDefaultSupabaseConfig(): SupabaseAuthConfig {
   return {
-    url: 'https://mock.supabase.co',
-    publishable_key: 'mock-anon-key',
+    url: import.meta.env?.VITE_SUPABASE_URL ?? 'https://mock.supabase.co',
+    publishable_key:
+      import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY ?? 'mock-anon-key',
   }
 }
 
 export function stripTrailingSlash(url: string): string {
-  let end = url.length
-  while (end > 0 && url.charCodeAt(end - 1) === 47) {
+  const trimmed = url.trim()
+  let end = trimmed.length
+  while (end > 0 && trimmed.charCodeAt(end - 1) === 47) {
     end--
   }
-  return url.slice(0, end)
+  return trimmed.slice(0, end)
 }
 
 export const VALID_AUTH_ERROR_CODES = new Set<AuthErrorCode>([

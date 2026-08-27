@@ -62,7 +62,13 @@ async function handleStartupOnlineRefresh(
       clearStoredAuth()
       return { status: 'expired', user: null, sessionId: null, mode: 'online' }
     }
-    return null
+    // Expiring soon but no refresh token: keep the still-valid session
+    return {
+      status: 'authenticated',
+      user: restored.user,
+      sessionId: restored.sessionId,
+      mode: 'online',
+    }
   }
 
   const refreshedSession = await refreshFn()

@@ -436,6 +436,7 @@ describe('F1.13 Authentication & Session Lifecycle Test Suite', () => {
     assert.strictEqual(stripTrailingSlash('https://example.com/'), 'https://example.com')
     assert.strictEqual(stripTrailingSlash('https://example.com///'), 'https://example.com')
     assert.strictEqual(stripTrailingSlash('https://example.com'), 'https://example.com')
+    assert.strictEqual(stripTrailingSlash('  https://example.com/  '), 'https://example.com')
   })
 
   // 12. Translation Key Parity across en, ar, fr
