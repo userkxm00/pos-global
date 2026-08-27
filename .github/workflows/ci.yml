@@ -127,16 +127,27 @@ jobs:
           AS $$
               SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
           $$;
+          DO $$
+          BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+                  CREATE ROLE authenticated NOLOGIN NOINHERIT;
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+                  CREATE ROLE anon NOLOGIN NOINHERIT;
+              END IF;
+          END $$;
           EOF
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/001_phase1_identity_and_rls.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/002_organization_branch_member_schema.sql
-          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/002_organization_branch_member_schema.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/003_device_register_cloud_identity.sql
-          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/003_device_register_cloud_identity.sql
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/004_privileged_server_functions.sql
+          # Intentional migration 004 idempotency re-run for F1.23 requirement verification
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/004_privileged_server_functions.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/rls_policies_test.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/organization_branch_member_test.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/device_register_identity_test.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/rls_tenant_isolation_test.sql
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/privileged_server_functions_test.sql
 
   foundation-validation:
     name: Foundation specification validation

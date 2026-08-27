@@ -16,6 +16,10 @@ const DEVICE_REGISTER_TEST_SQL: &str =
     include_str!("../../../supabase/tests/device_register_identity_test.sql");
 const RLS_TENANT_ISOLATION_TEST_SQL: &str =
     include_str!("../../../supabase/tests/rls_tenant_isolation_test.sql");
+const PRIVILEGED_FUNCTIONS_MIGRATION_SQL: &str =
+    include_str!("../../../supabase/migrations/004_privileged_server_functions.sql");
+const PRIVILEGED_FUNCTIONS_TEST_SQL: &str =
+    include_str!("../../../supabase/tests/privileged_server_functions_test.sql");
 
 fn normalize_whitespace(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -638,5 +642,122 @@ fn f1_22_test_suite_covers_global_catalog_access() {
         sql.contains("Anon role saw % permissions")
             && sql.contains("Anon role saw % role_permissions"),
         "Expected test assertion specifically blocking anonymous access to both permissions and role_permissions"
+    );
+}
+
+// ============================================================
+// F1.23 — Privileged Server Functions Static Assertions
+// ============================================================
+
+#[test]
+fn f1_23_migration_contains_all_required_privileged_functions() {
+    let sql = normalize_whitespace(PRIVILEGED_FUNCTIONS_MIGRATION_SQL);
+    let required_functions = [
+        "FUNCTION public.pair_device_to_register",
+        "FUNCTION public.revoke_device_pairing",
+        "FUNCTION public.record_device_heartbeat",
+        "FUNCTION public.create_organization_with_initial_setup",
+        "FUNCTION public.set_organization_member_role",
+    ];
+
+    for func in required_functions {
+        assert!(sql.contains(func), "Migration 004 must define {func}");
+    }
+}
+
+#[test]
+fn f1_23_migration_enforces_security_definer_and_search_path() {
+    let sql = normalize_whitespace(PRIVILEGED_FUNCTIONS_MIGRATION_SQL);
+    assert!(
+        sql.contains("SECURITY DEFINER"),
+        "Privileged functions must use SECURITY DEFINER"
+    );
+    assert!(
+        sql.contains("SET search_path = public"),
+        "Privileged functions must set search_path = public"
+    );
+}
+
+#[test]
+fn f1_23_migration_enforces_fail_closed_authorization_guards() {
+    let sql = normalize_whitespace(PRIVILEGED_FUNCTIONS_MIGRATION_SQL);
+    assert!(
+        sql.contains("auth.uid()"),
+        "Privileged functions must inspect auth.uid()"
+    );
+    assert!(
+        sql.contains("public.is_org_manager_or_above"),
+        "Device operations must enforce manager/admin/owner role"
+    );
+    assert!(
+        sql.contains("public.is_org_member"),
+        "Device heartbeat must enforce tenant membership"
+    );
+    assert!(
+        sql.contains("SQLSTATE '42501'") || sql.contains("ERRCODE = '42501'"),
+        "Privileged functions must use SQLSTATE 42501 for access denial"
+    );
+}
+
+#[test]
+fn f1_23_migration_revokes_public_and_grants_authenticated() {
+    let sql = normalize_whitespace(PRIVILEGED_FUNCTIONS_MIGRATION_SQL);
+    let functions = [
+        "public.pair_device_to_register(UUID, TEXT)",
+        "public.revoke_device_pairing(UUID)",
+        "public.record_device_heartbeat(UUID, TEXT)",
+        "public.create_organization_with_initial_setup(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT)",
+        "public.set_organization_member_role(UUID, UUID, TEXT)",
+    ];
+
+    for func in functions {
+        assert!(
+            sql.contains(&format!("REVOKE ALL ON FUNCTION {func} FROM PUBLIC;")),
+            "Must revoke PUBLIC execution on {func}"
+        );
+        assert!(
+            sql.contains(&format!(
+                "GRANT EXECUTE ON FUNCTION {func} TO authenticated;"
+            )),
+            "Must grant authenticated execution on {func}"
+        );
+    }
+}
+
+#[test]
+fn f1_23_test_suite_covers_all_seventeen_scenarios() {
+    let sql = normalize_whitespace(PRIVILEGED_FUNCTIONS_TEST_SQL);
+    for i in 1..=17 {
+        assert!(
+            sql.contains(&format!("PASS Case {i}:")),
+            "Privileged functions test suite must verify Case {i}"
+        );
+    }
+}
+
+#[test]
+fn f1_23_migration_uses_row_locking_for_device_operations() {
+    let sql = normalize_whitespace(PRIVILEGED_FUNCTIONS_MIGRATION_SQL);
+
+    // Verify pair_device_to_register independently
+    let pair_fn = sql
+        .split("FUNCTION public.pair_device_to_register")
+        .nth(1)
+        .and_then(|s| s.split("FUNCTION public.revoke_device_pairing").next())
+        .expect("Expected pair_device_to_register definition in migration 004");
+    assert!(
+        pair_fn.contains("WHERE id = p_register_id FOR UPDATE;"),
+        "pair_device_to_register must lock target register with FOR UPDATE to prevent TOCTOU races"
+    );
+
+    // Verify revoke_device_pairing independently
+    let revoke_fn = sql
+        .split("FUNCTION public.revoke_device_pairing")
+        .nth(1)
+        .and_then(|s| s.split("FUNCTION public.record_device_heartbeat").next())
+        .expect("Expected revoke_device_pairing definition in migration 004");
+    assert!(
+        revoke_fn.contains("WHERE id = p_register_id FOR UPDATE;"),
+        "revoke_device_pairing must lock target register with FOR UPDATE to prevent TOCTOU races"
     );
 }
