@@ -4,7 +4,7 @@
 -- domain check constraints, automatic timestamps, sole-owner mutation guard,
 -- and unique identity mapping.
 --
--- This test validates runtime database behavior, not static SQL structure.
+-- This test validates runtime database behavior against a real PostgreSQL engine.
 
 BEGIN;
 
@@ -89,8 +89,6 @@ END $$;
 -- 3. Composite FK — Cross-Tenant Branch Rejection (Users)
 -- ============================================================
 
--- Attempt to create a user in org_a but attached to branch_b (org_b).
--- This MUST be rejected by fk_users_branch_org composite FK.
 DO $$
 DECLARE
     org_a UUID := 'f1200001-aaaa-aaaa-aaaa-000000000001';
@@ -100,8 +98,10 @@ BEGIN
     INSERT INTO public.users (organization_id, branch_id, supabase_user_id, full_name, username, role)
     VALUES (org_a, branch_b, auth_owner_a, 'Cross Tenant User', 'cross_user', 'cashier');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Cross-tenant user-branch attachment was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Cross-tenant user-branch attachment was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN foreign_key_violation THEN
         RAISE NOTICE 'PASS: Cross-tenant user-branch attachment correctly rejected by composite FK';
 END $$;
@@ -118,8 +118,10 @@ BEGIN
     INSERT INTO public.registers (organization_id, branch_id, name, code)
     VALUES (org_a, branch_b, 'Cross Tenant Register', 'XREG-01');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Cross-tenant register-branch attachment was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Cross-tenant register-branch attachment was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN foreign_key_violation THEN
         RAISE NOTICE 'PASS: Cross-tenant register-branch attachment correctly rejected by composite FK';
 END $$;
@@ -134,8 +136,10 @@ BEGIN
     INSERT INTO public.organizations (name, default_currency, default_language)
     VALUES ('', 'USD', 'en');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Empty organization name was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Empty organization name was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: Empty organization name correctly rejected';
 END $$;
@@ -146,8 +150,10 @@ BEGIN
     INSERT INTO public.organizations (name, default_currency, default_language)
     VALUES ('   ', 'USD', 'en');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Whitespace-only organization name was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Whitespace-only organization name was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: Whitespace-only organization name correctly rejected';
 END $$;
@@ -158,8 +164,10 @@ BEGIN
     INSERT INTO public.organizations (name, default_currency, default_language)
     VALUES ('Test Currency Org', 'usd', 'en');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Lowercase currency code was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Lowercase currency code was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: Lowercase currency code correctly rejected';
 END $$;
@@ -170,8 +178,10 @@ BEGIN
     INSERT INTO public.organizations (name, default_currency, default_language)
     VALUES ('Test Currency Org 2', 'US', 'en');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: 2-character currency code was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: 2-character currency code was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: 2-character currency code correctly rejected';
 END $$;
@@ -182,8 +192,10 @@ BEGIN
     INSERT INTO public.organizations (name, default_currency, default_language)
     VALUES ('Test Currency Org 3', 'USDX', 'en');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: 4-character currency code was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: 4-character currency code was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: 4-character currency code correctly rejected';
 END $$;
@@ -194,8 +206,10 @@ BEGIN
     INSERT INTO public.organizations (name, default_currency, default_language)
     VALUES ('Test Lang Org', 'USD', 'e');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: 1-character language code was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: 1-character language code was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: 1-character language code correctly rejected';
 END $$;
@@ -209,7 +223,6 @@ BEGIN
     VALUES ('Valid Check Org', 'GBP', 'en-GB')
     RETURNING id INTO new_org_id;
 
-    -- Clean up
     DELETE FROM public.organizations WHERE id = new_org_id;
     RAISE NOTICE 'PASS: Valid organization creation succeeded';
 END $$;
@@ -226,8 +239,10 @@ BEGIN
     INSERT INTO public.branches (organization_id, name, currency)
     VALUES (org_a, '', 'USD');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Empty branch name was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Empty branch name was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: Empty branch name correctly rejected';
 END $$;
@@ -240,8 +255,10 @@ BEGIN
     INSERT INTO public.branches (organization_id, name, currency)
     VALUES (org_a, 'Bad Currency Branch', 'bad');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Invalid branch currency was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Invalid branch currency was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: Invalid branch currency correctly rejected';
 END $$;
@@ -259,8 +276,10 @@ BEGIN
     INSERT INTO public.users (organization_id, branch_id, full_name, role)
     VALUES (org_a, branch_a, '', 'cashier');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Empty user full_name was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Empty user full_name was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: Empty user full_name correctly rejected';
 END $$;
@@ -274,8 +293,10 @@ BEGIN
     INSERT INTO public.users (organization_id, branch_id, full_name, username, role)
     VALUES (org_a, branch_a, 'Short User', 'ab', 'cashier');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: 2-char username was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: 2-char username was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: 2-char username correctly rejected';
 END $$;
@@ -289,8 +310,10 @@ BEGIN
     INSERT INTO public.users (organization_id, branch_id, full_name, username, role)
     VALUES (org_a, branch_a, 'Space User', 'has space', 'cashier');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Username with spaces was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Username with spaces was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN check_violation THEN
         RAISE NOTICE 'PASS: Username with spaces correctly rejected';
 END $$;
@@ -314,7 +337,6 @@ END $$;
 -- 8. Sole-Owner Deletion Prevention
 -- ============================================================
 
--- Remove co-owner first so auth_owner_a becomes sole owner, then attempt deletion
 DO $$
 DECLARE
     org_a UUID := 'f1200001-aaaa-aaaa-aaaa-000000000001';
@@ -325,12 +347,14 @@ BEGIN
     DELETE FROM public.organization_members
     WHERE organization_id = org_a AND user_id = auth_owner_a2;
 
-    -- Now attempt to delete the sole remaining owner
+    -- Now attempt to delete the sole remaining owner (must be prevented)
     DELETE FROM public.organization_members
     WHERE organization_id = org_a AND user_id = auth_owner_a;
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Sole owner deletion was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Sole owner deletion was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN raise_exception THEN
         -- Re-insert co-owner for subsequent tests
         INSERT INTO public.organization_members (organization_id, user_id, role)
@@ -343,7 +367,6 @@ END $$;
 -- 9. Sole-Owner Role Demotion Prevention (UPDATE guard)
 -- ============================================================
 
--- Remove co-owner, then attempt to demote the sole remaining owner to 'admin'
 DO $$
 DECLARE
     org_a UUID := 'f1200001-aaaa-aaaa-aaaa-000000000001';
@@ -354,13 +377,15 @@ BEGIN
     DELETE FROM public.organization_members
     WHERE organization_id = org_a AND user_id = auth_owner_a2;
 
-    -- Attempt to demote sole owner to admin
+    -- Attempt to demote sole owner to admin (must be prevented)
     UPDATE public.organization_members
     SET role = 'admin'
     WHERE organization_id = org_a AND user_id = auth_owner_a;
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Sole owner role demotion was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Sole owner role demotion was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN raise_exception THEN
         -- Re-insert co-owner for subsequent tests
         INSERT INTO public.organization_members (organization_id, user_id, role)
@@ -387,7 +412,7 @@ BEGIN
         SELECT 1 FROM public.organization_members
         WHERE organization_id = org_a AND user_id = auth_owner_a2
     ) THEN
-        RAISE EXCEPTION 'SCHEMA VIOLATION: Co-owner deletion did not take effect';
+        RAISE EXCEPTION 'SCHEMA VIOLATION: Co-owner deletion did not take effect' USING ERRCODE = 'TF001';
     END IF;
 
     -- Re-insert co-owner for subsequent tests
@@ -399,27 +424,28 @@ BEGIN
 END $$;
 
 -- ============================================================
--- 11. Automatic updated_at Timestamp Trigger
+-- 11. Automatic updated_at Timestamp Trigger (Transaction-Stable Verification)
 -- ============================================================
 
 DO $$
 DECLARE
     org_a UUID := 'f1200001-aaaa-aaaa-aaaa-000000000001';
-    ts_before TIMESTAMPTZ;
     ts_after TIMESTAMPTZ;
+    stale_ts TIMESTAMPTZ := now() - INTERVAL '1 day';
 BEGIN
-    SELECT updated_at INTO ts_before FROM public.organizations WHERE id = org_a;
+    -- Force a stale updated_at value directly
+    ALTER TABLE public.organizations DISABLE TRIGGER trg_updated_at_organizations;
+    UPDATE public.organizations SET updated_at = stale_ts WHERE id = org_a;
+    ALTER TABLE public.organizations ENABLE TRIGGER trg_updated_at_organizations;
 
-    -- Ensure clock advances
-    PERFORM pg_sleep(0.05);
-
+    -- Trigger must overwrite the stale timestamp with current transaction now()
     UPDATE public.organizations SET name = 'F1.20 Test Org A Updated' WHERE id = org_a;
 
     SELECT updated_at INTO ts_after FROM public.organizations WHERE id = org_a;
 
-    IF ts_after <= ts_before THEN
-        RAISE EXCEPTION 'SCHEMA VIOLATION: updated_at was not advanced by trigger (before=%, after=%)',
-            ts_before, ts_after;
+    IF ts_after <= stale_ts THEN
+        RAISE EXCEPTION 'SCHEMA VIOLATION: updated_at was not updated by trigger (stale=%, actual=%)',
+            stale_ts, ts_after USING ERRCODE = 'TF001';
     END IF;
 
     -- Reset name
@@ -432,7 +458,6 @@ END $$;
 -- 12. Unique Supabase Identity Mapping per Organization
 -- ============================================================
 
--- Attempt to insert a second user in same org with same supabase_user_id
 DO $$
 DECLARE
     org_a UUID := 'f1200001-aaaa-aaaa-aaaa-000000000001';
@@ -449,16 +474,17 @@ BEGIN
     INSERT INTO public.users (organization_id, branch_id, supabase_user_id, full_name, role)
     VALUES (org_a, branch_a, auth_member_a, 'Duplicate Mapping', 'cashier');
 
-    RAISE EXCEPTION 'SCHEMA VIOLATION: Duplicate supabase_user_id mapping in same org was permitted';
+    RAISE EXCEPTION 'SCHEMA VIOLATION: Duplicate supabase_user_id mapping in same org was permitted' USING ERRCODE = 'TF001';
 EXCEPTION
+    WHEN SQLSTATE 'TF001' THEN
+        RAISE;
     WHEN unique_violation THEN
-        -- Clean up
         DELETE FROM public.users WHERE id = user1_id;
         RAISE NOTICE 'PASS: Duplicate supabase_user_id in same org correctly rejected';
 END $$;
 
 -- ============================================================
--- 13. Cascading Organization Deletion
+-- 13. Cascading Organization Deletion (Full Dependency Assertions)
 -- ============================================================
 
 DO $$
@@ -467,7 +493,7 @@ DECLARE
     test_branch_id UUID;
     auth_user UUID := '10000000-0000-0000-0000-000000000003';
 BEGIN
-    -- Create temporary org, branch, user, and register
+    -- Create temporary org, member, branch, user, and register
     INSERT INTO public.organizations (name, default_currency, default_language)
     VALUES ('Cascade Test Org', 'USD', 'en')
     RETURNING id INTO test_org_id;
@@ -486,17 +512,21 @@ BEGIN
     INSERT INTO public.registers (organization_id, branch_id, name, code)
     VALUES (test_org_id, test_branch_id, 'Cascade Register', 'CREG-01');
 
-    -- Delete the organization: all children must cascade
-    -- First remove the sole-owner guard by adding a second owner then
-    -- deleting the member directly, or just delete the org itself.
+    -- Delete the organization: all children must cascade cleanly
     DELETE FROM public.organizations WHERE id = test_org_id;
 
     -- Verify all children are removed
     IF EXISTS (SELECT 1 FROM public.branches WHERE organization_id = test_org_id) THEN
-        RAISE EXCEPTION 'SCHEMA VIOLATION: Branches not cascaded on org deletion';
+        RAISE EXCEPTION 'SCHEMA VIOLATION: Branches not cascaded on org deletion' USING ERRCODE = 'TF001';
     END IF;
     IF EXISTS (SELECT 1 FROM public.organization_members WHERE organization_id = test_org_id) THEN
-        RAISE EXCEPTION 'SCHEMA VIOLATION: Members not cascaded on org deletion';
+        RAISE EXCEPTION 'SCHEMA VIOLATION: Members not cascaded on org deletion' USING ERRCODE = 'TF001';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.users WHERE organization_id = test_org_id) THEN
+        RAISE EXCEPTION 'SCHEMA VIOLATION: Users not cascaded on org deletion' USING ERRCODE = 'TF001';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.registers WHERE organization_id = test_org_id) THEN
+        RAISE EXCEPTION 'SCHEMA VIOLATION: Registers not cascaded on org deletion' USING ERRCODE = 'TF001';
     END IF;
 
     RAISE NOTICE 'PASS: Organization deletion correctly cascades to branches, members, users, and registers';
@@ -517,7 +547,7 @@ BEGIN
     RETURNING id INTO new_user_id;
 
     IF new_user_id IS NULL THEN
-        RAISE EXCEPTION 'SCHEMA VIOLATION: Valid same-tenant user creation failed';
+        RAISE EXCEPTION 'SCHEMA VIOLATION: Valid same-tenant user creation failed' USING ERRCODE = 'TF001';
     END IF;
 
     DELETE FROM public.users WHERE id = new_user_id;
@@ -539,7 +569,7 @@ BEGIN
     RETURNING id INTO new_reg_id;
 
     IF new_reg_id IS NULL THEN
-        RAISE EXCEPTION 'SCHEMA VIOLATION: Valid same-tenant register creation failed';
+        RAISE EXCEPTION 'SCHEMA VIOLATION: Valid same-tenant register creation failed' USING ERRCODE = 'TF001';
     END IF;
 
     DELETE FROM public.registers WHERE id = new_reg_id;

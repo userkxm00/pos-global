@@ -2,7 +2,7 @@
 -- F1.20 — Organization / Branch / Member Cloud Schema Hardening
 -- Append-only migration: adds composite tenant integrity constraints,
 -- domain check constraints, automatic timestamps, sole-owner mutation guard,
--- and performance indexes to the Phase 1 cloud schema.
+-- child-side supporting indexes, and performance indexes.
 --
 -- INVARIANT: 001_phase1_identity_and_rls.sql is immutable and untouched.
 
@@ -13,12 +13,17 @@
 -- Enable composite FK targets: branches must be uniquely identifiable
 -- by (organization_id, id) to serve as a composite FK reference.
 ALTER TABLE public.branches
+    DROP CONSTRAINT IF EXISTS uq_branches_org_id;
+
+ALTER TABLE public.branches
     ADD CONSTRAINT uq_branches_org_id UNIQUE (organization_id, id);
 
--- Drop legacy simple FKs before replacing with composite FKs.
 -- users: organization_id + branch_id must reference the same org in branches.
 ALTER TABLE public.users
     DROP CONSTRAINT IF EXISTS users_branch_id_fkey;
+
+ALTER TABLE public.users
+    DROP CONSTRAINT IF EXISTS fk_users_branch_org;
 
 ALTER TABLE public.users
     ADD CONSTRAINT fk_users_branch_org
@@ -29,6 +34,9 @@ ALTER TABLE public.users
 -- registers: organization_id + branch_id must reference the same org in branches.
 ALTER TABLE public.registers
     DROP CONSTRAINT IF EXISTS registers_branch_id_fkey;
+
+ALTER TABLE public.registers
+    DROP CONSTRAINT IF EXISTS fk_registers_branch_org;
 
 ALTER TABLE public.registers
     ADD CONSTRAINT fk_registers_branch_org
@@ -42,12 +50,21 @@ ALTER TABLE public.registers
 
 -- Organizations
 ALTER TABLE public.organizations
+    DROP CONSTRAINT IF EXISTS chk_organizations_name;
+
+ALTER TABLE public.organizations
     ADD CONSTRAINT chk_organizations_name
     CHECK (length(trim(name)) > 0 AND length(name) <= 255);
 
 ALTER TABLE public.organizations
+    DROP CONSTRAINT IF EXISTS chk_organizations_currency;
+
+ALTER TABLE public.organizations
     ADD CONSTRAINT chk_organizations_currency
     CHECK (length(default_currency) = 3 AND default_currency ~ '^[A-Z]{3}$');
+
+ALTER TABLE public.organizations
+    DROP CONSTRAINT IF EXISTS chk_organizations_language;
 
 ALTER TABLE public.organizations
     ADD CONSTRAINT chk_organizations_language
@@ -56,8 +73,14 @@ ALTER TABLE public.organizations
 
 -- Branches
 ALTER TABLE public.branches
+    DROP CONSTRAINT IF EXISTS chk_branches_name;
+
+ALTER TABLE public.branches
     ADD CONSTRAINT chk_branches_name
     CHECK (length(trim(name)) > 0 AND length(name) <= 255);
+
+ALTER TABLE public.branches
+    DROP CONSTRAINT IF EXISTS chk_branches_currency;
 
 ALTER TABLE public.branches
     ADD CONSTRAINT chk_branches_currency
@@ -65,8 +88,14 @@ ALTER TABLE public.branches
 
 -- Users (POS Staff)
 ALTER TABLE public.users
+    DROP CONSTRAINT IF EXISTS chk_users_full_name;
+
+ALTER TABLE public.users
     ADD CONSTRAINT chk_users_full_name
     CHECK (length(trim(full_name)) > 0 AND length(full_name) <= 255);
+
+ALTER TABLE public.users
+    DROP CONSTRAINT IF EXISTS chk_users_username;
 
 ALTER TABLE public.users
     ADD CONSTRAINT chk_users_username
@@ -84,13 +113,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_users_org_supabase_user
     WHERE supabase_user_id IS NOT NULL;
 
 -- ============================================================
--- 4. Automatic updated_at Timestamp Trigger
+-- 4. Automatic updated_at Timestamp Trigger (Least Privilege)
 -- ============================================================
 
+-- Trigger function runs under invoking role context (no SECURITY DEFINER needed).
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
-SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
@@ -131,12 +160,62 @@ CREATE TRIGGER trg_updated_at_registers
     EXECUTE FUNCTION public.handle_updated_at();
 
 -- ============================================================
--- 5. Sole-Owner Mutation Guard (UPDATE + DELETE)
+-- 5. Sole-Owner Mutation Guard (UPDATE + DELETE + Cascade Safety)
 -- ============================================================
 
--- Upgrade the existing prevent_orphaned_organization trigger to also fire
--- on UPDATE, preventing role demotion of the sole remaining owner.
--- The function body already handles OLD.role = 'owner' checks.
+-- Upgrades prevent_orphaned_organization to handle:
+-- 1. DELETE: prevents deleting the sole owner, while allowing ON DELETE CASCADE
+--    when the parent organization itself is being deleted.
+-- 2. UPDATE: validates demotion (OLD.role = 'owner' AND NEW.role <> 'owner')
+--    and returns NEW so updates/role changes are preserved.
+CREATE OR REPLACE FUNCTION public.prevent_orphaned_organization()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    remaining_owners INTEGER;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        -- Allow cascade deletion when the parent organization itself is being deleted
+        IF NOT EXISTS (SELECT 1 FROM public.organizations WHERE id = OLD.organization_id) THEN
+            RETURN OLD;
+        END IF;
+
+        IF OLD.role = 'owner' THEN
+            SELECT COUNT(*)
+            INTO remaining_owners
+            FROM public.organization_members om
+            WHERE om.organization_id = OLD.organization_id
+              AND om.role = 'owner'
+              AND om.id <> OLD.id;
+
+            IF remaining_owners < 1 THEN
+                RAISE EXCEPTION 'Cannot delete the sole remaining owner of an organization';
+            END IF;
+        END IF;
+        RETURN OLD;
+    ELSIF TG_OP = 'UPDATE' THEN
+        -- Guard against demoting the sole remaining owner
+        IF OLD.role = 'owner' AND NEW.role <> 'owner' THEN
+            SELECT COUNT(*)
+            INTO remaining_owners
+            FROM public.organization_members om
+            WHERE om.organization_id = OLD.organization_id
+              AND om.role = 'owner'
+              AND om.id <> OLD.id;
+
+            IF remaining_owners < 1 THEN
+                RAISE EXCEPTION 'Cannot demote the sole remaining owner of an organization';
+            END IF;
+        END IF;
+        RETURN NEW;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
 DROP TRIGGER IF EXISTS trg_prevent_orphaned_organization ON public.organization_members;
 CREATE TRIGGER trg_prevent_orphaned_organization
     BEFORE UPDATE OR DELETE ON public.organization_members
@@ -144,7 +223,17 @@ CREATE TRIGGER trg_prevent_orphaned_organization
     EXECUTE FUNCTION public.prevent_orphaned_organization();
 
 -- ============================================================
--- 6. Performance Indexes
+-- 6. Child-Side Composite FK Supporting Indexes
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_users_org_branch
+    ON public.users (organization_id, branch_id);
+
+CREATE INDEX IF NOT EXISTS idx_registers_org_branch
+    ON public.registers (organization_id, branch_id);
+
+-- ============================================================
+-- 7. Performance Indexes
 -- ============================================================
 
 CREATE INDEX IF NOT EXISTS idx_branches_org_active

@@ -16,7 +16,7 @@ fn normalize_whitespace(input: &str) -> String {
 }
 
 // ============================================================
-// Migration Structure — Composite Foreign Keys
+// Migration Structure — Composite Foreign Keys (Table-Specific)
 // ============================================================
 
 #[test]
@@ -31,26 +31,20 @@ fn f1_20_migration_defines_composite_unique_constraint_on_branches() {
 #[test]
 fn f1_20_migration_defines_composite_fk_users_branch_org() {
     let sql = normalize_whitespace(SCHEMA_MIGRATION_SQL);
+    let expected = "ALTER TABLE public.users ADD CONSTRAINT fk_users_branch_org FOREIGN KEY (organization_id, branch_id) REFERENCES public.branches(organization_id, id) ON DELETE CASCADE;";
     assert!(
-        sql.contains("fk_users_branch_org"),
-        "Expected composite FK fk_users_branch_org on users"
-    );
-    assert!(
-        sql.contains("FOREIGN KEY (organization_id, branch_id) REFERENCES public.branches(organization_id, id)"),
-        "Expected users composite FK to reference branches(organization_id, id)"
+        sql.contains(expected),
+        "Expected table-specific composite FK definition for users: {expected}"
     );
 }
 
 #[test]
 fn f1_20_migration_defines_composite_fk_registers_branch_org() {
     let sql = normalize_whitespace(SCHEMA_MIGRATION_SQL);
+    let expected = "ALTER TABLE public.registers ADD CONSTRAINT fk_registers_branch_org FOREIGN KEY (organization_id, branch_id) REFERENCES public.branches(organization_id, id) ON DELETE CASCADE;";
     assert!(
-        sql.contains("fk_registers_branch_org"),
-        "Expected composite FK fk_registers_branch_org on registers"
-    );
-    assert!(
-        sql.contains("FOREIGN KEY (organization_id, branch_id) REFERENCES public.branches(organization_id, id)"),
-        "Expected registers composite FK to reference branches(organization_id, id)"
+        sql.contains(expected),
+        "Expected table-specific composite FK definition for registers: {expected}"
     );
 }
 
@@ -78,7 +72,6 @@ fn f1_20_migration_defines_organization_check_constraints() {
 #[test]
 fn f1_20_migration_uses_correct_currency_regex() {
     let sql = normalize_whitespace(SCHEMA_MIGRATION_SQL);
-    // Verify correct regex ^[A-Z]{3}$ — NOT ^[A-Z]{3}$*
     assert!(
         sql.contains("'^[A-Z]{3}$'"),
         "Expected correct ISO 4217 currency regex '^[A-Z]{3}$' (without trailing asterisk)"
@@ -137,7 +130,7 @@ fn f1_20_migration_defines_unique_supabase_user_index() {
 }
 
 // ============================================================
-// Migration Structure — updated_at Trigger
+// Migration Structure — updated_at Trigger (Least Privilege)
 // ============================================================
 
 #[test]
@@ -148,16 +141,18 @@ fn f1_20_migration_defines_updated_at_trigger_function() {
         "Expected trigger function public.handle_updated_at()"
     );
     assert!(
-        sql.contains("SECURITY DEFINER"),
-        "Expected handle_updated_at to be SECURITY DEFINER"
-    );
-    assert!(
         sql.contains("SET search_path = public"),
         "Expected handle_updated_at to enforce SET search_path = public"
     );
     assert!(
         sql.contains("NEW.updated_at = now()"),
         "Expected handle_updated_at to set NEW.updated_at = now()"
+    );
+    assert!(
+        !sql.contains(
+            "FUNCTION public.handle_updated_at() RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER"
+        ),
+        "handle_updated_at should not use SECURITY DEFINER (least privilege)"
     );
 }
 
@@ -179,7 +174,6 @@ fn f1_20_migration_attaches_updated_at_triggers_to_all_tenant_entities() {
         );
     }
 
-    // All must be BEFORE UPDATE triggers
     let before_update_count = sql.matches("BEFORE UPDATE ON public.").count();
     assert!(
         before_update_count >= 5,
@@ -192,7 +186,7 @@ fn f1_20_migration_attaches_updated_at_triggers_to_all_tenant_entities() {
 // ============================================================
 
 #[test]
-fn f1_20_migration_upgrades_sole_owner_trigger_to_cover_update() {
+fn f1_20_migration_upgrades_sole_owner_trigger_to_cover_update_and_cascade() {
     let sql = normalize_whitespace(SCHEMA_MIGRATION_SQL);
     assert!(
         sql.contains("BEFORE UPDATE OR DELETE ON public.organization_members"),
@@ -202,16 +196,32 @@ fn f1_20_migration_upgrades_sole_owner_trigger_to_cover_update() {
         sql.contains("trg_prevent_orphaned_organization"),
         "Expected trg_prevent_orphaned_organization trigger definition"
     );
+    assert!(
+        sql.contains(
+            "NOT EXISTS (SELECT 1 FROM public.organizations WHERE id = OLD.organization_id)"
+        ),
+        "Expected cascade bypass when parent organization is deleted"
+    );
+    assert!(
+        sql.contains("OLD.role = 'owner' AND NEW.role <> 'owner'"),
+        "Expected role demotion check on UPDATE"
+    );
+    assert!(
+        sql.contains("RETURN NEW;"),
+        "Expected RETURN NEW on UPDATE so member updates are preserved"
+    );
 }
 
 // ============================================================
-// Migration Structure — Performance Indexes
+// Migration Structure — Performance & Child-Side Indexes
 // ============================================================
 
 #[test]
-fn f1_20_migration_defines_performance_indexes() {
+fn f1_20_migration_defines_performance_and_supporting_indexes() {
     let sql = normalize_whitespace(SCHEMA_MIGRATION_SQL);
     let expected_indexes = [
+        "idx_users_org_branch",
+        "idx_registers_org_branch",
         "idx_branches_org_active",
         "idx_branches_org_name",
         "idx_users_org_active",
@@ -221,7 +231,7 @@ fn f1_20_migration_defines_performance_indexes() {
     for idx in expected_indexes {
         assert!(
             sql.contains(idx),
-            "Expected performance index '{idx}' to be defined"
+            "Expected index '{idx}' to be defined in migration 002"
         );
     }
 }
@@ -233,17 +243,14 @@ fn f1_20_migration_defines_performance_indexes() {
 #[test]
 fn f1_20_migration_does_not_recreate_tables_or_rls_policies() {
     let sql = normalize_whitespace(SCHEMA_MIGRATION_SQL);
-    // Must not contain CREATE TABLE (we are only ALTERing existing tables)
     assert!(
         !sql.contains("CREATE TABLE"),
         "Migration 002 must not CREATE TABLE — tables are defined in immutable 001"
     );
-    // Must not contain ENABLE ROW LEVEL SECURITY (already done in 001)
     assert!(
         !sql.contains("ENABLE ROW LEVEL SECURITY"),
         "Migration 002 must not re-enable RLS — already enabled in 001"
     );
-    // Must not contain CREATE POLICY (RLS policies are F1.22 scope)
     assert!(
         !sql.contains("CREATE POLICY"),
         "Migration 002 must not create RLS policies — that is F1.22 scope"
@@ -281,6 +288,10 @@ fn f1_20_test_suite_covers_sole_owner_protection() {
     assert!(
         sql.contains("Co-owner deletion correctly permitted when another owner remains"),
         "Expected test assertion for co-owner deletion permission"
+    );
+    assert!(
+        sql.contains("SQLSTATE 'TF001'"),
+        "Expected dedicated test failure SQLSTATE TF001"
     );
 }
 
@@ -327,7 +338,9 @@ fn f1_20_test_suite_covers_unique_supabase_identity() {
 fn f1_20_test_suite_covers_cascade_deletion() {
     let sql = normalize_whitespace(SCHEMA_TEST_SQL);
     assert!(
-        sql.contains("Organization deletion correctly cascades"),
-        "Expected test assertion for cascading organization deletion"
+        sql.contains(
+            "Organization deletion correctly cascades to branches, members, users, and registers"
+        ),
+        "Expected test assertion for complete cascading organization deletion"
     );
 }

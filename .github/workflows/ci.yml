@@ -83,6 +83,36 @@ jobs:
           fi
           echo 'No high-risk credential patterns detected.'
 
+  supabase-schema-tests:
+    name: Supabase Cloud Schema & RLS Runtime Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Run Supabase migrations and behavioral tests
+        env:
+          PGPASSWORD: postgrespassword
+        run: |
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/001_phase1_identity_and_rls.sql
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/002_organization_branch_member_schema.sql
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/rls_policies_test.sql
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/organization_branch_member_test.sql
+
   foundation-validation:
     name: Foundation specification validation
     runs-on: ubuntu-latest
