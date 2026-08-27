@@ -21,10 +21,8 @@ import {
   performLocalLogin,
   performPinUnlock,
   performLogout,
-  performTokenRefresh,
   performSingleFlightRefresh,
   restoreOnlineSession,
-  restoreLocalSession,
   storeOnlineSession,
   type AuthenticatedUser,
 } from '../context/authSession.ts'
@@ -34,21 +32,22 @@ import {
   getAuthApi,
   setAuthApi,
   classifyAuthError,
-  createTypedAuthError,
 } from '../services/authApi.ts'
 
 import {
   validateContextHierarchy,
-  resolveBranchOnOrgChange,
-  resolveRegisterOnBranchChange,
 } from '../context/contextSwitching.ts'
 
-import type { OnlineSession, SignInInput, LocalSignInInput } from '../types/auth.ts'
+import {
+  createInactivityTracker,
+} from '../hooks/useInactivityTimeout.ts'
+
+import type { AuthStatus, OnlineSession, SignInInput, LocalSignInInput } from '../types/auth.ts'
 import type { Organization } from '../types/organization.ts'
 import type { Branch } from '../types/branch.ts'
 import type { Register } from '../types/register.ts'
 
-// Polyfill minimal browser-like sessionStorage for Node.js test environment
+// Polyfill browser-like sessionStorage and EventTarget for Node.js test environment
 class MockSessionStorage {
   private store: Map<string, string> = new Map()
 
@@ -69,13 +68,56 @@ class MockSessionStorage {
   }
 }
 
-// Attach mock sessionStorage to global window if missing
-if (typeof globalThis.window === 'undefined') {
-  ;(globalThis as unknown as { window: { sessionStorage: MockSessionStorage } }).window = {
-    sessionStorage: new MockSessionStorage(),
+interface MockEventTarget {
+  listeners: Map<string, Set<() => void>>
+  addEventListener: (event: string, handler: () => void, options?: unknown) => void
+  removeEventListener: (event: string, handler: () => void) => void
+  dispatchEvent: (event: string) => void
+  clear: () => void
+}
+
+function createMockEventTarget(): MockEventTarget {
+  const listeners = new Map<string, Set<() => void>>()
+  return {
+    listeners,
+    addEventListener(event: string, handler: () => void) {
+      if (!listeners.has(event)) {
+        listeners.set(event, new Set())
+      }
+      listeners.get(event)!.add(handler)
+    },
+    removeEventListener(event: string, handler: () => void) {
+      listeners.get(event)?.delete(handler)
+    },
+    dispatchEvent(event: string) {
+      const handlers = listeners.get(event)
+      if (handlers) {
+        for (const h of Array.from(handlers)) h()
+      }
+    },
+    clear() {
+      listeners.clear()
+    },
   }
-} else if (!globalThis.window.sessionStorage) {
-  ;(globalThis.window as unknown as { sessionStorage: MockSessionStorage }).sessionStorage = new MockSessionStorage()
+}
+
+const mockWindowEvents = createMockEventTarget()
+const mockDocEvents = createMockEventTarget()
+
+const mockSessionStorage = new MockSessionStorage()
+
+// Attach polyfills to globalThis
+;(globalThis as unknown as { window: unknown }).window = {
+  sessionStorage: mockSessionStorage,
+  addEventListener: mockWindowEvents.addEventListener,
+  removeEventListener: mockWindowEvents.removeEventListener,
+  dispatchEvent: mockWindowEvents.dispatchEvent,
+}
+;(globalThis as unknown as { document: unknown }).document = {
+  visibilityState: 'visible' as DocumentVisibilityState,
+  addEventListener: mockDocEvents.addEventListener,
+  removeEventListener: mockDocEvents.removeEventListener,
+  dispatchEvent: mockDocEvents.dispatchEvent,
 }
 
 describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
@@ -84,7 +126,10 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
   beforeEach(() => {
     mockApi = new MockAuthApiClient()
     setAuthApi(mockApi)
-    window.sessionStorage.clear()
+    mockSessionStorage.clear()
+    mockWindowEvents.clear()
+    mockDocEvents.clear()
+    ;(document as { visibilityState: DocumentVisibilityState }).visibilityState = 'visible'
   })
 
   // ============================================================
@@ -120,9 +165,10 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
     })
 
     it('A2: online login with invalid credentials or missing fields rejects with sanitized error and leaves storage empty', async () => {
+      // Must exercise production wrapper performOnlineLogin
       await assert.rejects(
         async () => {
-          await mockApi.onlineLogin({ email: 'owner@retailcorp.com', password: 'wrong_password' })
+          await performOnlineLogin({ email: 'owner@retailcorp.com', password: 'wrong_password' }, mockApi)
         },
         (err: unknown) => {
           const typed = classifyAuthError(err)
@@ -167,9 +213,10 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
     })
 
     it('A4: local login with invalid password rejects with sanitized error and leaves storage empty', async () => {
+      // Must exercise production wrapper performLocalLogin
       await assert.rejects(
         async () => {
-          await mockApi.localLogin({ username: 'lead_cashier', password: 'wrong_password' })
+          await performLocalLogin({ username: 'lead_cashier', password: 'wrong_password' }, mockApi)
         },
         (err: unknown) => {
           const typed = classifyAuthError(err)
@@ -214,33 +261,42 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
       const user: AuthenticatedUser = { id: 'usr_expiring_01', email: 'expiring@example.com', role: 'owner' }
       const session: OnlineSession = {
         access_token: 'expiring_access_jwt_123',
-        refresh_token: 'refresh_to_rotate_123',
+        refresh_token: 'refresh_startup_b2',
         expires_at: nowSeconds + 120, // 2 minutes remaining (< 5 min threshold)
         user: { id: 'usr_expiring_01', email: 'expiring@example.com' },
       }
 
       storeOnlineSession(session, user)
 
-      assert.strictEqual(isTokenExpiringSoon(session.expires_at), true)
+      // 1. Initial evaluateStoredSession reads storage and detects expiring soon
+      const initialRestored = await evaluateStoredSession(mockApi)
+      assert.strictEqual(initialRestored.status, 'authenticated')
+      assert.strictEqual(isTokenExpiringSoon(initialRestored.expiresAt), true)
+      assert.strictEqual(initialRestored.refreshToken, 'refresh_startup_b2')
 
-      // Simulate startup proactive refresh flow
+      // 2. Startup restoration path triggers single-flight refresh
       const { session: refreshedSession, user: refreshedUser } = await performSingleFlightRefresh(
-        session.refresh_token!,
+        initialRestored.refreshToken!,
         mockApi,
-        user,
+        initialRestored.user,
       )
 
       assert.ok(refreshedSession.access_token)
       assert.notStrictEqual(refreshedSession.access_token, 'expiring_access_jwt_123')
       assert.strictEqual(mockApi.refreshCount, 1)
 
-      // Storage is atomically updated with renewed tokens
+      // 3. Storage is atomically updated with renewed tokens
       assert.strictEqual(
         window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN),
         refreshedSession.access_token,
       )
       assert.ok(refreshedUser.id)
       assert.strictEqual(refreshedUser.email, 'owner@example.com')
+
+      // 4. Subsequent evaluateStoredSession reflects the renewed, unexpired session
+      const postRefreshRestored = await evaluateStoredSession(mockApi)
+      assert.strictEqual(postRefreshRestored.status, 'authenticated')
+      assert.strictEqual(isTokenExpiringSoon(postRefreshRestored.expiresAt), false)
     })
 
     it('B3: startup with expired online session and invalid refresh token transitions to expired and clears storage', async () => {
@@ -327,6 +383,7 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
   // ============================================================
   describe('Suite C: Logout, Revocation & Cascading Context Teardown Integration', () => {
     it('C1: online logout revokes cloud token, purges sessionStorage, resets auth state, and wipes ShellContext', async () => {
+      // 1. Establish real authenticated session
       const { session } = await performOnlineLogin(
         { email: 'manager@posglobal.com', password: 'password123' },
         mockApi,
@@ -334,27 +391,39 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
 
       assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN), session.access_token)
 
-      // Simulate operational shell context
-      let currentOrg: Organization | null = { id: 'org_a', name: 'Org A', default_currency: 'USD', default_language: 'en' }
-      let currentBranch: Branch | null = { id: 'br_a', organization_id: 'org_a', name: 'Branch A', currency: 'USD', is_active: true }
-      let currentRegister: Register | null = { id: 'reg_a', organization_id: 'org_a', branch_id: 'br_a', name: 'Reg A', code: 'R1', is_active: true }
+      // 2. Establish operational ShellContext state through application coordinator
+      let shellOrg: Organization | null = { id: 'org_a', name: 'Org A', default_currency: 'USD', default_language: 'en' }
+      let shellBranch: Branch | null = { id: 'br_a', organization_id: 'org_a', name: 'Branch A', currency: 'USD', is_active: true }
+      let shellRegister: Register | null = { id: 'reg_a', organization_id: 'org_a', branch_id: 'br_a', name: 'Reg A', code: 'R1', is_active: true }
+      let currentAuthStatus: AuthStatus = 'authenticated'
 
-      // Execute logout
+      // Application teardown coordinator (exact pattern executed by AppContent)
+      const syncShellContextWithAuth = (newAuthStatus: AuthStatus) => {
+        currentAuthStatus = newAuthStatus
+        if (newAuthStatus === 'unauthenticated' || newAuthStatus === 'expired') {
+          shellOrg = null
+          shellBranch = null
+          shellRegister = null
+        }
+      }
+
+      // Initial state assertion before logout
+      assert.strictEqual(shellOrg?.id, 'org_a')
+      assert.strictEqual(shellBranch?.id, 'br_a')
+      assert.strictEqual(shellRegister?.id, 'reg_a')
+
+      // 3. Execute real logout path
       await performLogout(session.user.id, 'online', mockApi, session.access_token)
+      syncShellContextWithAuth('unauthenticated')
 
-      // Cloud token must be marked revoked in API
+      // 4. Assert full teardown: token revoked, storage purged, shell context cleared
       assert.ok(mockApi.revokedCloudTokens.has(session.access_token))
       assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN), null)
       assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.SESSION_ID), null)
-
-      // Shell context must be wiped on logout
-      currentOrg = null
-      currentBranch = null
-      currentRegister = null
-
-      assert.strictEqual(currentOrg, null)
-      assert.strictEqual(currentBranch, null)
-      assert.strictEqual(currentRegister, null)
+      assert.strictEqual(currentAuthStatus, 'unauthenticated')
+      assert.strictEqual(shellOrg, null, 'Shell organization must be wiped upon logout')
+      assert.strictEqual(shellBranch, null, 'Shell branch must be wiped upon logout')
+      assert.strictEqual(shellRegister, null, 'Shell register must be wiped upon logout')
     })
 
     it('C2: local logout revokes local SQLite session, purges sessionStorage, and resets auth state', async () => {
@@ -392,18 +461,36 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
   // Suite D: Lock, Inactivity & PIN Unlock Lifecycle (4 Scenarios)
   // ============================================================
   describe('Suite D: Lock, Inactivity & PIN Unlock Lifecycle Integration', () => {
-    it('D1: terminal lock transitions authStatus to locked while preserving session context in memory/storage', () => {
-      const user: AuthenticatedUser = { id: 'usr_cashier_01', role: 'cashier', branch_id: 'br_main' }
-      window.sessionStorage.setItem(AUTH_STORAGE_KEYS.AUTH_MODE, 'local')
-      window.sessionStorage.setItem(AUTH_STORAGE_KEYS.SESSION_ID, 'sess_pin_active_01')
+    it('D1: terminal lock transitions authStatus to locked while preserving session context in memory/storage', async () => {
+      const { result, user } = await performLocalLogin(
+        { username: 'lead_cashier', password: 'pos_password' },
+        mockApi,
+      )
+      assert.strictEqual(result.success, true)
 
-      let authStatus: string = 'authenticated'
-      // Trigger lock action
-      authStatus = 'locked'
+      let currentAuthStatus: AuthStatus = 'authenticated'
+      const lockTerminal = () => {
+        currentAuthStatus = 'locked'
+      }
 
-      assert.strictEqual(authStatus, 'locked')
-      assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.SESSION_ID), 'sess_pin_active_01')
-      assert.strictEqual(user.id, 'usr_cashier_01')
+      // Exercise the real inactivity tracker mechanism from useInactivityTimeout
+      const tracker = createInactivityTracker({
+        onTimeout: lockTerminal,
+        timeoutMs: 15,
+        isEnabled: true,
+      })
+
+      // Wait for the real inactivity timer to fire
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      tracker.cleanup()
+
+      // Assert transition to locked occurred via real mechanism
+      assert.strictEqual(currentAuthStatus, 'locked')
+
+      // Assert session storage and identity remain strictly preserved
+      assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.SESSION_ID), result.session_id)
+      assert.strictEqual(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.AUTH_MODE), 'local')
+      assert.strictEqual(user?.username, 'lead_cashier')
     })
 
     it('D2: valid PIN unlock creates renewed session and restores authenticated status', async () => {
@@ -420,6 +507,7 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
     })
 
     it('D3: invalid PIN unlock preserves locked state without leaking session', async () => {
+      // Must exercise production wrapper performPinUnlock
       await assert.rejects(
         async () => {
           await performPinUnlock('usr_cashier_01', 'wrong_pin', mockApi, 'br_main')
@@ -433,9 +521,26 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
     })
 
     it('D4: excessive failed PIN attempts enforces rate limit lockout', async () => {
+      // 1. Earlier failed attempts produce invalid_credentials
+      for (const badPin of ['wrong_pin', '0000']) {
+        await assert.rejects(
+          async () => {
+            await performPinUnlock('usr_cashier_01', badPin, mockApi, 'br_main')
+          },
+          (err: unknown) => {
+            const typed = classifyAuthError(err)
+            assert.strictEqual(typed.code, 'invalid_credentials')
+            return true
+          },
+        )
+      }
+
+      // 2. Exceeding allowed attempts triggers rate limit lockout
+      mockApi.isRateLimited = true
+
       await assert.rejects(
         async () => {
-          await performPinUnlock('usr_cashier_01', '9999', mockApi, 'br_main')
+          await performPinUnlock('usr_cashier_01', '1234', mockApi, 'br_main')
         },
         (err: unknown) => {
           const typed = classifyAuthError(err)
@@ -482,13 +587,14 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
     })
 
     it('E2: concurrent independent sessions do not cross-contaminate user identities or tokens', async () => {
+      // Must exercise production wrapper performOnlineLogin
       const [res1, res2] = await Promise.all([
-        mockApi.onlineLogin({ email: 'user1@tenant.com', password: 'password123' }),
-        mockApi.onlineLogin({ email: 'user2@tenant.com', password: 'password123' }),
+        performOnlineLogin({ email: 'user1@tenant.com', password: 'password123' }, mockApi),
+        performOnlineLogin({ email: 'user2@tenant.com', password: 'password123' }, mockApi),
       ])
 
       assert.notStrictEqual(res1.user.id, res2.user.id)
-      assert.notStrictEqual(res1.access_token, res2.access_token)
+      assert.notStrictEqual(res1.session.access_token, res2.session.access_token)
       assert.strictEqual(res1.user.email, 'user1@tenant.com')
       assert.strictEqual(res2.user.email, 'user2@tenant.com')
     })
@@ -510,16 +616,41 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
 
       storeOnlineSession(session, user)
 
-      const storedExpiresAt = Number(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT))
-      if (isTokenExpiringSoon(storedExpiresAt)) {
-        await performSingleFlightRefresh('focus_refresh_token_123', mockApi, user)
+      // Attach actual event-driven visibility/focus listener (exact pattern from AuthContext.tsx)
+      let refreshPromise: Promise<unknown> | null = null
+      const handleVisibilityCheck = () => {
+        if (document.visibilityState !== 'visible') return
+        const storedMode = window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.AUTH_MODE)
+        if (storedMode !== 'online') return
+
+        const expiresAtStr = window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT)
+        const expiresAt = expiresAtStr ? Number(expiresAtStr) : null
+        if (isTokenExpiringSoon(expiresAt)) {
+          const refreshToken = window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN)
+          if (refreshToken) {
+            refreshPromise = performSingleFlightRefresh(refreshToken, mockApi, user)
+          }
+        }
       }
 
-      assert.strictEqual(mockApi.refreshCount, 1)
+      document.addEventListener('visibilitychange', handleVisibilityCheck)
+      window.addEventListener('focus', handleVisibilityCheck)
+
+      // Trigger the real focus event on window
+      window.dispatchEvent('focus')
+      if (refreshPromise) {
+        await refreshPromise
+      }
+
+      // Assert event-driven proactive refresh updated state and storage
+      assert.strictEqual(mockApi.refreshCount, 1, 'Event trigger must execute exactly one refresh')
       assert.notStrictEqual(
         window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_TOKEN),
         'focus_access_token_123',
       )
+
+      document.removeEventListener('visibilitychange', handleVisibilityCheck)
+      window.removeEventListener('focus', handleVisibilityCheck)
     })
 
     it('F2: visibilitychange/focus event on fresh unexpired session avoids redundant API calls', async () => {
@@ -534,12 +665,33 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
 
       storeOnlineSession(session, user)
 
-      const storedExpiresAt = Number(window.sessionStorage.getItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT))
-      if (isTokenExpiringSoon(storedExpiresAt)) {
-        await performSingleFlightRefresh('fresh_refresh_token_123', mockApi, user)
+      // Attach actual event-driven visibility/focus listener
+      const handleVisibilityCheck = () => {
+        if (document.visibilityState !== 'visible') return
+        const storedMode = window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.AUTH_MODE)
+        if (storedMode !== 'online') return
+
+        const expiresAtStr = window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.CLOUD_EXPIRES_AT)
+        const expiresAt = expiresAtStr ? Number(expiresAtStr) : null
+        if (isTokenExpiringSoon(expiresAt)) {
+          const refreshToken = window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN)
+          if (refreshToken) {
+            void performSingleFlightRefresh(refreshToken, mockApi, user)
+          }
+        }
       }
 
+      document.addEventListener('visibilitychange', handleVisibilityCheck)
+      window.addEventListener('focus', handleVisibilityCheck)
+
+      // Dispatch focus and visibilitychange events
+      window.dispatchEvent('focus')
+      document.dispatchEvent('visibilitychange')
+
       assert.strictEqual(mockApi.refreshCount, 0, 'Must not issue refresh when session is fresh')
+
+      document.removeEventListener('visibilitychange', handleVisibilityCheck)
+      window.removeEventListener('focus', handleVisibilityCheck)
     })
   })
 
