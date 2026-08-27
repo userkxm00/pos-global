@@ -6,6 +6,8 @@ mod auth_middleware_tests;
 mod auth_tests;
 #[path = "branch_tests.rs"]
 mod branch_tests;
+#[path = "cloud_schema_tests.rs"]
+mod cloud_schema_tests;
 #[path = "organization_tests.rs"]
 mod organization_tests;
 #[path = "permission_tests.rs"]
