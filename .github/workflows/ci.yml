@@ -108,10 +108,22 @@ jobs:
         env:
           PGPASSWORD: postgrespassword
         run: |
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/001_phase1_identity_and_rls.sql
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/002_organization_branch_member_schema.sql
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/rls_policies_test.sql
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/organization_branch_member_test.sql
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "
+            CREATE SCHEMA IF NOT EXISTS auth;
+            CREATE TABLE IF NOT EXISTS auth.users (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              email TEXT UNIQUE,
+              created_at TIMESTAMPTZ DEFAULT now()
+            );
+            CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID LANGUAGE sql STABLE AS \$\$
+              SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
+            \$\$;
+          "
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/001_phase1_identity_and_rls.sql
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/002_organization_branch_member_schema.sql
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/rls_policies_test.sql
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/organization_branch_member_test.sql
 
   foundation-validation:
     name: Foundation specification validation
