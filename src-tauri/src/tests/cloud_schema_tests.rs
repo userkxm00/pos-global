@@ -203,8 +203,16 @@ fn f1_20_migration_upgrades_sole_owner_trigger_to_cover_update_and_cascade() {
         "Expected cascade bypass when parent organization is deleted"
     );
     assert!(
-        sql.contains("OLD.role = 'owner' AND NEW.role <> 'owner'"),
-        "Expected role demotion check on UPDATE"
+        sql.contains(
+            "OLD.role = 'owner' AND (NEW.role <> 'owner' OR NEW.organization_id <> OLD.organization_id)"
+        ),
+        "Expected role demotion and transfer check on UPDATE"
+    );
+    assert!(
+        sql.contains(
+            "PERFORM 1 FROM public.organizations WHERE id = OLD.organization_id FOR NO KEY UPDATE;"
+        ),
+        "Expected row lock on organization to serialize concurrent owner mutations"
     );
     assert!(
         sql.contains("RETURN NEW;"),

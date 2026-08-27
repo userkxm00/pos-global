@@ -160,14 +160,16 @@ CREATE TRIGGER trg_updated_at_registers
     EXECUTE FUNCTION public.handle_updated_at();
 
 -- ============================================================
--- 5. Sole-Owner Mutation Guard (UPDATE + DELETE + Cascade Safety)
+-- 5. Sole-Owner Mutation Guard (UPDATE + DELETE + Concurrency + Cascade Safety)
 -- ============================================================
 
 -- Upgrades prevent_orphaned_organization to handle:
 -- 1. DELETE: prevents deleting the sole owner, while allowing ON DELETE CASCADE
 --    when the parent organization itself is being deleted.
--- 2. UPDATE: validates demotion (OLD.role = 'owner' AND NEW.role <> 'owner')
---    and returns NEW so updates/role changes are preserved.
+-- 2. UPDATE: validates demotion (NEW.role <> 'owner') or transfer (NEW.organization_id <> OLD.organization_id)
+--    and returns NEW so legitimate updates and role changes are preserved.
+-- 3. Concurrency: acquires row-level lock on the organization row before checking
+--    remaining owners to serialize concurrent owner removals.
 CREATE OR REPLACE FUNCTION public.prevent_orphaned_organization()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -178,12 +180,15 @@ DECLARE
     remaining_owners INTEGER;
 BEGIN
     IF TG_OP = 'DELETE' THEN
-        -- Allow cascade deletion when the parent organization itself is being deleted
+        -- Allow cascade deletion when the parent organization itself is deleted
         IF NOT EXISTS (SELECT 1 FROM public.organizations WHERE id = OLD.organization_id) THEN
             RETURN OLD;
         END IF;
 
         IF OLD.role = 'owner' THEN
+            -- Serialize concurrent owner removals via row-level lock on the organization
+            PERFORM 1 FROM public.organizations WHERE id = OLD.organization_id FOR NO KEY UPDATE;
+
             SELECT COUNT(*)
             INTO remaining_owners
             FROM public.organization_members om
@@ -197,8 +202,11 @@ BEGIN
         END IF;
         RETURN OLD;
     ELSIF TG_OP = 'UPDATE' THEN
-        -- Guard against demoting the sole remaining owner
-        IF OLD.role = 'owner' AND NEW.role <> 'owner' THEN
+        -- Guard against demoting or transferring the sole remaining owner away from OLD.organization_id
+        IF OLD.role = 'owner' AND (NEW.role <> 'owner' OR NEW.organization_id <> OLD.organization_id) THEN
+            -- Serialize concurrent owner removals via row-level lock on OLD.organization_id
+            PERFORM 1 FROM public.organizations WHERE id = OLD.organization_id FOR NO KEY UPDATE;
+
             SELECT COUNT(*)
             INTO remaining_owners
             FROM public.organization_members om
@@ -207,7 +215,7 @@ BEGIN
               AND om.id <> OLD.id;
 
             IF remaining_owners < 1 THEN
-                RAISE EXCEPTION 'Cannot demote the sole remaining owner of an organization';
+                RAISE EXCEPTION 'Cannot demote or transfer the sole remaining owner of an organization';
             END IF;
         END IF;
         RETURN NEW;
