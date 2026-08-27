@@ -74,11 +74,11 @@ fn f1_20_migration_uses_correct_currency_regex() {
     let sql = normalize_whitespace(SCHEMA_MIGRATION_SQL);
     assert!(
         sql.contains("'^[A-Z]{3}$'"),
-        "Expected correct ISO 4217 currency regex '^[A-Z]{3}$' (without trailing asterisk)"
+        "Expected correct ISO 4217 currency regex '^[A-Z]{{3}}$' (without trailing asterisk)"
     );
     assert!(
         !sql.contains("'^[A-Z]{3}$*'"),
-        "MUST NOT contain incorrect regex '^[A-Z]{3}$*' with trailing asterisk"
+        "MUST NOT contain incorrect regex '^[A-Z]{{3}}$*' with trailing asterisk"
     );
 }
 

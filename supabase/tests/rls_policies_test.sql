@@ -277,7 +277,8 @@ BEGIN
         RAISE EXCEPTION 'RLS FAIL: Co-owner should be permitted to leave when another owner remains (deleted % rows)', deleted_cnt;
     END IF;
 
-    -- Primary owner A must still be present
+    -- Primary owner A must still be present (verify as table owner / superuser)
+    RESET ROLE;
     IF NOT EXISTS (
         SELECT 1 FROM public.organization_members
         WHERE organization_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
