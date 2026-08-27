@@ -288,15 +288,17 @@ DECLARE
     t_before TIMESTAMPTZ;
     t_after TIMESTAMPTZ;
 BEGIN
-    -- Explicitly age device_last_seen_at before testing heartbeat update in transaction
+    -- now() is the transaction timestamp and does not advance in this test
+    -- transaction, so age the row as table owner before the heartbeat call.
+    RESET ROLE;
     UPDATE public.registers
     SET device_last_seen_at = now() - INTERVAL '1 hour'
     WHERE id = reg_id;
 
-    SELECT device_last_seen_at INTO t_before FROM public.registers WHERE id = reg_id;
-
     SET LOCAL ROLE authenticated;
     PERFORM set_config('request.jwt.claim.sub', cashier_a::text, true);
+
+    SELECT device_last_seen_at INTO t_before FROM public.registers WHERE id = reg_id;
 
     PERFORM public.record_device_heartbeat(reg_id, 'hw-new-terminal-01');
 

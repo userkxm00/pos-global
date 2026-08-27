@@ -181,7 +181,9 @@ BEGIN
     END IF;
 
     -- Verify exact device identifier matches
-    IF v_reg.device_identifier IS NULL OR v_reg.device_identifier <> v_trimmed_device THEN
+    IF v_trimmed_device IS NULL
+       OR v_reg.device_identifier IS NULL
+       OR v_reg.device_identifier <> v_trimmed_device THEN
         RAISE EXCEPTION 'Mismatched device identifier for register' USING ERRCODE = '42501';
     END IF;
 

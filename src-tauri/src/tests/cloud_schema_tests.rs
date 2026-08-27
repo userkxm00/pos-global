@@ -738,8 +738,26 @@ fn f1_23_test_suite_covers_all_seventeen_scenarios() {
 #[test]
 fn f1_23_migration_uses_row_locking_for_device_operations() {
     let sql = normalize_whitespace(PRIVILEGED_FUNCTIONS_MIGRATION_SQL);
+
+    // Verify pair_device_to_register independently
+    let pair_fn = sql
+        .split("FUNCTION public.pair_device_to_register")
+        .nth(1)
+        .and_then(|s| s.split("FUNCTION public.revoke_device_pairing").next())
+        .expect("Expected pair_device_to_register definition in migration 004");
     assert!(
-        sql.contains("WHERE id = p_register_id FOR UPDATE;"),
-        "Pair and revoke device functions must lock target register with FOR UPDATE to prevent TOCTOU races"
+        pair_fn.contains("WHERE id = p_register_id FOR UPDATE;"),
+        "pair_device_to_register must lock target register with FOR UPDATE to prevent TOCTOU races"
+    );
+
+    // Verify revoke_device_pairing independently
+    let revoke_fn = sql
+        .split("FUNCTION public.revoke_device_pairing")
+        .nth(1)
+        .and_then(|s| s.split("FUNCTION public.record_device_heartbeat").next())
+        .expect("Expected revoke_device_pairing definition in migration 004");
+    assert!(
+        revoke_fn.contains("WHERE id = p_register_id FOR UPDATE;"),
+        "revoke_device_pairing must lock target register with FOR UPDATE to prevent TOCTOU races"
     );
 }
