@@ -40,12 +40,11 @@ export function getDefaultSupabaseConfig(): SupabaseAuthConfig {
 }
 
 export function stripTrailingSlash(url: string): string {
-  const trimmed = url.trim()
-  let end = trimmed.length
-  while (end > 0 && trimmed.charCodeAt(end - 1) === 47) {
-    end--
+  let trimmed = url.trim()
+  while (trimmed.endsWith('/')) {
+    trimmed = trimmed.slice(0, -1)
   }
-  return trimmed.slice(0, end)
+  return trimmed
 }
 
 export const VALID_AUTH_ERROR_CODES = new Set<AuthErrorCode>([
