@@ -136,6 +136,7 @@ jobs:
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/rls_policies_test.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/organization_branch_member_test.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/device_register_identity_test.sql
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/rls_tenant_isolation_test.sql
 
   foundation-validation:
     name: Foundation specification validation
