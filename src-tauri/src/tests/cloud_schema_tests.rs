@@ -573,15 +573,15 @@ fn f1_22_test_suite_covers_cross_tenant_write_isolation() {
         "Expected test assertion for cross-tenant write and mutation isolation"
     );
     assert!(
-        sql.contains("Admin A inserted branch into Org B"),
+        sql.contains("Cross-tenant branch insert correctly denied by RLS policy"),
         "Expected test assertion blocking cross-tenant branch insert"
     );
     assert!(
-        sql.contains("Manager A inserted register into Org B"),
+        sql.contains("Cross-tenant register insert correctly denied by RLS policy"),
         "Expected test assertion blocking cross-tenant register insert"
     );
     assert!(
-        sql.contains("Admin A inserted user into Org B"),
+        sql.contains("Cross-tenant user insert correctly denied by RLS policy"),
         "Expected test assertion blocking cross-tenant user insert"
     );
     assert!(
@@ -598,19 +598,19 @@ fn f1_22_test_suite_covers_intra_tenant_role_hierarchy() {
         "Expected test assertion for intra-tenant role hierarchy and boundaries"
     );
     assert!(
-        sql.contains("Cashier created branch"),
+        sql.contains("Cashier branch creation correctly denied by RLS policy"),
         "Expected test assertion blocking cashier branch creation"
     );
     assert!(
-        sql.contains("Cashier created register"),
+        sql.contains("Cashier register creation correctly denied by RLS policy"),
         "Expected test assertion blocking cashier register creation"
     );
     assert!(
-        sql.contains("Cashier created user"),
+        sql.contains("Cashier user creation correctly denied by RLS policy"),
         "Expected test assertion blocking cashier user creation"
     );
     assert!(
-        sql.contains("Manager created branch"),
+        sql.contains("Manager branch creation correctly denied by RLS policy"),
         "Expected test assertion blocking manager branch creation"
     );
     assert!(
