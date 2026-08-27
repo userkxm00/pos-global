@@ -10,33 +10,33 @@
 -- 1. Composite Foreign Key — Tenant Boundary Integrity
 -- ============================================================
 
--- Enable composite FK targets: branches must be uniquely identifiable
--- by (organization_id, id) to serve as a composite FK reference.
-ALTER TABLE public.branches
-    DROP CONSTRAINT IF EXISTS uq_branches_org_id;
-
-ALTER TABLE public.branches
-    ADD CONSTRAINT uq_branches_org_id UNIQUE (organization_id, id);
-
--- users: organization_id + branch_id must reference the same org in branches.
+-- Step 1a: Drop any existing simple or composite FKs on child tables
+-- that reference branches, so uq_branches_org_id can be safely recreated on re-runs.
 ALTER TABLE public.users
     DROP CONSTRAINT IF EXISTS users_branch_id_fkey;
 
 ALTER TABLE public.users
     DROP CONSTRAINT IF EXISTS fk_users_branch_org;
 
-ALTER TABLE public.users
-    ADD CONSTRAINT fk_users_branch_org
-    FOREIGN KEY (organization_id, branch_id)
-    REFERENCES public.branches(organization_id, id)
-    ON DELETE CASCADE;
-
--- registers: organization_id + branch_id must reference the same org in branches.
 ALTER TABLE public.registers
     DROP CONSTRAINT IF EXISTS registers_branch_id_fkey;
 
 ALTER TABLE public.registers
     DROP CONSTRAINT IF EXISTS fk_registers_branch_org;
+
+-- Step 1b: Now that no child FKs depend on uq_branches_org_id, drop and recreate it.
+ALTER TABLE public.branches
+    DROP CONSTRAINT IF EXISTS uq_branches_org_id;
+
+ALTER TABLE public.branches
+    ADD CONSTRAINT uq_branches_org_id UNIQUE (organization_id, id);
+
+-- Step 1c: Recreate composite FKs on child tables referencing branches(organization_id, id).
+ALTER TABLE public.users
+    ADD CONSTRAINT fk_users_branch_org
+    FOREIGN KEY (organization_id, branch_id)
+    REFERENCES public.branches(organization_id, id)
+    ON DELETE CASCADE;
 
 ALTER TABLE public.registers
     ADD CONSTRAINT fk_registers_branch_org
