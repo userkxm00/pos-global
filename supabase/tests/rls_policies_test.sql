@@ -34,6 +34,7 @@ $$;
 -- Grant permissions to test roles
 GRANT USAGE ON SCHEMA public, auth TO authenticated, anon;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth TO authenticated, anon;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public, auth TO authenticated, anon;
 
