@@ -635,7 +635,8 @@ fn f1_22_test_suite_covers_global_catalog_access() {
         "Expected test assertion verifying authenticated access to permissions"
     );
     assert!(
-        sql.contains("Anon role saw") && sql.contains("permissions"),
-        "Expected test assertion blocking anonymous access to permissions"
+        sql.contains("Anon role saw % permissions")
+            && sql.contains("Anon role saw % role_permissions"),
+        "Expected test assertion specifically blocking anonymous access to both permissions and role_permissions"
     );
 }

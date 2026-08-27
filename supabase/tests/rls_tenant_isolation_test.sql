@@ -230,7 +230,6 @@ DECLARE
 
     perm_id UUID;
     mutated_cnt INTEGER := 0;
-    blocked BOOLEAN := false;
 BEGIN
     SET LOCAL ROLE authenticated;
     PERFORM set_config('request.jwt.claim.sub', admin_a::text, true);
@@ -239,14 +238,12 @@ BEGIN
     BEGIN
         INSERT INTO public.branches (id, organization_id, name, currency)
         VALUES ('f1220099-bbbb-bbbb-bbbb-000000000001', org_b, 'Rogue Branch in B', 'EUR');
-    EXCEPTION WHEN OTHERS THEN
-        blocked := true;
+        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Admin A was permitted to insert branch into Org B' USING ERRCODE = 'TF001';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS: Cross-tenant branch insert correctly denied by RLS policy';
     END;
-    IF NOT blocked THEN
-        IF EXISTS (SELECT 1 FROM public.branches WHERE id = 'f1220099-bbbb-bbbb-bbbb-000000000001') THEN
-            RAISE EXCEPTION 'RLS SECURITY VIOLATION: Admin A inserted branch into Org B';
-        END IF;
-    END IF;
 
     -- 2. Cross-Tenant Branch UPDATE: Admin A attempting to update branch in Org B
     UPDATE public.branches SET name = 'Attacked Branch B' WHERE id = branch_b;
@@ -264,18 +261,15 @@ BEGIN
 
     -- 4. Cross-Tenant Register INSERT: Manager A attempting to insert register in Org B
     PERFORM set_config('request.jwt.claim.sub', manager_a::text, true);
-    blocked := false;
     BEGIN
         INSERT INTO public.registers (id, organization_id, branch_id, name, code)
         VALUES ('f1220099-bbbb-bbbb-bbbb-000000000002', org_b, branch_b, 'Rogue Reg in B', 'RREG-B');
-    EXCEPTION WHEN OTHERS THEN
-        blocked := true;
+        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Manager A was permitted to insert register into Org B' USING ERRCODE = 'TF001';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS: Cross-tenant register insert correctly denied by RLS policy';
     END;
-    IF NOT blocked THEN
-        IF EXISTS (SELECT 1 FROM public.registers WHERE id = 'f1220099-bbbb-bbbb-bbbb-000000000002') THEN
-            RAISE EXCEPTION 'RLS SECURITY VIOLATION: Manager A inserted register into Org B';
-        END IF;
-    END IF;
 
     -- 5. Cross-Tenant Register UPDATE / Device Mutation: Manager A attempting to mutate register in Org B
     UPDATE public.registers SET name = 'Attacked Reg B', device_pairing_status = 'revoked' WHERE id = reg_b;
@@ -292,19 +286,16 @@ BEGIN
         RAISE EXCEPTION 'RLS SECURITY VIOLATION: Admin A deleted % register rows in Org B', mutated_cnt;
     END IF;
 
-    -- 7. Cross-Tenant User INSERT: Admin A attempting to insert user in Org B
-    blocked := false;
+    -- 7. Cross-Tenant User INSERT: Admin A attempting to insert user in Org B (with valid supabase_user_id)
     BEGIN
-        INSERT INTO public.users (id, organization_id, branch_id, full_name, username, role)
-        VALUES ('f1220099-bbbb-bbbb-bbbb-000000000003', org_b, branch_b, 'Rogue User B', 'rogue_b', 'cashier');
-    EXCEPTION WHEN OTHERS THEN
-        blocked := true;
+        INSERT INTO public.users (id, organization_id, branch_id, supabase_user_id, full_name, username, role)
+        VALUES ('f1220099-bbbb-bbbb-bbbb-000000000003', org_b, branch_b, admin_a, 'Rogue User B', 'rogue_b', 'cashier');
+        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Admin A was permitted to insert user into Org B' USING ERRCODE = 'TF001';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS: Cross-tenant user insert correctly denied by RLS policy';
     END;
-    IF NOT blocked THEN
-        IF EXISTS (SELECT 1 FROM public.users WHERE id = 'f1220099-bbbb-bbbb-bbbb-000000000003') THEN
-            RAISE EXCEPTION 'RLS SECURITY VIOLATION: Admin A inserted user into Org B';
-        END IF;
-    END IF;
 
     -- 8. Cross-Tenant User UPDATE: Admin A attempting to update user in Org B
     UPDATE public.users SET full_name = 'Attacked User B' WHERE id = user_b_id;
@@ -351,46 +342,48 @@ DECLARE
 
     perm_id UUID;
     mutated_cnt INTEGER := 0;
-    blocked BOOLEAN := false;
 BEGIN
     -- 1. Cashier Role Boundaries:
     SET LOCAL ROLE authenticated;
     PERFORM set_config('request.jwt.claim.sub', cashier_a::text, true);
 
     -- Cashier cannot insert branches
-    blocked := false;
     BEGIN
         INSERT INTO public.branches (id, organization_id, name, currency)
         VALUES ('f1220099-aaaa-aaaa-aaaa-000000000001', org_a, 'Cashier Branch', 'USD');
-    EXCEPTION WHEN OTHERS THEN blocked := true; END;
-    IF NOT blocked AND EXISTS (SELECT 1 FROM public.branches WHERE id = 'f1220099-aaaa-aaaa-aaaa-000000000001') THEN
-        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Cashier created branch';
-    END IF;
+        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Cashier was permitted to create branch' USING ERRCODE = 'TF001';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS: Cashier branch creation correctly denied by RLS policy';
+    END;
 
     -- Cashier cannot insert registers
-    blocked := false;
     BEGIN
         INSERT INTO public.registers (id, organization_id, branch_id, name, code)
         VALUES ('f1220099-aaaa-aaaa-aaaa-000000000002', org_a, branch_a, 'Cashier Reg', 'CREG-1');
-    EXCEPTION WHEN OTHERS THEN blocked := true; END;
-    IF NOT blocked AND EXISTS (SELECT 1 FROM public.registers WHERE id = 'f1220099-aaaa-aaaa-aaaa-000000000002') THEN
-        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Cashier created register';
-    END IF;
+        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Cashier was permitted to create register' USING ERRCODE = 'TF001';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS: Cashier register creation correctly denied by RLS policy';
+    END;
 
     -- Cashier cannot update register / device pairing
     UPDATE public.registers SET device_pairing_status = 'revoked' WHERE id = reg_a;
     GET DIAGNOSTICS mutated_cnt = ROW_COUNT;
     IF mutated_cnt > 0 THEN RAISE EXCEPTION 'RLS SECURITY VIOLATION: Cashier updated register'; END IF;
 
-    -- Cashier cannot insert users
-    blocked := false;
+    -- Cashier cannot insert users (with valid supabase_user_id)
     BEGIN
-        INSERT INTO public.users (id, organization_id, branch_id, full_name, username, role)
-        VALUES ('f1220099-aaaa-aaaa-aaaa-000000000003', org_a, branch_a, 'Cashier User', 'c_user', 'cashier');
-    EXCEPTION WHEN OTHERS THEN blocked := true; END;
-    IF NOT blocked AND EXISTS (SELECT 1 FROM public.users WHERE id = 'f1220099-aaaa-aaaa-aaaa-000000000003') THEN
-        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Cashier created user';
-    END IF;
+        INSERT INTO public.users (id, organization_id, branch_id, supabase_user_id, full_name, username, role)
+        VALUES ('f1220099-aaaa-aaaa-aaaa-000000000003', org_a, branch_a, cashier_a, 'Cashier User', 'c_user', 'cashier');
+        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Cashier was permitted to create user' USING ERRCODE = 'TF001';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS: Cashier user creation correctly denied by RLS policy';
+    END;
 
     -- Cashier cannot mutate user_permissions
     SELECT id INTO perm_id FROM public.permissions WHERE code = 'sales.create' LIMIT 1;
@@ -404,19 +397,23 @@ BEGIN
     PERFORM set_config('request.jwt.claim.sub', manager_a::text, true);
 
     -- Manager cannot insert branches
-    blocked := false;
     BEGIN
         INSERT INTO public.branches (id, organization_id, name, currency)
         VALUES ('f1220099-aaaa-aaaa-aaaa-000000000004', org_a, 'Manager Branch', 'USD');
-    EXCEPTION WHEN OTHERS THEN blocked := true; END;
-    IF NOT blocked AND EXISTS (SELECT 1 FROM public.branches WHERE id = 'f1220099-aaaa-aaaa-aaaa-000000000004') THEN
-        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Manager created branch';
-    END IF;
+        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Manager was permitted to create branch' USING ERRCODE = 'TF001';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS: Manager branch creation correctly denied by RLS policy';
+    END;
 
-    -- Manager CAN insert registers in own branch
+    -- Manager CAN insert registers in own branch (explicitly verified)
     INSERT INTO public.registers (id, organization_id, branch_id, name, code)
-    VALUES ('f1220099-aaaa-aaaa-aaaa-000000000005', org_a, branch_a, 'Manager Reg', 'MREG-1')
-    ON CONFLICT (branch_id, code) DO NOTHING;
+    VALUES ('f1220099-aaaa-aaaa-aaaa-000000000005', org_a, branch_a, 'Manager Reg', 'MREG-1');
+    GET DIAGNOSTICS mutated_cnt = ROW_COUNT;
+    IF mutated_cnt <> 1 THEN
+        RAISE EXCEPTION 'RLS FAIL: Manager was unable to insert register in own branch (inserted % rows)', mutated_cnt;
+    END IF;
 
     -- Manager CANNOT delete registers
     DELETE FROM public.registers WHERE id = 'f1220099-aaaa-aaaa-aaaa-000000000005';
@@ -426,7 +423,7 @@ BEGIN
     -- 3. Admin Role Boundaries:
     PERFORM set_config('request.jwt.claim.sub', admin_a::text, true);
 
-    -- Admin CAN delete register
+    -- Admin CAN delete register created by Manager
     DELETE FROM public.registers WHERE id = 'f1220099-aaaa-aaaa-aaaa-000000000005';
     GET DIAGNOSTICS mutated_cnt = ROW_COUNT;
     IF mutated_cnt <> 1 THEN RAISE EXCEPTION 'RLS FAIL: Admin was unable to delete register'; END IF;
