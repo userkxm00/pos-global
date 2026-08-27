@@ -14,6 +14,8 @@ const DEVICE_REGISTER_MIGRATION_SQL: &str =
     include_str!("../../../supabase/migrations/003_device_register_cloud_identity.sql");
 const DEVICE_REGISTER_TEST_SQL: &str =
     include_str!("../../../supabase/tests/device_register_identity_test.sql");
+const RLS_TENANT_ISOLATION_TEST_SQL: &str =
+    include_str!("../../../supabase/tests/rls_tenant_isolation_test.sql");
 
 fn normalize_whitespace(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -531,5 +533,110 @@ fn f1_21_test_suite_covers_composite_fk_and_cascade() {
     assert!(
         sql.contains("updated_at trigger correctly advances on register UPDATE"),
         "Expected test assertion for updated_at trigger behavior on registers"
+    );
+}
+
+// ============================================================
+// F1.22 — RLS Tenant Isolation Verification Assertions
+// ============================================================
+
+#[test]
+fn f1_22_test_suite_covers_cross_tenant_read_isolation() {
+    let sql = normalize_whitespace(RLS_TENANT_ISOLATION_TEST_SQL);
+    assert!(
+        sql.contains("Cross-tenant and unauthenticated read isolation verified across all tables"),
+        "Expected test assertion for cross-tenant and unauthenticated read isolation"
+    );
+    assert!(
+        sql.contains("Owner A saw Org B"),
+        "Expected test assertion preventing owner from seeing other org"
+    );
+    assert!(
+        sql.contains("Cashier A saw Org B"),
+        "Expected test assertion preventing cashier from seeing other org"
+    );
+    assert!(
+        sql.contains("Unaffiliated user saw"),
+        "Expected test assertion preventing unaffiliated user from seeing tenant data"
+    );
+    assert!(
+        sql.contains("Anon role saw"),
+        "Expected test assertion preventing anonymous caller from seeing tenant data"
+    );
+}
+
+#[test]
+fn f1_22_test_suite_covers_cross_tenant_write_isolation() {
+    let sql = normalize_whitespace(RLS_TENANT_ISOLATION_TEST_SQL);
+    assert!(
+        sql.contains("Cross-tenant write and mutation isolation verified across all resources"),
+        "Expected test assertion for cross-tenant write and mutation isolation"
+    );
+    assert!(
+        sql.contains("Cross-tenant branch insert correctly denied by RLS policy"),
+        "Expected test assertion blocking cross-tenant branch insert"
+    );
+    assert!(
+        sql.contains("Cross-tenant register insert correctly denied by RLS policy"),
+        "Expected test assertion blocking cross-tenant register insert"
+    );
+    assert!(
+        sql.contains("Cross-tenant user insert correctly denied by RLS policy"),
+        "Expected test assertion blocking cross-tenant user insert"
+    );
+    assert!(
+        sql.contains("Admin A mutated") && sql.contains("user_permission rows in Org B"),
+        "Expected test assertion blocking cross-tenant user_permission mutation"
+    );
+}
+
+#[test]
+fn f1_22_test_suite_covers_intra_tenant_role_hierarchy() {
+    let sql = normalize_whitespace(RLS_TENANT_ISOLATION_TEST_SQL);
+    assert!(
+        sql.contains("Intra-tenant role hierarchy and privilege boundaries verified"),
+        "Expected test assertion for intra-tenant role hierarchy and boundaries"
+    );
+    assert!(
+        sql.contains("Cashier branch creation correctly denied by RLS policy"),
+        "Expected test assertion blocking cashier branch creation"
+    );
+    assert!(
+        sql.contains("Cashier register creation correctly denied by RLS policy"),
+        "Expected test assertion blocking cashier register creation"
+    );
+    assert!(
+        sql.contains("Cashier user creation correctly denied by RLS policy"),
+        "Expected test assertion blocking cashier user creation"
+    );
+    assert!(
+        sql.contains("Manager branch creation correctly denied by RLS policy"),
+        "Expected test assertion blocking manager branch creation"
+    );
+    assert!(
+        sql.contains("Manager deleted register"),
+        "Expected test assertion blocking manager register deletion"
+    );
+    assert!(
+        sql.contains("Admin deleted organization"),
+        "Expected test assertion blocking admin organization deletion"
+    );
+}
+
+#[test]
+fn f1_22_test_suite_covers_global_catalog_access() {
+    let sql = normalize_whitespace(RLS_TENANT_ISOLATION_TEST_SQL);
+    assert!(
+        sql.contains("Global catalog access policies verified"),
+        "Expected test assertion for global catalog access policies"
+    );
+    assert!(
+        sql.contains("Authenticated user cannot read permissions catalog"),
+        "Expected test assertion verifying authenticated access to permissions"
+    );
+    assert!(
+        sql.contains("Anon role saw % permissions")
+            && sql.contains("Anon role saw % role_permissions"),
+        "Expected test assertion specifically blocking anonymous access to both permissions and role_permissions"
     );
 }
