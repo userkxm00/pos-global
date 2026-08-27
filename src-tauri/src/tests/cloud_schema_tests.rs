@@ -388,24 +388,29 @@ fn f1_21_migration_defines_device_identity_columns() {
 fn f1_21_migration_defines_register_domain_check_constraints() {
     let sql = normalize_whitespace(DEVICE_REGISTER_MIGRATION_SQL);
     assert!(
-        sql.contains("chk_registers_name"),
-        "Expected check constraint chk_registers_name on registers"
+        sql.contains("chk_registers_name")
+            && sql.contains("VALIDATE CONSTRAINT chk_registers_name;"),
+        "Expected check constraint chk_registers_name and validation on registers"
     );
     assert!(
-        sql.contains("chk_registers_code"),
-        "Expected check constraint chk_registers_code on registers"
+        sql.contains("chk_registers_code")
+            && sql.contains("VALIDATE CONSTRAINT chk_registers_code;"),
+        "Expected check constraint chk_registers_code and validation on registers"
     );
     assert!(
-        sql.contains("chk_registers_device_identifier"),
-        "Expected check constraint chk_registers_device_identifier on registers"
+        sql.contains("chk_registers_device_identifier")
+            && sql.contains("VALIDATE CONSTRAINT chk_registers_device_identifier;"),
+        "Expected check constraint chk_registers_device_identifier and validation on registers"
     );
     assert!(
-        sql.contains("chk_registers_pairing_status"),
-        "Expected check constraint chk_registers_pairing_status on registers"
+        sql.contains("chk_registers_pairing_status")
+            && sql.contains("VALIDATE CONSTRAINT chk_registers_pairing_status;"),
+        "Expected check constraint chk_registers_pairing_status and validation on registers"
     );
     assert!(
-        sql.contains("chk_registers_pairing_coherence"),
-        "Expected check constraint chk_registers_pairing_coherence on registers"
+        sql.contains("chk_registers_pairing_coherence")
+            && sql.contains("VALIDATE CONSTRAINT chk_registers_pairing_coherence;"),
+        "Expected check constraint chk_registers_pairing_coherence and validation on registers"
     );
 }
 
@@ -413,8 +418,8 @@ fn f1_21_migration_defines_register_domain_check_constraints() {
 fn f1_21_migration_defines_device_uniqueness_indexes() {
     let sql = normalize_whitespace(DEVICE_REGISTER_MIGRATION_SQL);
     assert!(
-        sql.contains("CREATE UNIQUE INDEX uq_registers_org_device ON public.registers (organization_id, device_identifier) WHERE device_identifier IS NOT NULL AND device_pairing_status = 'paired';"),
-        "Expected tenant-scoped active device unique index uq_registers_org_device"
+        sql.contains("DROP INDEX IF EXISTS public.uq_registers_org_device;"),
+        "Expected cleanup of redundant tenant-scoped unique index uq_registers_org_device"
     );
     assert!(
         sql.contains("CREATE UNIQUE INDEX uq_registers_global_active_device ON public.registers (device_identifier) WHERE device_identifier IS NOT NULL AND device_pairing_status = 'paired';"),

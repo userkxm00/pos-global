@@ -33,7 +33,11 @@ ALTER TABLE public.registers
 
 ALTER TABLE public.registers
     ADD CONSTRAINT chk_registers_name
-    CHECK (length(trim(name)) > 0 AND length(name) <= 255);
+    CHECK (length(trim(name)) > 0 AND length(name) <= 255)
+    NOT VALID;
+
+ALTER TABLE public.registers
+    VALIDATE CONSTRAINT chk_registers_name;
 
 -- Code validation: non-empty, alphanumeric with dashes/underscores/dots, 1-50 characters
 ALTER TABLE public.registers
@@ -41,7 +45,11 @@ ALTER TABLE public.registers
 
 ALTER TABLE public.registers
     ADD CONSTRAINT chk_registers_code
-    CHECK (length(trim(code)) > 0 AND length(code) <= 50 AND code ~ '^[a-zA-Z0-9_.-]+$');
+    CHECK (length(trim(code)) > 0 AND length(code) <= 50 AND code ~ '^[a-zA-Z0-9_.-]+$')
+    NOT VALID;
+
+ALTER TABLE public.registers
+    VALIDATE CONSTRAINT chk_registers_code;
 
 -- Device Identifier validation: optional, 3-128 characters, alphanumeric with safe delimiters
 ALTER TABLE public.registers
@@ -52,7 +60,11 @@ ALTER TABLE public.registers
     CHECK (device_identifier IS NULL
            OR (length(trim(device_identifier)) >= 3
                AND length(device_identifier) <= 128
-               AND device_identifier ~ '^[a-zA-Z0-9_.:-]+$'));
+               AND device_identifier ~ '^[a-zA-Z0-9_.:-]+$'))
+    NOT VALID;
+
+ALTER TABLE public.registers
+    VALIDATE CONSTRAINT chk_registers_device_identifier;
 
 -- Device Pairing Status validation: finite state machine domain
 ALTER TABLE public.registers
@@ -60,7 +72,11 @@ ALTER TABLE public.registers
 
 ALTER TABLE public.registers
     ADD CONSTRAINT chk_registers_pairing_status
-    CHECK (device_pairing_status IN ('unpaired', 'paired', 'revoked'));
+    CHECK (device_pairing_status IN ('unpaired', 'paired', 'revoked'))
+    NOT VALID;
+
+ALTER TABLE public.registers
+    VALIDATE CONSTRAINT chk_registers_pairing_status;
 
 -- Pairing Coherence validation:
 -- - 'paired' requires a non-null device_identifier
@@ -75,20 +91,20 @@ ALTER TABLE public.registers
         (device_pairing_status = 'paired' AND device_identifier IS NOT NULL)
         OR (device_pairing_status = 'unpaired' AND device_identifier IS NULL)
         OR (device_pairing_status = 'revoked')
-    );
+    )
+    NOT VALID;
+
+ALTER TABLE public.registers
+    VALIDATE CONSTRAINT chk_registers_pairing_coherence;
 
 -- ============================================================
 -- 3. Device Identity Uniqueness Rules
 -- ============================================================
 
--- A physical device cannot be paired to multiple registers in the same organization simultaneously
+-- Clean up any previous tenant-scoped unique index (superseded by global active device uniqueness)
 DROP INDEX IF EXISTS public.uq_registers_org_device;
 
-CREATE UNIQUE INDEX uq_registers_org_device
-    ON public.registers (organization_id, device_identifier)
-    WHERE device_identifier IS NOT NULL AND device_pairing_status = 'paired';
-
--- A physical device cannot be actively paired across different organizations simultaneously
+-- A physical device cannot be actively paired across multiple registers or organizations simultaneously
 DROP INDEX IF EXISTS public.uq_registers_global_active_device;
 
 CREATE UNIQUE INDEX uq_registers_global_active_device
