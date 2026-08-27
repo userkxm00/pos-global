@@ -10,6 +10,10 @@ const SCHEMA_MIGRATION_SQL: &str =
     include_str!("../../../supabase/migrations/002_organization_branch_member_schema.sql");
 const SCHEMA_TEST_SQL: &str =
     include_str!("../../../supabase/tests/organization_branch_member_test.sql");
+const DEVICE_REGISTER_MIGRATION_SQL: &str =
+    include_str!("../../../supabase/migrations/003_device_register_cloud_identity.sql");
+const DEVICE_REGISTER_TEST_SQL: &str =
+    include_str!("../../../supabase/tests/device_register_identity_test.sql");
 
 fn normalize_whitespace(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -350,5 +354,182 @@ fn f1_20_test_suite_covers_cascade_deletion() {
             "Organization deletion correctly cascades to branches, members, users, and registers"
         ),
         "Expected test assertion for complete cascading organization deletion"
+    );
+}
+
+// ============================================================
+// F1.21 — Device / Register Cloud Identity Migration Assertions
+// ============================================================
+
+#[test]
+fn f1_21_migration_defines_device_identity_columns() {
+    let sql = normalize_whitespace(DEVICE_REGISTER_MIGRATION_SQL);
+    assert!(
+        sql.contains("ADD COLUMN IF NOT EXISTS device_identifier TEXT;"),
+        "Expected device_identifier column on registers"
+    );
+    assert!(
+        sql.contains(
+            "ADD COLUMN IF NOT EXISTS device_pairing_status TEXT NOT NULL DEFAULT 'unpaired';"
+        ),
+        "Expected device_pairing_status column on registers"
+    );
+    assert!(
+        sql.contains("ADD COLUMN IF NOT EXISTS device_paired_at TIMESTAMPTZ;"),
+        "Expected device_paired_at column on registers"
+    );
+    assert!(
+        sql.contains("ADD COLUMN IF NOT EXISTS device_last_seen_at TIMESTAMPTZ;"),
+        "Expected device_last_seen_at column on registers"
+    );
+}
+
+#[test]
+fn f1_21_migration_defines_register_domain_check_constraints() {
+    let sql = normalize_whitespace(DEVICE_REGISTER_MIGRATION_SQL);
+    assert!(
+        sql.contains("chk_registers_name")
+            && sql.contains("VALIDATE CONSTRAINT chk_registers_name;"),
+        "Expected check constraint chk_registers_name and validation on registers"
+    );
+    assert!(
+        sql.contains("chk_registers_code")
+            && sql.contains("VALIDATE CONSTRAINT chk_registers_code;"),
+        "Expected check constraint chk_registers_code and validation on registers"
+    );
+    assert!(
+        sql.contains("chk_registers_device_identifier")
+            && sql.contains("VALIDATE CONSTRAINT chk_registers_device_identifier;"),
+        "Expected check constraint chk_registers_device_identifier and validation on registers"
+    );
+    assert!(
+        sql.contains("chk_registers_pairing_status")
+            && sql.contains("VALIDATE CONSTRAINT chk_registers_pairing_status;"),
+        "Expected check constraint chk_registers_pairing_status and validation on registers"
+    );
+    assert!(
+        sql.contains("chk_registers_pairing_coherence")
+            && sql.contains("VALIDATE CONSTRAINT chk_registers_pairing_coherence;"),
+        "Expected check constraint chk_registers_pairing_coherence and validation on registers"
+    );
+}
+
+#[test]
+fn f1_21_migration_defines_device_uniqueness_indexes() {
+    let sql = normalize_whitespace(DEVICE_REGISTER_MIGRATION_SQL);
+    assert!(
+        sql.contains("DROP INDEX IF EXISTS public.uq_registers_org_device;"),
+        "Expected cleanup of redundant tenant-scoped unique index uq_registers_org_device"
+    );
+    assert!(
+        sql.contains("CREATE UNIQUE INDEX uq_registers_global_active_device ON public.registers (device_identifier) WHERE device_identifier IS NOT NULL AND device_pairing_status = 'paired';"),
+        "Expected global active device unique index uq_registers_global_active_device"
+    );
+}
+
+#[test]
+fn f1_21_migration_defines_supporting_performance_indexes() {
+    let sql = normalize_whitespace(DEVICE_REGISTER_MIGRATION_SQL);
+    assert!(
+        sql.contains("idx_registers_device_id"),
+        "Expected supporting index idx_registers_device_id"
+    );
+    assert!(
+        sql.contains("idx_registers_branch_active"),
+        "Expected supporting index idx_registers_branch_active"
+    );
+    assert!(
+        sql.contains("idx_registers_pairing_status"),
+        "Expected supporting index idx_registers_pairing_status"
+    );
+}
+
+// ============================================================
+// F1.21 — Device / Register Test Suite Coverage Assertions
+// ============================================================
+
+#[test]
+fn f1_21_test_suite_covers_register_domain_constraints() {
+    let sql = normalize_whitespace(DEVICE_REGISTER_TEST_SQL);
+    assert!(
+        sql.contains("Empty register name correctly rejected"),
+        "Expected test assertion for empty register name rejection"
+    );
+    assert!(
+        sql.contains("Whitespace-only register name correctly rejected"),
+        "Expected test assertion for whitespace-only register name rejection"
+    );
+    assert!(
+        sql.contains("256-character register name correctly rejected"),
+        "Expected test assertion for 256-character register name rejection"
+    );
+    assert!(
+        sql.contains("Empty register code correctly rejected"),
+        "Expected test assertion for empty register code rejection"
+    );
+    assert!(
+        sql.contains("Invalid register code characters correctly rejected"),
+        "Expected test assertion for invalid register code characters rejection"
+    );
+}
+
+#[test]
+fn f1_21_test_suite_covers_device_identifier_and_pairing_lifecycle() {
+    let sql = normalize_whitespace(DEVICE_REGISTER_TEST_SQL);
+    assert!(
+        sql.contains("Short device identifier correctly rejected"),
+        "Expected test assertion for short device identifier rejection"
+    );
+    assert!(
+        sql.contains("Invalid device identifier characters correctly rejected"),
+        "Expected test assertion for invalid device identifier characters rejection"
+    );
+    assert!(
+        sql.contains("Invalid pairing status correctly rejected"),
+        "Expected test assertion for invalid pairing status rejection"
+    );
+    assert!(
+        sql.contains("Paired status without device_identifier correctly rejected"),
+        "Expected test assertion for paired status without device_identifier rejection"
+    );
+    assert!(
+        sql.contains("Unpaired status with device_identifier correctly rejected"),
+        "Expected test assertion for unpaired status with device_identifier rejection"
+    );
+}
+
+#[test]
+fn f1_21_test_suite_covers_active_device_uniqueness_and_revocation() {
+    let sql = normalize_whitespace(DEVICE_REGISTER_TEST_SQL);
+    assert!(
+        sql.contains("Duplicate active device in same org correctly rejected by unique index"),
+        "Expected test assertion for duplicate active device in same org rejection"
+    );
+    assert!(
+        sql.contains(
+            "Cross-tenant duplicate active device correctly rejected by global unique index"
+        ),
+        "Expected test assertion for cross-tenant duplicate active device rejection"
+    );
+    assert!(
+        sql.contains("Device re-pairing succeeded after previous binding was revoked"),
+        "Expected test assertion for device re-pairing after revocation"
+    );
+}
+
+#[test]
+fn f1_21_test_suite_covers_composite_fk_and_cascade() {
+    let sql = normalize_whitespace(DEVICE_REGISTER_TEST_SQL);
+    assert!(
+        sql.contains("Cross-tenant branch register correctly rejected by composite FK"),
+        "Expected test assertion for cross-tenant branch register rejection"
+    );
+    assert!(
+        sql.contains("Organization deletion correctly cascades to registers"),
+        "Expected test assertion for cascading organization deletion to registers"
+    );
+    assert!(
+        sql.contains("updated_at trigger correctly advances on register UPDATE"),
+        "Expected test assertion for updated_at trigger behavior on registers"
     );
 }
