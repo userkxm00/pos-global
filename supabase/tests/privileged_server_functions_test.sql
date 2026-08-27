@@ -288,12 +288,16 @@ DECLARE
     t_before TIMESTAMPTZ;
     t_after TIMESTAMPTZ;
 BEGIN
-    SET LOCAL ROLE authenticated;
-    PERFORM set_config('request.jwt.claim.sub', cashier_a::text, true);
+    -- Explicitly age device_last_seen_at before testing heartbeat update in transaction
+    UPDATE public.registers
+    SET device_last_seen_at = now() - INTERVAL '1 hour'
+    WHERE id = reg_id;
 
     SELECT device_last_seen_at INTO t_before FROM public.registers WHERE id = reg_id;
 
-    PERFORM pg_sleep(0.05);
+    SET LOCAL ROLE authenticated;
+    PERFORM set_config('request.jwt.claim.sub', cashier_a::text, true);
+
     PERFORM public.record_device_heartbeat(reg_id, 'hw-new-terminal-01');
 
     SELECT device_last_seen_at INTO t_after FROM public.registers WHERE id = reg_id;
@@ -314,14 +318,27 @@ BEGIN
     SET LOCAL ROLE authenticated;
     PERFORM set_config('request.jwt.claim.sub', cashier_a::text, true);
 
+    -- 1. Test mismatched device identifier
     BEGIN
         PERFORM public.record_device_heartbeat(reg_id, 'hw-wrong-device-99');
         RAISE EXCEPTION 'SECURITY VIOLATION: Heartbeat accepted mismatched device identifier' USING ERRCODE = 'TF001';
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
-            RAISE NOTICE 'PASS Case 10: record_device_heartbeat mismatched device denied (SQLSTATE 42501)';
+            NULL;
     END;
+
+    -- 2. Test NULL device identifier fail-closed
+    BEGIN
+        PERFORM public.record_device_heartbeat(reg_id, NULL);
+        RAISE EXCEPTION 'SECURITY VIOLATION: Heartbeat accepted NULL device identifier' USING ERRCODE = 'TF001';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            NULL;
+    END;
+
+    RAISE NOTICE 'PASS Case 10: record_device_heartbeat mismatched device denied (SQLSTATE 42501)';
 END $$;
 
 -- Case 11: record_device_heartbeat — cross-tenant denied

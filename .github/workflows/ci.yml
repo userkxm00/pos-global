@@ -130,8 +130,6 @@ jobs:
           EOF
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/001_phase1_identity_and_rls.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/002_organization_branch_member_schema.sql
-          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/002_organization_branch_member_schema.sql
-          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/003_device_register_cloud_identity.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/003_device_register_cloud_identity.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/004_privileged_server_functions.sql
           psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/migrations/004_privileged_server_functions.sql

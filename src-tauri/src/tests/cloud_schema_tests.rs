@@ -734,3 +734,12 @@ fn f1_23_test_suite_covers_all_seventeen_scenarios() {
         );
     }
 }
+
+#[test]
+fn f1_23_migration_uses_row_locking_for_device_operations() {
+    let sql = normalize_whitespace(PRIVILEGED_FUNCTIONS_MIGRATION_SQL);
+    assert!(
+        sql.contains("WHERE id = p_register_id FOR UPDATE;"),
+        "Pair and revoke device functions must lock target register with FOR UPDATE to prevent TOCTOU races"
+    );
+}

@@ -33,10 +33,11 @@ BEGIN
         RAISE EXCEPTION 'Authentication required to pair device' USING ERRCODE = '42501';
     END IF;
 
-    -- Fetch target register
+    -- Fetch target register with row lock to prevent TOCTOU race conditions
     SELECT * INTO v_reg
     FROM public.registers
-    WHERE id = p_register_id;
+    WHERE id = p_register_id
+    FOR UPDATE;
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Register not found' USING ERRCODE = 'P0002';
@@ -96,9 +97,11 @@ BEGIN
         RAISE EXCEPTION 'Authentication required to revoke device pairing' USING ERRCODE = '42501';
     END IF;
 
+    -- Fetch target register with row lock to prevent TOCTOU race conditions
     SELECT * INTO v_reg
     FROM public.registers
-    WHERE id = p_register_id;
+    WHERE id = p_register_id
+    FOR UPDATE;
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Register not found' USING ERRCODE = 'P0002';
@@ -149,6 +152,16 @@ BEGIN
         RAISE EXCEPTION 'Authentication required for heartbeat' USING ERRCODE = '42501';
     END IF;
 
+    -- Reject NULL or empty device identifier immediately
+    IF p_device_identifier IS NULL THEN
+        RAISE EXCEPTION 'Device identifier cannot be null' USING ERRCODE = '42501';
+    END IF;
+
+    v_trimmed_device := trim(p_device_identifier);
+    IF length(v_trimmed_device) = 0 THEN
+        RAISE EXCEPTION 'Device identifier cannot be empty' USING ERRCODE = '42501';
+    END IF;
+
     SELECT * INTO v_reg
     FROM public.registers
     WHERE id = p_register_id;
@@ -167,7 +180,6 @@ BEGIN
         RAISE EXCEPTION 'Register is not actively paired' USING ERRCODE = '22000';
     END IF;
 
-    v_trimmed_device := trim(p_device_identifier);
     -- Verify exact device identifier matches
     IF v_reg.device_identifier IS NULL OR v_reg.device_identifier <> v_trimmed_device THEN
         RAISE EXCEPTION 'Mismatched device identifier for register' USING ERRCODE = '42501';
