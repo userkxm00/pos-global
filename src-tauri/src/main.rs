@@ -40,6 +40,8 @@ fn main() {
             commands::auth::verify_pin,
             commands::auth::logout,
             commands::auth::online_login,
+            commands::auth::refresh_online_session,
+            commands::auth::online_logout,
             commands::licence::activate_licence,
             commands::licence::check_licence_status,
             commands::sales::create_sale,

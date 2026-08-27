@@ -4,7 +4,7 @@
 
 use crate::auth::{
     parse_error_response, parse_token_response, validate_config, validate_credentials, AuthError,
-    OnlineSession, SignInInput, SupabaseAuthConfig,
+    OnlineSession, RefreshTokenInput, SignInInput, SupabaseAuthConfig,
 };
 use crate::db::DbState;
 use crate::user;
@@ -74,28 +74,18 @@ pub fn auth_state(
     }
 }
 
-/// Performs online account authentication against Supabase Auth.
-#[tauri::command]
-pub async fn online_login(
-    config: SupabaseAuthConfig,
-    credentials: SignInInput,
+async fn post_token_request(
+    config: &SupabaseAuthConfig,
+    grant_type: &str,
+    payload: &serde_json::Value,
 ) -> Result<OnlineSession, String> {
-    validate_config(&config).map_err(|e| e.to_string())?;
-    let (email, password) = validate_credentials(&credentials.email, &credentials.password)
-        .map_err(|e| e.to_string())?;
-
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
     let base_url = config.url.trim_end_matches('/');
-    let token_url = format!("{base_url}/auth/v1/token?grant_type=password");
-
-    let payload = serde_json::json!({
-        "email": email,
-        "password": password,
-    });
+    let token_url = format!("{base_url}/auth/v1/token?grant_type={grant_type}");
 
     let res = client
         .post(&token_url)
@@ -105,7 +95,7 @@ pub async fn online_login(
             format!("Bearer {}", config.publishable_key),
         )
         .header("Content-Type", "application/json")
-        .json(&payload)
+        .json(payload)
         .send()
         .await
         .map_err(|e| {
@@ -124,6 +114,78 @@ pub async fn online_login(
     if status == 200 {
         parse_token_response(&body_text).map_err(|e| e.to_string())
     } else {
+        Err(parse_error_response(status, &body_text).to_string())
+    }
+}
+
+/// Performs online account authentication against Supabase Auth.
+#[tauri::command]
+pub async fn online_login(
+    config: SupabaseAuthConfig,
+    credentials: SignInInput,
+) -> Result<OnlineSession, String> {
+    validate_config(&config).map_err(|e| e.to_string())?;
+    let (email, password) = validate_credentials(&credentials.email, &credentials.password)
+        .map_err(|e| e.to_string())?;
+
+    let payload = serde_json::json!({
+        "email": email,
+        "password": password,
+    });
+
+    post_token_request(&config, "password", &payload).await
+}
+
+/// Performs online session token refresh against Supabase Auth.
+#[tauri::command]
+pub async fn refresh_online_session(
+    config: SupabaseAuthConfig,
+    input: RefreshTokenInput,
+) -> Result<OnlineSession, String> {
+    validate_config(&config).map_err(|e| e.to_string())?;
+    let token =
+        crate::auth::validate_refresh_token(&input.refresh_token).map_err(|e| e.to_string())?;
+
+    let payload = serde_json::json!({
+        "refresh_token": token,
+    });
+
+    post_token_request(&config, "refresh_token", &payload).await
+}
+
+/// Explicit online account logout and token revocation on Supabase Auth.
+#[tauri::command]
+pub async fn online_logout(config: SupabaseAuthConfig, access_token: String) -> Result<(), String> {
+    validate_config(&config).map_err(|e| e.to_string())?;
+    let token = crate::auth::validate_access_token(&access_token).map_err(|e| e.to_string())?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+
+    let base_url = config.url.trim_end_matches('/');
+    let logout_url = format!("{base_url}/auth/v1/logout");
+
+    let res = client
+        .post(&logout_url)
+        .header("apikey", &config.publishable_key)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| {
+            AuthError::Network(format!(
+                "Unable to reach Supabase authentication service: {e}"
+            ))
+            .to_string()
+        })?;
+
+    let status = res.status().as_u16();
+    if status == 200 || status == 204 {
+        Ok(())
+    } else {
+        let body_text = res.text().await.unwrap_or_default();
         Err(parse_error_response(status, &body_text).to_string())
     }
 }
