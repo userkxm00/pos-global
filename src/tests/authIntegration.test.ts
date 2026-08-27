@@ -480,8 +480,11 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
         isEnabled: true,
       })
 
-      // Wait for the real inactivity timer to fire
-      await new Promise((resolve) => setTimeout(resolve, 30))
+      // Poll until the real timer fires, with a generous bound to avoid CI flakiness
+      const deadline = Date.now() + 2000
+      while (currentAuthStatus !== 'locked' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
       tracker.cleanup()
 
       // Assert transition to locked occurred via real mechanism
@@ -666,6 +669,7 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
       storeOnlineSession(session, user)
 
       // Attach actual event-driven visibility/focus listener
+      let refreshPromise: Promise<unknown> | null = null
       const handleVisibilityCheck = () => {
         if (document.visibilityState !== 'visible') return
         const storedMode = window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.AUTH_MODE)
@@ -676,7 +680,7 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
         if (isTokenExpiringSoon(expiresAt)) {
           const refreshToken = window.sessionStorage?.getItem(AUTH_STORAGE_KEYS.CLOUD_REFRESH_TOKEN)
           if (refreshToken) {
-            void performSingleFlightRefresh(refreshToken, mockApi, user)
+            refreshPromise = performSingleFlightRefresh(refreshToken, mockApi, user)
           }
         }
       }
@@ -688,7 +692,12 @@ describe('F1.24 Auth & Session Integration Test Suite (24 Scenarios)', () => {
       window.dispatchEvent('focus')
       document.dispatchEvent('visibilitychange')
 
+      if (refreshPromise) {
+        await refreshPromise
+      }
+
       assert.strictEqual(mockApi.refreshCount, 0, 'Must not issue refresh when session is fresh')
+      assert.strictEqual(refreshPromise, null, 'No refresh promise should be created for fresh session')
 
       document.removeEventListener('visibilitychange', handleVisibilityCheck)
       window.removeEventListener('focus', handleVisibilityCheck)
