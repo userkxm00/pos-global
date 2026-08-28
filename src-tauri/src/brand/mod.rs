@@ -157,7 +157,7 @@ pub fn create_brand(conn: &Connection, input: CreateBrandInput) -> Result<Brand,
     let description = validate_description(input.description.as_deref());
     let website = validate_website(input.website.as_deref())?;
 
-    let id = format!("{:032x}", rand::random::<u128>());
+    let id = uuid::Uuid::new_v4().to_string();
 
     conn.execute(
         "INSERT INTO brands (

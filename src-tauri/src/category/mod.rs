@@ -254,7 +254,7 @@ pub fn create_category(
         ensure_parent_active(conn, pid)?;
     }
 
-    let id = format!("{:032x}", rand::random::<u128>());
+    let id = uuid::Uuid::new_v4().to_string();
 
     conn.execute(
         "INSERT INTO categories (

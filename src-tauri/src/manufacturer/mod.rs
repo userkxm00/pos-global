@@ -232,9 +232,10 @@ pub fn create_manufacturer(
     let support_phone = validate_phone(input.support_phone.as_deref())?;
     let support_email = validate_email(input.support_email.as_deref())?;
 
-    let id = format!("{:032x}", rand::random::<u128>());
+    let id = uuid::Uuid::new_v4().to_string();
 
     conn.execute(
+
         "INSERT INTO manufacturers (
             id, name, description, website, support_phone, support_email, is_active, created_at, updated_at
         ) VALUES (
