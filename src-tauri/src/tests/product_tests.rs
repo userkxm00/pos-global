@@ -705,10 +705,12 @@ fn test_product_organization_isolation_enforced() {
 
     // 3. Set business settings to Org A
     conn.execute(
-        "UPDATE business_settings SET organization_id = ?1",
+        "INSERT INTO business_settings (id, business_name, default_currency, organization_id)
+         VALUES ('bs-1', 'Org A Store', 'USD', ?1)
+         ON CONFLICT(id) DO UPDATE SET organization_id = ?1",
         params![org_a.id],
     )
-    .expect("business settings updated");
+    .expect("business settings configured");
 
     let catalog_org = get_catalog_organization_id(&conn).expect("get catalog org");
     assert_eq!(catalog_org.as_deref(), Some(org_a.id.as_str()));
