@@ -905,4 +905,8 @@ fn f1_25_test_suite_structures_all_six_security_suites() {
         sql.contains("SET LOCAL ROLE anon"),
         "Expected anonymous role execution in Suite 6"
     );
+    assert!(
+        sql.contains("has_function_privilege"),
+        "Expected has_function_privilege ACL check in Suite 6"
+    );
 }

@@ -651,7 +651,6 @@ DECLARE
     cashier_a UUID := '14141414-1414-1414-1414-141414141414';
 
     mutated_cnt INTEGER := 0;
-    err_msg TEXT;
 BEGIN
     RESET ROLE;
     -- N23: Unaffiliated authenticated user calling privileged RPCs
@@ -743,17 +742,31 @@ BEGIN
     END;
 
     -- N25: Anonymous privileged RPC execution denial at SQL EXECUTE boundary
+    -- 1. Direct deterministic PostgreSQL function privilege verification (must NOT have EXECUTE privilege)
+    IF has_function_privilege('anon', 'public.create_organization_with_initial_setup(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL VIOLATION: Role anon has EXECUTE privilege on create_organization_with_initial_setup' USING ERRCODE = 'TF001';
+    END IF;
+    IF has_function_privilege('anon', 'public.pair_device_to_register(UUID, TEXT)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL VIOLATION: Role anon has EXECUTE privilege on pair_device_to_register' USING ERRCODE = 'TF001';
+    END IF;
+    IF has_function_privilege('anon', 'public.revoke_device_pairing(UUID)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL VIOLATION: Role anon has EXECUTE privilege on revoke_device_pairing' USING ERRCODE = 'TF001';
+    END IF;
+    IF has_function_privilege('anon', 'public.record_device_heartbeat(UUID, TEXT)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL VIOLATION: Role anon has EXECUTE privilege on record_device_heartbeat' USING ERRCODE = 'TF001';
+    END IF;
+    IF has_function_privilege('anon', 'public.set_organization_member_role(UUID, UUID, TEXT)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL VIOLATION: Role anon has EXECUTE privilege on set_organization_member_role' USING ERRCODE = 'TF001';
+    END IF;
+
+    -- 2. Direct adversarial runtime invocation attempts under role anon (must fail with insufficient_privilege / 42501)
     BEGIN
         PERFORM public.create_organization_with_initial_setup('Anon Org Bootstrap');
         RAISE EXCEPTION 'ANON RPC PENETRATION: Anon was able to execute create_organization_with_initial_setup' USING ERRCODE = 'TF001';
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
-            GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
-            IF err_msg LIKE '%Authentication required%' THEN
-                RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: create_organization_with_initial_setup entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
-            END IF;
-            RAISE NOTICE 'PASS N25a: Anonymous create_organization_with_initial_setup blocked at EXECUTE boundary (42501 permission denied)';
+            RAISE NOTICE 'PASS N25a: Anonymous create_organization_with_initial_setup blocked at EXECUTE boundary (42501)';
     END;
 
     BEGIN
@@ -762,11 +775,7 @@ BEGIN
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
-            GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
-            IF err_msg LIKE '%Authentication required%' THEN
-                RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: pair_device_to_register entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
-            END IF;
-            RAISE NOTICE 'PASS N25b: Anonymous pair_device_to_register blocked at EXECUTE boundary (42501 permission denied)';
+            RAISE NOTICE 'PASS N25b: Anonymous pair_device_to_register blocked at EXECUTE boundary (42501)';
     END;
 
     BEGIN
@@ -775,11 +784,7 @@ BEGIN
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
-            GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
-            IF err_msg LIKE '%Authentication required%' THEN
-                RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: revoke_device_pairing entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
-            END IF;
-            RAISE NOTICE 'PASS N25c: Anonymous revoke_device_pairing blocked at EXECUTE boundary (42501 permission denied)';
+            RAISE NOTICE 'PASS N25c: Anonymous revoke_device_pairing blocked at EXECUTE boundary (42501)';
     END;
 
     BEGIN
@@ -788,11 +793,7 @@ BEGIN
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
-            GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
-            IF err_msg LIKE '%Authentication required%' THEN
-                RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: record_device_heartbeat entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
-            END IF;
-            RAISE NOTICE 'PASS N25d: Anonymous record_device_heartbeat blocked at EXECUTE boundary (42501 permission denied)';
+            RAISE NOTICE 'PASS N25d: Anonymous record_device_heartbeat blocked at EXECUTE boundary (42501)';
     END;
 
     BEGIN
@@ -801,11 +802,7 @@ BEGIN
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
-            GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
-            IF err_msg LIKE '%Authentication required%' THEN
-                RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: set_organization_member_role entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
-            END IF;
-            RAISE NOTICE 'PASS N25e: Anonymous set_organization_member_role blocked at EXECUTE boundary (42501 permission denied)';
+            RAISE NOTICE 'PASS N25e: Anonymous set_organization_member_role blocked at EXECUTE boundary (42501)';
     END;
 
     RESET ROLE;
