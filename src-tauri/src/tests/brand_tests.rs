@@ -71,6 +71,24 @@ fn test_validate_brand_website() {
         validate_website(Some("https://ac me.com")),
         Err(BrandError::Validation(_))
     ));
+
+    // Malformed URLs without valid host rejected
+    assert!(matches!(
+        validate_website(Some("http://")),
+        Err(BrandError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_website(Some("https://")),
+        Err(BrandError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_website(Some(".invalid")),
+        Err(BrandError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_website(Some("invalid.")),
+        Err(BrandError::Validation(_))
+    ));
 }
 
 // =========================================================================

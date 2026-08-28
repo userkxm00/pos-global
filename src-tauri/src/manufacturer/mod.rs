@@ -119,7 +119,7 @@ pub fn validate_description(desc: Option<&str>) -> Option<String> {
         .map(ToString::to_string)
 }
 
-/// Validates manufacturer website. Conservative check: <= 2048 chars, no spaces.
+/// Validates manufacturer website. Conservative check: <= 2048 chars, no spaces, valid host.
 pub fn validate_website(url: Option<&str>) -> Result<Option<String>, ManufacturerError> {
     match url.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(None),
@@ -134,7 +134,19 @@ pub fn validate_website(url: Option<&str>) -> Result<Option<String>, Manufacture
                     "Website URL cannot contain whitespace".into(),
                 ));
             }
-            if !s.starts_with("http://") && !s.starts_with("https://") && !s.contains('.') {
+            let host_part = if let Some(stripped) = s.strip_prefix("https://") {
+                stripped
+            } else if let Some(stripped) = s.strip_prefix("http://") {
+                stripped
+            } else {
+                s
+            };
+            let host = host_part.split(['/', '?', '#', ':']).next().unwrap_or("");
+            if host.is_empty()
+                || !host.contains('.')
+                || host.starts_with('.')
+                || host.ends_with('.')
+            {
                 return Err(ManufacturerError::Validation(
                     "Website URL must be a valid web address or domain".into(),
                 ));
@@ -144,7 +156,7 @@ pub fn validate_website(url: Option<&str>) -> Result<Option<String>, Manufacture
     }
 }
 
-/// Validates manufacturer support phone. Conservative international format check.
+/// Validates manufacturer support phone. Conservative international format check requiring >= 3 digits.
 pub fn validate_phone(phone: Option<&str>) -> Result<Option<String>, ManufacturerError> {
     match phone.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(None),
@@ -152,6 +164,12 @@ pub fn validate_phone(phone: Option<&str>) -> Result<Option<String>, Manufacture
             if s.chars().count() > 50 {
                 return Err(ManufacturerError::Validation(
                     "Support phone exceeds maximum length of 50 characters".into(),
+                ));
+            }
+            let digit_count = s.chars().filter(|c| c.is_ascii_digit()).count();
+            if digit_count < 3 {
+                return Err(ManufacturerError::Validation(
+                    "Support phone must contain at least 3 digits".into(),
                 ));
             }
             let valid = s.chars().all(|c| {

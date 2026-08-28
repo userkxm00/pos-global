@@ -111,7 +111,7 @@ pub fn validate_description(desc: Option<&str>) -> Option<String> {
         .map(ToString::to_string)
 }
 
-/// Validates brand website. Conservative check: <= 2048 chars, no spaces.
+/// Validates brand website. Conservative check: <= 2048 chars, no spaces, valid host.
 pub fn validate_website(url: Option<&str>) -> Result<Option<String>, BrandError> {
     match url.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(None),
@@ -126,7 +126,19 @@ pub fn validate_website(url: Option<&str>) -> Result<Option<String>, BrandError>
                     "Website URL cannot contain whitespace".into(),
                 ));
             }
-            if !s.starts_with("http://") && !s.starts_with("https://") && !s.contains('.') {
+            let host_part = if let Some(stripped) = s.strip_prefix("https://") {
+                stripped
+            } else if let Some(stripped) = s.strip_prefix("http://") {
+                stripped
+            } else {
+                s
+            };
+            let host = host_part.split(['/', '?', '#', ':']).next().unwrap_or("");
+            if host.is_empty()
+                || !host.contains('.')
+                || host.starts_with('.')
+                || host.ends_with('.')
+            {
                 return Err(BrandError::Validation(
                     "Website URL must be a valid web address or domain".into(),
                 ));

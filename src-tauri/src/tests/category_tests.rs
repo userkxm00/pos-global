@@ -772,3 +772,27 @@ fn test_category_hierarchy_depth_limit_and_deep_valid_chain() {
             .unwrap_err();
     assert!(matches!(deep_err, CategoryError::HierarchyDepthExceeded(_)));
 }
+
+#[test]
+fn test_category_tree_surfaces_stranded_cyclic_data() {
+    let conn = setup_test_db();
+
+    // Directly insert a cyclic pair (A -> B -> A) as might occur in corrupted/imported legacy data
+    conn.execute(
+        "INSERT INTO categories (id, name, parent_id, is_active, created_at, updated_at) VALUES ('cyc_a', 'Cycle A', 'cyc_b', 1, datetime('now'), datetime('now'))",
+        [],
+    ).expect("insert cyc_a");
+    conn.execute(
+        "INSERT INTO categories (id, name, parent_id, is_active, created_at, updated_at) VALUES ('cyc_b', 'Cycle B', 'cyc_a', 1, datetime('now'), datetime('now'))",
+        [],
+    ).expect("insert cyc_b");
+
+    // Also insert a normal root category
+    create_category(&conn, make_category_fixture("Normal Root", None)).expect("normal root");
+
+    let tree = get_category_tree(&conn, false).expect("get tree");
+    // Verify that the stranded cyclic nodes are surfaced as top-level nodes rather than silently dropped
+    let names: Vec<String> = tree.iter().map(|n| n.category.name.clone()).collect();
+    assert!(names.contains(&"Normal Root".to_string()));
+    assert!(names.contains(&"Cycle A".to_string()) || names.contains(&"Cycle B".to_string()));
+}

@@ -475,10 +475,30 @@ pub fn get_category_tree(
 
     root_categories.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
-    let tree = root_categories
+    let mut tree: Vec<CategoryTreeNode> = root_categories
         .into_iter()
         .map(|root| build_node_recursive(root, &mut children_by_parent))
         .collect();
+
+    // Final safety pass: append any stranded cyclic categories left in children_by_parent so they are never silently dropped
+    while !children_by_parent.is_empty() {
+        let next_key = match children_by_parent.keys().next() {
+            Some(k) => k.clone(),
+            None => break,
+        };
+        if let Some(stranded_list) = children_by_parent.remove(&next_key) {
+            for stranded in stranded_list {
+                tree.push(build_node_recursive(stranded, &mut children_by_parent));
+            }
+        }
+    }
+
+    tree.sort_by(|a, b| {
+        a.category
+            .name
+            .to_lowercase()
+            .cmp(&b.category.name.to_lowercase())
+    });
 
     Ok(tree)
 }
