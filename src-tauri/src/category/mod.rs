@@ -451,8 +451,7 @@ pub fn get_category_tree(
 
         if is_orphan_or_root {
             root_categories.push(cat);
-        } else {
-            let pid = cat.parent_id.clone().unwrap();
+        } else if let Some(pid) = cat.parent_id.clone() {
             children_by_parent.entry(pid).or_default().push(cat);
         }
     }
@@ -461,15 +460,13 @@ pub fn get_category_tree(
         cat: Category,
         children_map: &mut std::collections::HashMap<String, Vec<Category>>,
     ) -> CategoryTreeNode {
-        let children = if let Some(mut raw_children) = children_map.remove(&cat.id) {
-            raw_children.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-            raw_children
-                .into_iter()
-                .map(|child| build_node_recursive(child, children_map))
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let mut raw_children = children_map.remove(&cat.id).unwrap_or_default();
+        raw_children.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        let children = raw_children
+            .into_iter()
+            .map(|child| build_node_recursive(child, children_map))
+            .collect();
+
         CategoryTreeNode {
             category: cat,
             children,

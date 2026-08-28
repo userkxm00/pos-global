@@ -1,14 +1,9 @@
-// Unit, repository, hierarchy, and authorization tests for F2.02 Categories.
-
-use crate::auth::middleware::{
-    require_permission, require_scoped_permission, require_session, AuthMiddlewareError,
-    AuthorizeRequest,
-};
+use crate::auth::middleware::{require_permission, AuthMiddlewareError, AuthorizeRequest};
 use crate::branch::{create_branch, CreateBranchInput};
 use crate::category::{
     create_category, delete_category, get_category, get_category_tree, list_categories,
-    update_category, validate_description, validate_name, CategoryError, CategoryFilter,
-    CreateCategoryInput, UpdateCategoryInput,
+    update_category, validate_name, CategoryError, CategoryFilter, CreateCategoryInput,
+    UpdateCategoryInput,
 };
 use crate::organization::{create_organization, CreateOrganizationInput};
 use crate::permission::Permission;
@@ -18,8 +13,7 @@ use crate::product::{
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
 };
-use crate::user::session::{create_local_session, revoke_local_session};
-use rusqlite::params;
+use crate::user::session::create_local_session;
 
 fn make_category_fixture(name: &str, parent_id: Option<&str>) -> CreateCategoryInput {
     CreateCategoryInput {
