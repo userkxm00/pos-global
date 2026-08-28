@@ -39,21 +39,15 @@ GRANT USAGE ON SCHEMA public, auth TO authenticated, anon;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth TO authenticated, anon;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public, auth TO authenticated, anon;
 
--- Explicitly enforce migration 004 security model: revoke execution on privileged RPCs from anon / PUBLIC
-REVOKE ALL ON FUNCTION public.pair_device_to_register(UUID, TEXT) FROM anon, PUBLIC;
-REVOKE ALL ON FUNCTION public.revoke_device_pairing(UUID) FROM anon, PUBLIC;
-REVOKE ALL ON FUNCTION public.record_device_heartbeat(UUID, TEXT) FROM anon, PUBLIC;
-REVOKE ALL ON FUNCTION public.create_organization_with_initial_setup(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM anon, PUBLIC;
-REVOKE ALL ON FUNCTION public.set_organization_member_role(UUID, UUID, TEXT) FROM anon, PUBLIC;
-
--- Ensure authenticated role retains execution on privileged RPCs
-GRANT EXECUTE ON FUNCTION public.pair_device_to_register(UUID, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.revoke_device_pairing(UUID) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.record_device_heartbeat(UUID, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.create_organization_with_initial_setup(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.set_organization_member_role(UUID, UUID, TEXT) TO authenticated;
+-- Grant EXECUTE explicitly only on auth.uid() and required public RLS helper functions.
+-- Preserves migration-defined ACLs for the 5 privileged RPCs without blanket grants.
+GRANT EXECUTE ON FUNCTION auth.uid() TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.get_user_organization_ids() TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.is_org_member(UUID) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.is_org_admin_or_owner(UUID) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.is_org_manager_or_above(UUID) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.can_delete_organization_member(UUID, UUID, TEXT) TO authenticated, anon;
 
 -- ============================================================
 -- 2. Test Fixtures Setup (Elevated Initial Context)
@@ -657,6 +651,7 @@ DECLARE
     cashier_a UUID := '14141414-1414-1414-1414-141414141414';
 
     mutated_cnt INTEGER := 0;
+    err_msg TEXT;
 BEGIN
     RESET ROLE;
     -- N23: Unaffiliated authenticated user calling privileged RPCs
@@ -747,60 +742,70 @@ BEGIN
             RAISE NOTICE 'PASS N24e: Anonymous user delete rejected by PostgreSQL privilege check';
     END;
 
-    -- N25: Anonymous privileged RPC execution denial
+    -- N25: Anonymous privileged RPC execution denial at SQL EXECUTE boundary
     BEGIN
         PERFORM public.create_organization_with_initial_setup('Anon Org Bootstrap');
-        RAISE EXCEPTION 'ANON RPC PENETRATION: Anon called create_organization_with_initial_setup' USING ERRCODE = 'TF001';
+        RAISE EXCEPTION 'ANON RPC PENETRATION: Anon was able to execute create_organization_with_initial_setup' USING ERRCODE = 'TF001';
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
-        WHEN SQLSTATE '42501' THEN
-            RAISE NOTICE 'PASS N25a: Anonymous create_organization_with_initial_setup rejected with 42501';
         WHEN insufficient_privilege THEN
-            RAISE NOTICE 'PASS N25a: Anonymous create_organization_with_initial_setup rejected by privilege check';
+            GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
+            IF err_msg NOT LIKE '%permission denied for function%' THEN
+                RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: create_organization_with_initial_setup entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
+            END IF;
+            RAISE NOTICE 'PASS N25a: Anonymous create_organization_with_initial_setup blocked at EXECUTE boundary (42501 permission denied)';
     END;
 
     BEGIN
         PERFORM public.pair_device_to_register(reg_a_unpaired, 'dev-anon-01');
-        RAISE EXCEPTION 'ANON RPC PENETRATION: Anon called pair_device_to_register' USING ERRCODE = 'TF001';
+        RAISE EXCEPTION 'ANON RPC PENETRATION: Anon was able to execute pair_device_to_register' USING ERRCODE = 'TF001';
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
-        WHEN SQLSTATE '42501' THEN
-            RAISE NOTICE 'PASS N25b: Anonymous pair_device_to_register rejected with 42501';
         WHEN insufficient_privilege THEN
-            RAISE NOTICE 'PASS N25b: Anonymous pair_device_to_register rejected by privilege check';
+            GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
+            IF err_msg NOT LIKE '%permission denied for function%' THEN
+                RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: pair_device_to_register entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
+            END IF;
+            RAISE NOTICE 'PASS N25b: Anonymous pair_device_to_register blocked at EXECUTE boundary (42501 permission denied)';
     END;
 
     BEGIN
         PERFORM public.revoke_device_pairing(reg_a_paired);
-        RAISE EXCEPTION 'ANON RPC PENETRATION: Anon called revoke_device_pairing' USING ERRCODE = 'TF001';
+        RAISE EXCEPTION 'ANON RPC PENETRATION: Anon was able to execute revoke_device_pairing' USING ERRCODE = 'TF001';
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
-        WHEN SQLSTATE '42501' THEN
-            RAISE NOTICE 'PASS N25c: Anonymous revoke_device_pairing rejected with 42501';
         WHEN insufficient_privilege THEN
-            RAISE NOTICE 'PASS N25c: Anonymous revoke_device_pairing rejected by privilege check';
+            GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
+            IF err_msg NOT LIKE '%permission denied for function%' THEN
+                RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: revoke_device_pairing entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
+            END IF;
+            RAISE NOTICE 'PASS N25c: Anonymous revoke_device_pairing blocked at EXECUTE boundary (42501 permission denied)';
     END;
 
     BEGIN
         PERFORM public.record_device_heartbeat(reg_a_paired, 'dev-alpha-active-01');
-        RAISE EXCEPTION 'ANON RPC PENETRATION: Anon called record_device_heartbeat' USING ERRCODE = 'TF001';
+        RAISE EXCEPTION 'ANON RPC PENETRATION: Anon was able to execute record_device_heartbeat' USING ERRCODE = 'TF001';
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
-        WHEN SQLSTATE '42501' THEN
-            RAISE NOTICE 'PASS N25d: Anonymous record_device_heartbeat rejected with 42501';
         WHEN insufficient_privilege THEN
-            RAISE NOTICE 'PASS N25d: Anonymous record_device_heartbeat rejected by privilege check';
+            GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
+            IF err_msg NOT LIKE '%permission denied for function%' THEN
+                RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: record_device_heartbeat entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
+            END IF;
+            RAISE NOTICE 'PASS N25d: Anonymous record_device_heartbeat blocked at EXECUTE boundary (42501 permission denied)';
     END;
 
     BEGIN
         PERFORM public.set_organization_member_role(org_a, cashier_a, 'admin');
-        RAISE EXCEPTION 'ANON RPC PENETRATION: Anon called set_organization_member_role' USING ERRCODE = 'TF001';
+        RAISE EXCEPTION 'ANON RPC PENETRATION: Anon was able to execute set_organization_member_role' USING ERRCODE = 'TF001';
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
-        WHEN SQLSTATE '42501' THEN
-            RAISE NOTICE 'PASS N25e: Anonymous set_organization_member_role rejected with 42501';
         WHEN insufficient_privilege THEN
-            RAISE NOTICE 'PASS N25e: Anonymous set_organization_member_role rejected by privilege check';
+            GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
+            IF err_msg NOT LIKE '%permission denied for function%' THEN
+                RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: set_organization_member_role entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
+            END IF;
+            RAISE NOTICE 'PASS N25e: Anonymous set_organization_member_role blocked at EXECUTE boundary (42501 permission denied)';
     END;
 
     RESET ROLE;
