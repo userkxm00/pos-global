@@ -412,7 +412,7 @@ pub fn list_categories(
 fn partition_categories(
     categories: Vec<Category>,
 ) -> (Vec<Category>, HashMap<String, Vec<Category>>) {
-    let active_ids: HashSet<String> = categories.iter().map(|c| c.id.clone()).collect();
+    let active_ids: HashSet<&str> = categories.iter().map(|c| c.id.as_str()).collect();
     let mut children_by_parent: HashMap<String, Vec<Category>> = HashMap::new();
     let mut root_categories: Vec<Category> = Vec::new();
 
@@ -434,7 +434,7 @@ fn build_category_tree_node(
     children_map: &mut HashMap<String, Vec<Category>>,
 ) -> CategoryTreeNode {
     let mut raw_children = children_map.remove(&cat.id).unwrap_or_default();
-    raw_children.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    raw_children.sort_by_key(|a| a.name.to_lowercase());
     let children = raw_children
         .into_iter()
         .map(|child| build_category_tree_node(child, children_map))
@@ -473,7 +473,7 @@ pub fn get_category_tree(
     let all_categories = list_categories(conn, &filter)?;
     let (mut root_categories, mut children_by_parent) = partition_categories(all_categories);
 
-    root_categories.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    root_categories.sort_by_key(|a| a.name.to_lowercase());
 
     let mut tree: Vec<CategoryTreeNode> = root_categories
         .into_iter()
@@ -482,12 +482,7 @@ pub fn get_category_tree(
 
     drain_stranded_categories(children_by_parent, &mut tree);
 
-    tree.sort_by(|a, b| {
-        a.category
-            .name
-            .to_lowercase()
-            .cmp(&b.category.name.to_lowercase())
-    });
+    tree.sort_by_key(|a| a.category.name.to_lowercase());
 
     Ok(tree)
 }
