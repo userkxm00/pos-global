@@ -1,8 +1,10 @@
 // Category domain model, validation rules, hierarchy invariants, and database operations.
 // F2.02 — Categories, Brands, Manufacturers
 
+use crate::db::escape_like_pattern;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 /// Canonical Category entity.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -424,6 +426,62 @@ pub fn list_categories(
     Ok(categories)
 }
 
+fn partition_categories(
+    categories: Vec<Category>,
+) -> (Vec<Category>, HashMap<String, Vec<Category>>) {
+    let active_ids: HashSet<String> = categories.iter().map(|c| c.id.clone()).collect();
+    let mut children_by_parent: HashMap<String, Vec<Category>> = HashMap::new();
+    let mut root_categories: Vec<Category> = Vec::new();
+
+    for cat in categories {
+        let is_orphan_or_root = match cat.parent_id.as_ref() {
+            None => true,
+            Some(pid) => !active_ids.contains(pid),
+        };
+
+        if is_orphan_or_root {
+            root_categories.push(cat);
+        } else if let Some(pid) = cat.parent_id.clone() {
+            children_by_parent.entry(pid).or_default().push(cat);
+        }
+    }
+    (root_categories, children_by_parent)
+}
+
+fn build_category_tree_node(
+    cat: Category,
+    children_map: &mut HashMap<String, Vec<Category>>,
+) -> CategoryTreeNode {
+    let mut raw_children = children_map.remove(&cat.id).unwrap_or_default();
+    raw_children.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    let children = raw_children
+        .into_iter()
+        .map(|child| build_category_tree_node(child, children_map))
+        .collect();
+
+    CategoryTreeNode {
+        category: cat,
+        children,
+    }
+}
+
+fn drain_stranded_categories(
+    mut children_map: HashMap<String, Vec<Category>>,
+    tree: &mut Vec<CategoryTreeNode>,
+) {
+    while !children_map.is_empty() {
+        let next_key = match children_map.keys().next() {
+            Some(k) => k.clone(),
+            None => break,
+        };
+        if let Some(stranded_list) = children_map.remove(&next_key) {
+            for stranded in stranded_list {
+                tree.push(build_category_tree_node(stranded, &mut children_map));
+            }
+        }
+    }
+}
+
 /// Reconstructs the complete hierarchical category tree in memory in O(n) time.
 pub fn get_category_tree(
     conn: &Connection,
@@ -436,62 +494,16 @@ pub fn get_category_tree(
     };
 
     let all_categories = list_categories(conn, &filter)?;
-    let active_ids: std::collections::HashSet<String> =
-        all_categories.iter().map(|c| c.id.clone()).collect();
-
-    let mut children_by_parent: std::collections::HashMap<String, Vec<Category>> =
-        std::collections::HashMap::new();
-    let mut root_categories: Vec<Category> = Vec::new();
-
-    for cat in all_categories {
-        let is_orphan_or_root = match cat.parent_id.as_ref() {
-            None => true,
-            Some(pid) => !active_ids.contains(pid),
-        };
-
-        if is_orphan_or_root {
-            root_categories.push(cat);
-        } else if let Some(pid) = cat.parent_id.clone() {
-            children_by_parent.entry(pid).or_default().push(cat);
-        }
-    }
-
-    fn build_node_recursive(
-        cat: Category,
-        children_map: &mut std::collections::HashMap<String, Vec<Category>>,
-    ) -> CategoryTreeNode {
-        let mut raw_children = children_map.remove(&cat.id).unwrap_or_default();
-        raw_children.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        let children = raw_children
-            .into_iter()
-            .map(|child| build_node_recursive(child, children_map))
-            .collect();
-
-        CategoryTreeNode {
-            category: cat,
-            children,
-        }
-    }
+    let (mut root_categories, mut children_by_parent) = partition_categories(all_categories);
 
     root_categories.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
     let mut tree: Vec<CategoryTreeNode> = root_categories
         .into_iter()
-        .map(|root| build_node_recursive(root, &mut children_by_parent))
+        .map(|root| build_category_tree_node(root, &mut children_by_parent))
         .collect();
 
-    // Final safety pass: append any stranded cyclic categories left in children_by_parent so they are never silently dropped
-    while !children_by_parent.is_empty() {
-        let next_key = match children_by_parent.keys().next() {
-            Some(k) => k.clone(),
-            None => break,
-        };
-        if let Some(stranded_list) = children_by_parent.remove(&next_key) {
-            for stranded in stranded_list {
-                tree.push(build_node_recursive(stranded, &mut children_by_parent));
-            }
-        }
-    }
+    drain_stranded_categories(children_by_parent, &mut tree);
 
     tree.sort_by(|a, b| {
         a.category

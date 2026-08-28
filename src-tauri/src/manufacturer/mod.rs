@@ -1,6 +1,7 @@
 // Manufacturer domain model, validation rules, and SQLite database operations.
 // F2.02 — Categories, Brands, Manufacturers
 
+use crate::db::escape_like_pattern;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -166,7 +167,7 @@ pub fn validate_phone(phone: Option<&str>) -> Result<Option<String>, Manufacture
                     "Support phone exceeds maximum length of 50 characters".into(),
                 ));
             }
-            let digit_count = s.chars().filter(|c| c.is_ascii_digit()).count();
+            let digit_count = s.chars().filter(char::is_ascii_digit).count();
             if digit_count < 3 {
                 return Err(ManufacturerError::Validation(
                     "Support phone must contain at least 3 digits".into(),

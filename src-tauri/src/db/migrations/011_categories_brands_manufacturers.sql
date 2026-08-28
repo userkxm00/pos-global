@@ -7,7 +7,8 @@ ALTER TABLE categories ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE categories ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
 
 -- Backfill updated_at for existing categories
-UPDATE categories SET updated_at = COALESCE(created_at, datetime('now')) WHERE updated_at = '';
+UPDATE categories SET updated_at = COALESCE(created_at, datetime('now')) WHERE updated_at = '' OR updated_at IS NULL;
+
 
 -- 2. Indexes and database-level unique constraints for categories
 CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);

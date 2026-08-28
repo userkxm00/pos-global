@@ -276,4 +276,24 @@ mod tests {
             .expect("rollback probe should remain queryable");
         assert_eq!(count, 0);
     }
+
+    #[test]
+    fn test_escape_like_pattern() {
+        assert_eq!(super::escape_like_pattern("100% pure"), "100\\% pure");
+        assert_eq!(super::escape_like_pattern("item_one"), "item\\_one");
+        assert_eq!(super::escape_like_pattern("path\\to"), "path\\\\to");
+        assert_eq!(super::escape_like_pattern("normal"), "normal");
+    }
+}
+
+/// Safely escapes special LIKE wildcard characters (`%`, `_`, `\`) with a backslash escape.
+pub fn escape_like_pattern(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for c in input.chars() {
+        if c == '%' || c == '_' || c == '\\' {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
 }
