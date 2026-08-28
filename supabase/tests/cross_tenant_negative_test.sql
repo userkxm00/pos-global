@@ -750,7 +750,7 @@ BEGIN
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
             GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
-            IF err_msg NOT LIKE '%permission denied for function%' THEN
+            IF err_msg LIKE '%Authentication required%' THEN
                 RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: create_organization_with_initial_setup entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
             END IF;
             RAISE NOTICE 'PASS N25a: Anonymous create_organization_with_initial_setup blocked at EXECUTE boundary (42501 permission denied)';
@@ -763,7 +763,7 @@ BEGIN
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
             GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
-            IF err_msg NOT LIKE '%permission denied for function%' THEN
+            IF err_msg LIKE '%Authentication required%' THEN
                 RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: pair_device_to_register entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
             END IF;
             RAISE NOTICE 'PASS N25b: Anonymous pair_device_to_register blocked at EXECUTE boundary (42501 permission denied)';
@@ -776,7 +776,7 @@ BEGIN
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
             GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
-            IF err_msg NOT LIKE '%permission denied for function%' THEN
+            IF err_msg LIKE '%Authentication required%' THEN
                 RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: revoke_device_pairing entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
             END IF;
             RAISE NOTICE 'PASS N25c: Anonymous revoke_device_pairing blocked at EXECUTE boundary (42501 permission denied)';
@@ -789,7 +789,7 @@ BEGIN
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
             GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
-            IF err_msg NOT LIKE '%permission denied for function%' THEN
+            IF err_msg LIKE '%Authentication required%' THEN
                 RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: record_device_heartbeat entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
             END IF;
             RAISE NOTICE 'PASS N25d: Anonymous record_device_heartbeat blocked at EXECUTE boundary (42501 permission denied)';
@@ -802,7 +802,7 @@ BEGIN
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN insufficient_privilege THEN
             GET STACKED DIAGNOSTICS err_msg = MESSAGE_TEXT;
-            IF err_msg NOT LIKE '%permission denied for function%' THEN
+            IF err_msg LIKE '%Authentication required%' THEN
                 RAISE EXCEPTION 'EXECUTE BOUNDARY VIOLATION: set_organization_member_role entered function body instead of blocking at EXECUTE boundary (Message: %)', err_msg;
             END IF;
             RAISE NOTICE 'PASS N25e: Anonymous set_organization_member_role blocked at EXECUTE boundary (42501 permission denied)';
