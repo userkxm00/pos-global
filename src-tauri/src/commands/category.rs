@@ -129,5 +129,6 @@ pub fn get_category_tree(
         .map_err(|e| format!("database lock failed: {e}"))?;
 
     authorize_category_read(&conn, &session_id)?;
-    category::get_category_tree(&conn, include_inactive.unwrap_or(false)).map_err(|e| e.to_string())
+    category::get_category_tree(&conn, include_inactive.unwrap_or_default())
+        .map_err(|e| e.to_string())
 }
