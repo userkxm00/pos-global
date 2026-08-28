@@ -788,7 +788,9 @@ fn test_category_tree_surfaces_stranded_cyclic_data() {
 
     let tree = get_category_tree(&conn, false).expect("get tree");
     // Verify that the stranded cyclic nodes are surfaced as top-level nodes rather than silently dropped
-    let names: Vec<String> = tree.iter().map(|n| n.category.name.clone()).collect();
-    assert!(names.contains(&"Normal Root".to_string()));
-    assert!(names.contains(&"Cycle A".to_string()) || names.contains(&"Cycle B".to_string()));
+    assert!(tree.iter().any(|n| n.category.name == "Normal Root"));
+    assert!(
+        tree.iter().any(|n| n.category.name == "Cycle A")
+            || tree.iter().any(|n| n.category.name == "Cycle B")
+    );
 }
