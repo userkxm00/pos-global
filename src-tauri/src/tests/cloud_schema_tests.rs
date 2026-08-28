@@ -772,7 +772,7 @@ fn f1_23_migration_uses_row_locking_for_device_operations() {
 fn f1_25_test_suite_is_transaction_safe_and_fail_closed() {
     let statements: Vec<&str> = CROSS_TENANT_NEGATIVE_TEST_SQL
         .lines()
-        .map(|l| l.trim())
+        .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with("--"))
         .collect();
 

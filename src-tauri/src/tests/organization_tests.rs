@@ -290,7 +290,7 @@ fn tenant_isolation_boundary() {
         .unwrap()
         .query_map([&org_a.id], |row| row.get(0))
         .unwrap()
-        .map(|r| r.unwrap())
+        .map(Result::unwrap)
         .collect();
 
     assert_eq!(alpha_branches, vec!["branch-alpha"]);
@@ -300,7 +300,7 @@ fn tenant_isolation_boundary() {
         .unwrap()
         .query_map([&org_b.id], |row| row.get(0))
         .unwrap()
-        .map(|r| r.unwrap())
+        .map(Result::unwrap)
         .collect();
 
     assert_eq!(beta_branches, vec!["branch-beta"]);

@@ -93,7 +93,7 @@ pub fn hash_secret(secret: &str) -> Result<String, UserError> {
     let argon2 = Argon2::default();
     argon2
         .hash_password(secret.as_bytes(), &salt)
-        .map(|h| h.to_string())
+        .map(ToString::to_string)
         .map_err(|e| UserError::Database(format!("Argon2 hashing error: {e}")))
 }
 

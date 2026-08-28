@@ -264,6 +264,18 @@ const GET_PRODUCT_SQL: &str = "SELECT id, category_id, name, description, barcod
 
 const GET_PRODUCT_BY_BARCODE_SQL: &str = "SELECT id, category_id, name, description, barcode, product_type, base_price, cost_price, unit_type, requires_expiry, requires_serial, warranty_months, custom_attributes, is_active, created_at, updated_at FROM products WHERE barcode = ?1";
 
+/// Escapes SQL LIKE wildcards ('%', '_', and '\') using '\' as the escape character.
+fn escape_like_pattern(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for c in input.chars() {
+        if c == '\\' || c == '%' || c == '_' {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
 /// Creates a new product in the local SQLite database.
 pub fn create_product(
     conn: &Connection,
@@ -523,7 +535,7 @@ pub fn list_products(
         let trimmed_q = q.trim();
         if !trimmed_q.is_empty() {
             sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR barcode = ?)");
-            let pattern = format!("%{}%", crate::db::escape_like_pattern(trimmed_q));
+            let pattern = format!("%{}%", escape_like_pattern(trimmed_q));
             params_vec.push(Box::new(pattern));
             params_vec.push(Box::new(trimmed_q.to_string()));
         }
