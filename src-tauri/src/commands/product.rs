@@ -8,27 +8,36 @@ use crate::product::{
     get_catalog_organization_id, CreateProductInput, Product, ProductFilter, UpdateProductInput,
 };
 
-fn authorize_product_mutation(conn: &rusqlite::Connection, session_id: &str) -> Result<(), String> {
-    let catalog_org = get_catalog_organization_id(conn).map_err(|e| e.to_string())?;
+pub fn authorize_product_mutation(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<String, String> {
+    let catalog_org = get_catalog_organization_id(conn)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no catalog organization configured".to_string())?;
     require_scoped_permission(
         conn,
         session_id,
         Permission::ProductsManage,
-        catalog_org.as_deref(),
+        Some(&catalog_org),
         None,
     )
     .map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(catalog_org)
 }
 
-fn authorize_product_read(conn: &rusqlite::Connection, session_id: &str) -> Result<(), String> {
-    let catalog_org = get_catalog_organization_id(conn).map_err(|e| e.to_string())?;
-    let mut req = AuthorizeRequest::new(session_id);
-    if let Some(ref org) = catalog_org {
-        req = req.with_organization_scope(org);
-    }
-    req.execute(conn).map_err(|e| e.to_string())?;
-    Ok(())
+pub fn authorize_product_read(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<String, String> {
+    let catalog_org = get_catalog_organization_id(conn)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no catalog organization configured".to_string())?;
+    AuthorizeRequest::new(session_id)
+        .with_organization_scope(&catalog_org)
+        .execute(conn)
+        .map_err(|e| e.to_string())?;
+    Ok(catalog_org)
 }
 
 #[tauri::command]

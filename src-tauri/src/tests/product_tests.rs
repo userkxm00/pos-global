@@ -808,3 +808,87 @@ fn test_unauthenticated_or_revoked_session_denied_all_product_operations() {
         "Nonexistent session must be denied as Unauthenticated for permission checks"
     );
 }
+
+#[test]
+fn test_multiple_organizations_without_configured_catalog_org_fails_closed() {
+    let conn = setup_test_db();
+
+    // 1. Create Org A and Branch A
+    let org_a = create_organization(
+        &conn,
+        CreateOrganizationInput {
+            name: "Org Alpha".to_string(),
+            default_currency: Some("USD".to_string()),
+            default_language: Some("en".to_string()),
+        },
+    )
+    .expect("org a created");
+
+    let branch_a = create_branch(
+        &conn,
+        CreateBranchInput {
+            organization_id: org_a.id.clone(),
+            name: "Branch A".to_string(),
+            address: None,
+            currency: Some("USD".to_string()),
+            is_active: Some(true),
+        },
+    )
+    .expect("branch a created");
+
+    let user_a = create_test_user_with_creds(
+        &conn,
+        &branch_a.id,
+        "User Alpha",
+        Some("user_alpha_multi"),
+        None,
+        None,
+        "admin",
+    )
+    .expect("user a created");
+
+    let session_a = create_local_session(&conn, &user_a.id, &branch_a.id, "pin", None)
+        .expect("session created");
+
+    // 2. Create Org B and Branch B (ambiguous multi-tenant DB with no business_settings configured)
+    let org_b = create_organization(
+        &conn,
+        CreateOrganizationInput {
+            name: "Org Beta".to_string(),
+            default_currency: Some("EUR".to_string()),
+            default_language: Some("de".to_string()),
+        },
+    )
+    .expect("org b created");
+
+    create_branch(
+        &conn,
+        CreateBranchInput {
+            organization_id: org_b.id,
+            name: "Branch B".to_string(),
+            address: None,
+            currency: Some("EUR".to_string()),
+            is_active: Some(true),
+        },
+    )
+    .expect("branch b created");
+
+    // 3. get_catalog_organization_id must return Ok(None) due to ambiguous multi-org presence
+    let catalog_org = get_catalog_organization_id(&conn).expect("lookup succeeds");
+    assert_eq!(catalog_org, None);
+
+    // 4. Mutation and read command authorizers must fail closed
+    let mutation_err =
+        crate::commands::product::authorize_product_mutation(&conn, &session_a.id).unwrap_err();
+    assert!(
+        mutation_err.contains("no catalog organization configured"),
+        "Mutation must fail closed when catalog org is unresolved"
+    );
+
+    let read_err =
+        crate::commands::product::authorize_product_read(&conn, &session_a.id).unwrap_err();
+    assert!(
+        read_err.contains("no catalog organization configured"),
+        "Read must fail closed when catalog org is unresolved"
+    );
+}
