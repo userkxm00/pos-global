@@ -39,7 +39,8 @@ GRANT USAGE ON SCHEMA public, auth TO authenticated, anon;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth TO authenticated, anon;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public, auth TO authenticated, anon;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO authenticated, anon;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated;
 
 -- ============================================================
 -- 2. Test Fixtures Setup (Elevated Initial Context)
@@ -76,7 +77,7 @@ DECLARE
     reg_b_unpaired UUID := 'f1250003-bbbb-bbbb-bbbb-000000000002';
     user_b_id UUID := 'f1250004-bbbb-bbbb-bbbb-000000000002';
 
-    perm_id UUID;
+    perm_id UUID := 'f1250005-aaaa-aaaa-aaaa-000000000001';
 BEGIN
     -- Auth Users
     INSERT INTO auth.users (id, email) VALUES
@@ -129,14 +130,24 @@ BEGIN
         (user_b_id, org_b, branch_b, cashier_b, 'Bob Cashier Beta', 'bob_b', 'cashier', true)
     ON CONFLICT (id) DO NOTHING;
 
-    -- Permissions Catalog & User Permissions Override Fixture
-    SELECT id INTO perm_id FROM public.permissions WHERE code = 'sales.create' LIMIT 1;
-    IF perm_id IS NOT NULL THEN
-        INSERT INTO public.user_permissions (user_id, permission_id, effect) VALUES
-            (user_a_id, perm_id, 'allow'),
-            (user_b_id, perm_id, 'allow')
-        ON CONFLICT (user_id, permission_id) DO NOTHING;
+    -- Permissions Catalog & Role Permissions & User Permissions Override Fixture
+    INSERT INTO public.permissions (id, code, description) VALUES
+        (perm_id, 'sales.create', 'Permission to create sales transactions')
+    ON CONFLICT (code) DO UPDATE SET description = EXCLUDED.description
+    RETURNING id INTO perm_id;
+
+    IF perm_id IS NULL THEN
+        RAISE EXCEPTION 'FIXTURE ERROR: Failed to establish sales.create permission record';
     END IF;
+
+    INSERT INTO public.role_permissions (role, permission_id) VALUES
+        ('cashier', perm_id)
+    ON CONFLICT (role, permission_id) DO NOTHING;
+
+    INSERT INTO public.user_permissions (user_id, permission_id, effect) VALUES
+        (user_a_id, perm_id, 'allow'),
+        (user_b_id, perm_id, 'allow')
+    ON CONFLICT (user_id, permission_id) DO NOTHING;
 END $$;
 
 -- ============================================================
@@ -302,7 +313,15 @@ DECLARE
     mutated_cnt INTEGER := 0;
     initial_last_seen TIMESTAMPTZ;
     current_last_seen TIMESTAMPTZ;
+    curr_device TEXT;
+    curr_status TEXT;
 BEGIN
+    -- Baseline verification in elevated context
+    SELECT device_last_seen_at INTO initial_last_seen FROM public.registers WHERE id = reg_b_paired;
+    IF initial_last_seen IS NULL THEN
+        RAISE EXCEPTION 'FIXTURE ERROR: initial_last_seen for reg_b_paired is NULL';
+    END IF;
+
     SET LOCAL ROLE authenticated;
 
     -- N09: Cross-tenant device identifier collision on RPC pairing (device is active on Tenant B)
@@ -313,7 +332,7 @@ BEGIN
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN unique_violation THEN
-            RAISE NOTICE 'PASS N09: Cross-tenant active device collision rejected by unique index (idx_registers_active_device_unique)';
+            RAISE NOTICE 'PASS N09: Cross-tenant active device collision rejected by unique index (uq_registers_global_active_device)';
     END;
 
     -- N10: Manager A calling pair_device_to_register targeting Tenant B's register
@@ -338,9 +357,6 @@ BEGIN
     END;
 
     -- N12: Device Heartbeat Spoofing across Tenants
-    -- Record original last_seen_at for Tenant B paired register
-    SELECT device_last_seen_at INTO initial_last_seen FROM public.registers WHERE id = reg_b_paired;
-
     -- Sub-test 12a: Unaffiliated user calls heartbeat on Tenant B register
     PERFORM set_config('request.jwt.claim.sub', unaffiliated::text, true);
     BEGIN
@@ -374,20 +390,35 @@ BEGIN
             RAISE NOTICE 'PASS N12c: Mismatched device identifier heartbeat rejected with 42501 Mismatch';
     END;
 
-    -- Confirm Tenant B register last_seen timestamp was completely unaffected by spoofed attempts
+    -- Reset to elevated role to verify Tenant B timestamp was untouched
+    RESET ROLE;
     SELECT device_last_seen_at INTO current_last_seen FROM public.registers WHERE id = reg_b_paired;
-    IF current_last_seen <> initial_last_seen THEN
-        RAISE EXCEPTION 'HEARTBEAT INVARIANT BROKEN: Target register device_last_seen_at was updated by spoofed heartbeat';
+    IF current_last_seen IS DISTINCT FROM initial_last_seen THEN
+        RAISE EXCEPTION 'HEARTBEAT INVARIANT BROKEN: Target register device_last_seen_at was altered by spoofed heartbeat (initial: %, current: %)', initial_last_seen, current_last_seen;
     END IF;
 
     -- N13: Direct SQL manipulation of foreign tenant register pairing state
+    SET LOCAL ROLE authenticated;
     PERFORM set_config('request.jwt.claim.sub', admin_a::text, true);
-    UPDATE public.registers SET device_pairing_status = 'revoked', device_identifier = NULL WHERE id = reg_b_paired;
-    GET DIAGNOSTICS mutated_cnt = ROW_COUNT;
-    IF mutated_cnt > 0 THEN
-        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Admin A mutated % registers in Tenant B via direct SQL', mutated_cnt;
+    BEGIN
+        UPDATE public.registers SET device_pairing_status = 'revoked', device_identifier = NULL WHERE id = reg_b_paired;
+        GET DIAGNOSTICS mutated_cnt = ROW_COUNT;
+        IF mutated_cnt > 0 THEN
+            RAISE EXCEPTION 'RLS SECURITY VIOLATION: Admin A mutated % registers in Tenant B via direct SQL', mutated_cnt USING ERRCODE = 'TF001';
+        END IF;
+        RAISE NOTICE 'PASS N13: Direct SQL manipulation of foreign tenant register pairing state blocked by RLS (0 rows updated)';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS N13: Direct SQL manipulation of foreign tenant register rejected by RLS policy';
+    END;
+
+    -- Verify Tenant B register state in elevated context
+    RESET ROLE;
+    SELECT device_pairing_status, device_identifier INTO curr_status, curr_device FROM public.registers WHERE id = reg_b_paired;
+    IF curr_status <> 'paired' OR curr_device <> 'dev-beta-active-01' THEN
+        RAISE EXCEPTION 'INVARIANT BROKEN: Tenant B register was mutated by unauthorized caller';
     END IF;
-    RAISE NOTICE 'PASS N13: Direct SQL manipulation of foreign tenant register pairing state blocked by RLS (0 rows updated)';
 END $$;
 
 -- ============================================================
@@ -472,10 +503,22 @@ DECLARE
     owner_a UUID := '11111111-1111-1111-1111-111111111111';
     user_b_id UUID := 'f1250004-bbbb-bbbb-bbbb-000000000002';
     org_b UUID := 'f1250001-bbbb-bbbb-bbbb-000000000002';
+    perm_id UUID := 'f1250005-aaaa-aaaa-aaaa-000000000001';
 
-    perm_id UUID;
     mutated_cnt INTEGER := 0;
+    perm_count INTEGER := 0;
 BEGIN
+    -- Elevated pre-check: verify fixtures exist
+    SELECT COUNT(*) INTO perm_count FROM public.user_permissions WHERE user_id = user_b_id AND permission_id = perm_id;
+    IF perm_count < 1 THEN
+        RAISE EXCEPTION 'FIXTURE ERROR: user_permissions row missing for user_b_id';
+    END IF;
+
+    SELECT COUNT(*) INTO perm_count FROM public.role_permissions WHERE role = 'cashier' AND permission_id = perm_id;
+    IF perm_count < 1 THEN
+        RAISE EXCEPTION 'FIXTURE ERROR: role_permissions row missing for cashier role';
+    END IF;
+
     SET LOCAL ROLE authenticated;
 
     -- N19: Admin A attempts direct SQL INSERT into organization_members for Org B
@@ -491,28 +534,39 @@ BEGIN
     END;
 
     -- N20: Admin A attempts direct SQL INSERT of user_permission override for User B (in Org B)
-    SELECT id INTO perm_id FROM public.permissions WHERE code = 'sales.create' LIMIT 1;
-    IF perm_id IS NOT NULL THEN
-        BEGIN
-            INSERT INTO public.user_permissions (user_id, permission_id, effect)
-            VALUES (user_b_id, perm_id, 'deny');
-            RAISE EXCEPTION 'PERMISSION VIOLATION: Admin A inserted user_permission override for Tenant B user' USING ERRCODE = 'TF001';
-        EXCEPTION
-            WHEN SQLSTATE 'TF001' THEN RAISE;
-            WHEN insufficient_privilege THEN
-                RAISE NOTICE 'PASS N20: Cross-tenant user permission override injection rejected by RLS policy';
-        END;
-    END IF;
+    BEGIN
+        INSERT INTO public.user_permissions (user_id, permission_id, effect)
+        VALUES (user_b_id, perm_id, 'deny');
+        RAISE EXCEPTION 'PERMISSION VIOLATION: Admin A inserted user_permission override for Tenant B user' USING ERRCODE = 'TF001';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS N20: Cross-tenant user permission override injection rejected by RLS policy';
+    END;
 
     -- N21: Admin A attempts direct SQL DELETE of user_permissions for User B (in Org B)
-    DELETE FROM public.user_permissions WHERE user_id = user_b_id;
-    GET DIAGNOSTICS mutated_cnt = ROW_COUNT;
-    IF mutated_cnt > 0 THEN
-        RAISE EXCEPTION 'RLS SECURITY VIOLATION: Admin A deleted % user_permission rows in Org B', mutated_cnt;
+    BEGIN
+        DELETE FROM public.user_permissions WHERE user_id = user_b_id;
+        GET DIAGNOSTICS mutated_cnt = ROW_COUNT;
+        IF mutated_cnt > 0 THEN
+            RAISE EXCEPTION 'RLS SECURITY VIOLATION: Admin A deleted % user_permission rows in Org B', mutated_cnt USING ERRCODE = 'TF001';
+        END IF;
+        RAISE NOTICE 'PASS N21: Cross-tenant user permission override deletion blocked by RLS (0 rows deleted)';
+    EXCEPTION
+        WHEN SQLSTATE 'TF001' THEN RAISE;
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS N21: Cross-tenant user permission override deletion rejected by RLS policy';
+    END;
+
+    -- Elevated verification: confirm User B user_permissions row was NOT deleted
+    RESET ROLE;
+    SELECT COUNT(*) INTO perm_count FROM public.user_permissions WHERE user_id = user_b_id AND permission_id = perm_id;
+    IF perm_count < 1 THEN
+        RAISE EXCEPTION 'INVARIANT BROKEN: User B permission override was deleted by unauthorized caller';
     END IF;
-    RAISE NOTICE 'PASS N21: Cross-tenant user permission override deletion blocked by RLS (0 rows deleted)';
 
     -- N22: Tenant Owner attempts mutation of global catalog (permissions & role_permissions)
+    SET LOCAL ROLE authenticated;
     PERFORM set_config('request.jwt.claim.sub', owner_a::text, true);
     BEGIN
         INSERT INTO public.permissions (id, code, description)
@@ -525,7 +579,7 @@ BEGIN
     END;
 
     BEGIN
-        DELETE FROM public.role_permissions WHERE role = 'cashier';
+        DELETE FROM public.role_permissions WHERE role = 'cashier' AND permission_id = perm_id;
         GET DIAGNOSTICS mutated_cnt = ROW_COUNT;
         IF mutated_cnt > 0 THEN
             RAISE EXCEPTION 'CATALOG VIOLATION: Owner A deleted % role_permission catalog rows', mutated_cnt USING ERRCODE = 'TF001';
@@ -536,6 +590,13 @@ BEGIN
         WHEN insufficient_privilege THEN
             RAISE NOTICE 'PASS N22b: Global role_permissions catalog deletion rejected by RLS policy';
     END;
+
+    -- Elevated verification: confirm role_permissions row for cashier was NOT deleted
+    RESET ROLE;
+    SELECT COUNT(*) INTO perm_count FROM public.role_permissions WHERE role = 'cashier' AND permission_id = perm_id;
+    IF perm_count < 1 THEN
+        RAISE EXCEPTION 'INVARIANT BROKEN: Global role_permissions catalog row was deleted by tenant owner';
+    END IF;
 END $$;
 
 -- ============================================================
@@ -648,7 +709,9 @@ BEGIN
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN SQLSTATE '42501' THEN
-            RAISE NOTICE 'PASS N25a: Anonymous create_organization_with_initial_setup rejected with 42501 Authentication required';
+            RAISE NOTICE 'PASS N25a: Anonymous create_organization_with_initial_setup rejected with 42501';
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS N25a: Anonymous create_organization_with_initial_setup rejected by privilege check';
     END;
 
     BEGIN
@@ -657,7 +720,9 @@ BEGIN
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN SQLSTATE '42501' THEN
-            RAISE NOTICE 'PASS N25b: Anonymous pair_device_to_register rejected with 42501 Authentication required';
+            RAISE NOTICE 'PASS N25b: Anonymous pair_device_to_register rejected with 42501';
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS N25b: Anonymous pair_device_to_register rejected by privilege check';
     END;
 
     BEGIN
@@ -666,7 +731,9 @@ BEGIN
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN SQLSTATE '42501' THEN
-            RAISE NOTICE 'PASS N25c: Anonymous revoke_device_pairing rejected with 42501 Authentication required';
+            RAISE NOTICE 'PASS N25c: Anonymous revoke_device_pairing rejected with 42501';
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS N25c: Anonymous revoke_device_pairing rejected by privilege check';
     END;
 
     BEGIN
@@ -675,7 +742,9 @@ BEGIN
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN SQLSTATE '42501' THEN
-            RAISE NOTICE 'PASS N25d: Anonymous record_device_heartbeat rejected with 42501 Authentication required';
+            RAISE NOTICE 'PASS N25d: Anonymous record_device_heartbeat rejected with 42501';
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS N25d: Anonymous record_device_heartbeat rejected by privilege check';
     END;
 
     BEGIN
@@ -684,7 +753,9 @@ BEGIN
     EXCEPTION
         WHEN SQLSTATE 'TF001' THEN RAISE;
         WHEN SQLSTATE '42501' THEN
-            RAISE NOTICE 'PASS N25e: Anonymous set_organization_member_role rejected with 42501 Authentication required';
+            RAISE NOTICE 'PASS N25e: Anonymous set_organization_member_role rejected with 42501';
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE 'PASS N25e: Anonymous set_organization_member_role rejected by privilege check';
     END;
 END $$;
 

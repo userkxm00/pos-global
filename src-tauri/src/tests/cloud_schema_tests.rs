@@ -770,15 +770,28 @@ fn f1_23_migration_uses_row_locking_for_device_operations() {
 
 #[test]
 fn f1_25_test_suite_is_transaction_safe_and_fail_closed() {
+    let statements: Vec<&str> = CROSS_TENANT_NEGATIVE_TEST_SQL
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with("--"))
+        .collect();
+
+    assert!(
+        !statements.is_empty(),
+        "Cross-tenant negative test suite must contain executable statements"
+    );
+    assert_eq!(
+        statements.first().copied(),
+        Some("BEGIN;"),
+        "First executable statement in cross-tenant negative test suite must be 'BEGIN;'"
+    );
+    assert_eq!(
+        statements.last().copied(),
+        Some("ROLLBACK;"),
+        "Last executable statement in cross-tenant negative test suite must be 'ROLLBACK;'"
+    );
+
     let sql = normalize_whitespace(CROSS_TENANT_NEGATIVE_TEST_SQL);
-    assert!(
-        sql.starts_with("BEGIN;"),
-        "Cross-tenant negative test suite must start with BEGIN;"
-    );
-    assert!(
-        sql.ends_with("ROLLBACK;"),
-        "Cross-tenant negative test suite must end with ROLLBACK;"
-    );
     assert!(
         !sql.contains("WHEN OTHERS"),
         "Cross-tenant negative test suite MUST NOT use broad WHEN OTHERS exception handlers"
@@ -863,8 +876,8 @@ fn f1_25_test_suite_structures_all_six_security_suites() {
         "Expected Suite 3 definition in F1.25 test SQL"
     );
     assert!(
-        sql.contains("idx_registers_active_device_unique"),
-        "Expected idx_registers_active_device_unique reference in Suite 3"
+        sql.contains("uq_registers_global_active_device"),
+        "Expected uq_registers_global_active_device reference in Suite 3"
     );
 
     // Suite 4: Privileged RPC Attacks & Parameter Injection
