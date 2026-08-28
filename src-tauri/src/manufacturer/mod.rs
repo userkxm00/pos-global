@@ -182,6 +182,9 @@ pub fn validate_email(email: Option<&str>) -> Result<Option<String>, Manufacture
 const MANUFACTURER_COLUMNS: &str =
     "id, name, description, website, support_phone, support_email, is_active, created_at, updated_at";
 
+const GET_MANUFACTURER_SQL: &str =
+    "SELECT id, name, description, website, support_phone, support_email, is_active, created_at, updated_at FROM manufacturers WHERE id = ?1";
+
 fn map_manufacturer_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Manufacturer> {
     let is_active_int: i64 = row.get("is_active")?;
     Ok(Manufacturer {
@@ -211,7 +214,6 @@ pub fn create_manufacturer(
     let id = uuid::Uuid::new_v4().to_string();
 
     conn.execute(
-
         "INSERT INTO manufacturers (
             id, name, description, website, support_phone, support_email, is_active, created_at, updated_at
         ) VALUES (
@@ -230,9 +232,8 @@ pub fn get_manufacturer(
     conn: &Connection,
     id: &str,
 ) -> Result<Option<Manufacturer>, ManufacturerError> {
-    let sql = format!("SELECT {MANUFACTURER_COLUMNS} FROM manufacturers WHERE id = ?1");
     let result = conn
-        .query_row(&sql, [id], map_manufacturer_row)
+        .query_row(GET_MANUFACTURER_SQL, [id], map_manufacturer_row)
         .optional()?;
     Ok(result)
 }
@@ -328,9 +329,6 @@ pub fn list_manufacturers(
     let mut stmt = conn.prepare(&sql)?;
     let mfr_iter = stmt.query_map(params_slice.as_slice(), map_manufacturer_row)?;
 
-    let mut manufacturers = Vec::new();
-    for m in mfr_iter {
-        manufacturers.push(m?);
-    }
+    let manufacturers = mfr_iter.collect::<rusqlite::Result<Vec<Manufacturer>>>()?;
     Ok(manufacturers)
 }

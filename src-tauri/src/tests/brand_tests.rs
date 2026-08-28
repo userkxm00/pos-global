@@ -1,7 +1,7 @@
 use crate::auth::middleware::{require_permission, AuthMiddlewareError};
 use crate::brand::{
-    create_brand, delete_brand, get_brand, list_brands, update_brand, validate_name,
-    validate_website, BrandError, BrandFilter, CreateBrandInput, UpdateBrandInput,
+    create_brand, delete_brand, get_brand, list_brands, update_brand, validate_description,
+    validate_name, validate_website, BrandError, BrandFilter, CreateBrandInput, UpdateBrandInput,
 };
 use crate::permission::Permission;
 use crate::tests::test_helpers::{
@@ -50,6 +50,16 @@ fn test_validate_brand_name_rejects_empty_and_too_long() {
         validate_name(&too_long),
         Err(BrandError::Validation(_))
     ));
+}
+
+#[test]
+fn test_validate_brand_description() {
+    assert_eq!(validate_description(None), None);
+    assert_eq!(validate_description(Some("   ")), None);
+    assert_eq!(
+        validate_description(Some("  Official brand gear  ")),
+        Some("Official brand gear".to_string())
+    );
 }
 
 #[test]

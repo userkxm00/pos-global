@@ -106,6 +106,9 @@ pub fn validate_website(url: Option<&str>) -> Result<Option<String>, BrandError>
 
 const BRAND_COLUMNS: &str = "id, name, description, website, is_active, created_at, updated_at";
 
+const GET_BRAND_SQL: &str =
+    "SELECT id, name, description, website, is_active, created_at, updated_at FROM brands WHERE id = ?1";
+
 fn map_brand_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Brand> {
     let is_active_int: i64 = row.get("is_active")?;
     Ok(Brand {
@@ -142,8 +145,9 @@ pub fn create_brand(conn: &Connection, input: CreateBrandInput) -> Result<Brand,
 
 /// Retrieves a brand by unique ID.
 pub fn get_brand(conn: &Connection, id: &str) -> Result<Option<Brand>, BrandError> {
-    let sql = format!("SELECT {BRAND_COLUMNS} FROM brands WHERE id = ?1");
-    let result = conn.query_row(&sql, [id], map_brand_row).optional()?;
+    let result = conn
+        .query_row(GET_BRAND_SQL, [id], map_brand_row)
+        .optional()?;
     Ok(result)
 }
 
@@ -219,9 +223,6 @@ pub fn list_brands(conn: &Connection, filter: &BrandFilter) -> Result<Vec<Brand>
     let mut stmt = conn.prepare(&sql)?;
     let brand_iter = stmt.query_map(params_slice.as_slice(), map_brand_row)?;
 
-    let mut brands = Vec::new();
-    for b in brand_iter {
-        brands.push(b?);
-    }
+    let brands = brand_iter.collect::<rusqlite::Result<Vec<Brand>>>()?;
     Ok(brands)
 }

@@ -89,18 +89,19 @@ impl std::error::Error for CategoryError {}
 impl From<rusqlite::Error> for CategoryError {
     fn from(e: rusqlite::Error) -> Self {
         if let rusqlite::Error::SqliteFailure(ref f, Some(ref msg)) = e {
-            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation {
-                if msg.contains("idx_categories_root_name_active")
+            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+                && (msg.contains("idx_categories_root_name_active")
                     || msg.contains("idx_categories_sibling_name_active")
-                    || msg.contains("UNIQUE constraint failed: categories.name")
-                {
-                    return CategoryError::DuplicateName(
-                        "An active category with this name already exists in this scope".into(),
-                    );
-                }
-                if msg.contains("FOREIGN KEY constraint failed") {
-                    return CategoryError::NotFound("Parent category not found".into());
-                }
+                    || msg.contains("UNIQUE constraint failed: categories.name"))
+            {
+                return CategoryError::DuplicateName(
+                    "An active category with this name already exists in this scope".into(),
+                );
+            }
+            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+                && msg.contains("FOREIGN KEY constraint failed")
+            {
+                return CategoryError::NotFound("Parent category not found".into());
             }
         }
         CategoryError::Database(e.to_string())
@@ -139,6 +140,9 @@ pub fn normalize_parent_id(pid: Option<&str>) -> Option<String> {
 
 const CATEGORY_COLUMNS: &str =
     "id, name, parent_id, description, is_active, created_at, updated_at";
+
+const GET_CATEGORY_SQL: &str =
+    "SELECT id, name, parent_id, description, is_active, created_at, updated_at FROM categories WHERE id = ?1";
 
 fn map_category_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Category> {
     let is_active_int: i64 = row.get("is_active")?;
@@ -260,8 +264,9 @@ pub fn create_category(
 
 /// Retrieves a category by unique ID.
 pub fn get_category(conn: &Connection, id: &str) -> Result<Option<Category>, CategoryError> {
-    let sql = format!("SELECT {CATEGORY_COLUMNS} FROM categories WHERE id = ?1");
-    let result = conn.query_row(&sql, [id], map_category_row).optional()?;
+    let result = conn
+        .query_row(GET_CATEGORY_SQL, [id], map_category_row)
+        .optional()?;
     Ok(result)
 }
 
@@ -402,10 +407,7 @@ pub fn list_categories(
     let mut stmt = conn.prepare(&sql)?;
     let category_iter = stmt.query_map(params_slice.as_slice(), map_category_row)?;
 
-    let mut categories = Vec::new();
-    for c in category_iter {
-        categories.push(c?);
-    }
+    let categories = category_iter.collect::<rusqlite::Result<Vec<Category>>>()?;
     Ok(categories)
 }
 
@@ -434,7 +436,7 @@ fn build_category_tree_node(
     children_map: &mut HashMap<String, Vec<Category>>,
 ) -> CategoryTreeNode {
     let mut raw_children = children_map.remove(&cat.id).unwrap_or_default();
-    raw_children.sort_by_key(|a| a.name.to_lowercase());
+    raw_children.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     let children = raw_children
         .into_iter()
         .map(|child| build_category_tree_node(child, children_map))
@@ -451,10 +453,9 @@ fn drain_stranded_categories(
     tree: &mut Vec<CategoryTreeNode>,
 ) {
     while let Some(next_key) = children_map.keys().next().cloned() {
-        if let Some(stranded_list) = children_map.remove(&next_key) {
-            for stranded in stranded_list {
-                tree.push(build_category_tree_node(stranded, &mut children_map));
-            }
+        let stranded_list = children_map.remove(&next_key).unwrap_or_default();
+        for stranded in stranded_list {
+            tree.push(build_category_tree_node(stranded, &mut children_map));
         }
     }
 }
@@ -473,7 +474,7 @@ pub fn get_category_tree(
     let all_categories = list_categories(conn, &filter)?;
     let (mut root_categories, mut children_by_parent) = partition_categories(all_categories);
 
-    root_categories.sort_by_key(|a| a.name.to_lowercase());
+    root_categories.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
     let mut tree: Vec<CategoryTreeNode> = root_categories
         .into_iter()
@@ -482,7 +483,12 @@ pub fn get_category_tree(
 
     drain_stranded_categories(children_by_parent, &mut tree);
 
-    tree.sort_by_key(|a| a.category.name.to_lowercase());
+    tree.sort_by(|a, b| {
+        a.category
+            .name
+            .to_lowercase()
+            .cmp(&b.category.name.to_lowercase())
+    });
 
     Ok(tree)
 }

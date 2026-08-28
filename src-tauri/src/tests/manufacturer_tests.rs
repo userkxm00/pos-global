@@ -1,8 +1,9 @@
 use crate::auth::middleware::{require_permission, AuthMiddlewareError};
 use crate::manufacturer::{
     create_manufacturer, delete_manufacturer, get_manufacturer, list_manufacturers,
-    update_manufacturer, validate_email, validate_name, validate_phone, validate_website,
-    CreateManufacturerInput, ManufacturerError, ManufacturerFilter, UpdateManufacturerInput,
+    update_manufacturer, validate_description, validate_email, validate_name, validate_phone,
+    validate_website, CreateManufacturerInput, ManufacturerError, ManufacturerFilter,
+    UpdateManufacturerInput,
 };
 use crate::permission::Permission;
 use crate::tests::test_helpers::{
@@ -39,6 +40,16 @@ fn test_validate_manufacturer_name_accepts_multibyte_unicode_up_to_255_chars() {
     let exact_255_unicode: String = "ص".repeat(255);
     let result_255 = validate_name(&exact_255_unicode).expect("exact 255 accepted");
     assert_eq!(result_255, exact_255_unicode);
+}
+
+#[test]
+fn test_validate_manufacturer_description() {
+    assert_eq!(validate_description(None), None);
+    assert_eq!(validate_description(Some("   ")), None);
+    assert_eq!(
+        validate_description(Some("  OEM partner description  ")),
+        Some("OEM partner description".to_string())
+    );
 }
 
 #[test]
