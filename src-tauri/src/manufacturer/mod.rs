@@ -128,15 +128,9 @@ pub fn validate_phone(phone: Option<&str>) -> Result<Option<String>, Manufacture
                     "Support phone must contain at least 3 digits".into(),
                 ));
             }
-            let valid = s.chars().all(|c| {
-                c.is_ascii_digit()
-                    || c == '+'
-                    || c == '-'
-                    || c == ' '
-                    || c == '('
-                    || c == ')'
-                    || c == '.'
-            });
+            let valid = s
+                .chars()
+                .all(|c| matches!(c, '+' | '-' | ' ' | '(' | ')' | '.' | '0'..='9'));
             if !valid {
                 return Err(ManufacturerError::Validation(
                     "Support phone contains invalid characters".into(),
@@ -169,7 +163,7 @@ pub fn validate_email(email: Option<&str>) -> Result<Option<String>, Manufacture
                 ));
             }
             let domain_labels: Vec<&str> = parts[1].split('.').collect();
-            if domain_labels.len() < 2 || domain_labels.iter().any(|label| label.is_empty()) {
+            if domain_labels.len() < 2 || domain_labels.iter().any(str::is_empty) {
                 return Err(ManufacturerError::Validation(
                     "Support email must be a valid email address".into(),
                 ));

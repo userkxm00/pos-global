@@ -308,8 +308,7 @@ fn test_reuse_category_name_after_archive_allowed() {
 fn test_delete_category_with_active_children_rejected() {
     let conn = setup_test_db();
     let parent = create_category(&conn, make_category_fixture("Parent Cat", None)).expect("parent");
-    let _child = create_category(&conn, make_category_fixture("Child Cat", Some(&parent.id)))
-        .expect("child");
+    create_category(&conn, make_category_fixture("Child Cat", Some(&parent.id))).expect("child");
 
     let err = delete_category(&conn, &parent.id).unwrap_err();
     assert!(matches!(err, CategoryError::HasActiveChildren(_)));
@@ -366,10 +365,8 @@ fn test_get_category_tree_hierarchy() {
     let drinks = create_category(&conn, make_category_fixture("Drinks", None)).expect("drinks");
 
     let hot = create_category(&conn, make_category_fixture("Hot", Some(&drinks.id))).expect("hot");
-    let cold =
-        create_category(&conn, make_category_fixture("Cold", Some(&drinks.id))).expect("cold");
-    let _tea =
-        create_category(&conn, make_category_fixture("Green Tea", Some(&hot.id))).expect("tea");
+    create_category(&conn, make_category_fixture("Cold", Some(&drinks.id))).expect("cold");
+    create_category(&conn, make_category_fixture("Green Tea", Some(&hot.id))).expect("tea");
 
     let tree = get_category_tree(&conn, false).expect("tree built");
     assert_eq!(tree.len(), 2); // 2 root categories: Drinks, Food (alphabetical)

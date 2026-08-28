@@ -83,7 +83,7 @@ pub fn init_database(conn: &Connection) -> Result<()> {
 pub fn escape_like_pattern(input: &str) -> String {
     let mut escaped = String::with_capacity(input.len());
     for c in input.chars() {
-        if c == '%' || c == '_' || c == '\\' {
+        if matches!(c, '%' | '_' | '\\') {
             escaped.push('\\');
         }
         escaped.push(c);
@@ -111,7 +111,7 @@ pub fn validate_url_syntax(url: Option<&str>) -> Result<Option<String>, &'static
             };
             let host = host_part.split(['/', '?', '#', ':']).next().unwrap_or("");
             let labels: Vec<&str> = host.split('.').collect();
-            if labels.len() < 2 || labels.iter().any(|l| l.is_empty()) {
+            if labels.len() < 2 || labels.iter().any(str::is_empty) {
                 return Err("Website URL must be a valid web address or domain");
             }
             Ok(Some(s.to_string()))
