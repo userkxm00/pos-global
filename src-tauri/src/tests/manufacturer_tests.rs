@@ -1,15 +1,9 @@
-use crate::auth::middleware::{require_permission, AuthMiddlewareError, AuthorizeRequest};
 use crate::manufacturer::{
     create_manufacturer, delete_manufacturer, get_manufacturer, list_manufacturers,
     update_manufacturer, validate_email, validate_name, validate_phone, validate_website,
     CreateManufacturerInput, ManufacturerError, ManufacturerFilter, UpdateManufacturerInput,
 };
-use crate::permission::Permission;
-use crate::product::get_catalog_organization_id;
-use crate::tests::test_helpers::{
-    create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
-};
-use crate::user::session::create_local_session;
+use crate::tests::test_helpers::setup_test_db;
 
 fn make_manufacturer_fixture(name: &str) -> CreateManufacturerInput {
     CreateManufacturerInput {
