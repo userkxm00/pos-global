@@ -4,7 +4,7 @@
 use crate::db::DbState;
 use crate::product::{CreateProductInput, Product, ProductFilter, UpdateProductInput};
 
-pub use super::{
+use super::{
     authorize_catalog_mutation as authorize_product_mutation,
     authorize_catalog_read as authorize_product_read,
 };

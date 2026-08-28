@@ -925,14 +925,13 @@ fn test_multiple_organizations_without_configured_catalog_org_fails_closed() {
 
     // 4. Mutation and read command authorizers must fail closed
     let mutation_err =
-        crate::commands::product::authorize_product_mutation(&conn, &session_a.id).unwrap_err();
+        crate::commands::authorize_catalog_mutation(&conn, &session_a.id).unwrap_err();
     assert!(
         mutation_err.contains("no catalog organization configured"),
         "Mutation must fail closed when catalog org is unresolved"
     );
 
-    let read_err =
-        crate::commands::product::authorize_product_read(&conn, &session_a.id).unwrap_err();
+    let read_err = crate::commands::authorize_catalog_read(&conn, &session_a.id).unwrap_err();
     assert!(
         read_err.contains("no catalog organization configured"),
         "Read must fail closed when catalog org is unresolved"
