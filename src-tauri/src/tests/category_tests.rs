@@ -747,7 +747,7 @@ fn test_category_hierarchy_depth_limit_and_deep_valid_chain() {
     let new_root =
         create_category(&conn, make_category_fixture("New Root", None)).expect("new root");
     let check =
-        crate::category::check_category_cycle(&conn, prev_id.as_ref().unwrap(), &new_root.id);
+        crate::category::check_category_cycle(&conn, prev_id.as_deref().unwrap(), &new_root.id);
     assert!(check.is_ok());
 
     // Create chain exceeding MAX_DEFENSIVE_STEPS (50) to test HierarchyDepthExceeded
@@ -767,9 +767,12 @@ fn test_category_hierarchy_depth_limit_and_deep_valid_chain() {
         chain_head = Some(cat_id);
     }
 
-    let deep_err =
-        crate::category::check_category_cycle(&conn, "unrelated_id", chain_head.as_ref().unwrap())
-            .unwrap_err();
+    let deep_err = crate::category::check_category_cycle(
+        &conn,
+        "unrelated_id",
+        chain_head.as_deref().unwrap(),
+    )
+    .unwrap_err();
     assert!(matches!(deep_err, CategoryError::HierarchyDepthExceeded(_)));
 }
 

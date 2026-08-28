@@ -1,7 +1,7 @@
 // Tauri command boundary for Brand operations.
 // F2.02 — Categories, Brands, Manufacturers
 
-use crate::brand::{self, Brand, BrandFilter, CreateBrandInput, UpdateBrandInput};
+use crate::brand::{Brand, BrandFilter, CreateBrandInput, UpdateBrandInput};
 use crate::db::DbState;
 
 use super::{
@@ -21,7 +21,7 @@ pub fn create_brand(
         .map_err(|e| format!("database lock failed: {e}"))?;
 
     authorize_brand_mutation(&conn, &session_id)?;
-    brand::create_brand(&conn, request).map_err(|e| e.to_string())
+    crate::brand::create_brand(&conn, request).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -36,7 +36,7 @@ pub fn get_brand(
         .map_err(|e| format!("database lock failed: {e}"))?;
 
     authorize_brand_read(&conn, &session_id)?;
-    brand::get_brand(&conn, &id).map_err(|e| e.to_string())
+    crate::brand::get_brand(&conn, &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -51,7 +51,7 @@ pub fn update_brand(
         .map_err(|e| format!("database lock failed: {e}"))?;
 
     authorize_brand_mutation(&conn, &session_id)?;
-    brand::update_brand(&conn, request).map_err(|e| e.to_string())
+    crate::brand::update_brand(&conn, request).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -66,7 +66,7 @@ pub fn delete_brand(
         .map_err(|e| format!("database lock failed: {e}"))?;
 
     authorize_brand_mutation(&conn, &session_id)?;
-    brand::delete_brand(&conn, &id).map_err(|e| e.to_string())
+    crate::brand::delete_brand(&conn, &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -82,5 +82,5 @@ pub fn list_brands(
 
     authorize_brand_read(&conn, &session_id)?;
     let f = filter.unwrap_or_default();
-    brand::list_brands(&conn, &f).map_err(|e| e.to_string())
+    crate::brand::list_brands(&conn, &f).map_err(|e| e.to_string())
 }

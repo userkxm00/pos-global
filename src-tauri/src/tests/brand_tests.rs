@@ -1,8 +1,13 @@
+use crate::auth::middleware::{require_permission, AuthMiddlewareError};
 use crate::brand::{
     create_brand, delete_brand, get_brand, list_brands, update_brand, validate_name,
     validate_website, BrandError, BrandFilter, CreateBrandInput, UpdateBrandInput,
 };
-use crate::tests::test_helpers::setup_test_db;
+use crate::permission::Permission;
+use crate::tests::test_helpers::{
+    create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
+};
+use crate::user::session::create_local_session;
 
 fn make_brand_fixture(name: &str) -> CreateBrandInput {
     CreateBrandInput {

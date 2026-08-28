@@ -2,7 +2,7 @@
 // F2.02 — Categories, Brands, Manufacturers
 
 use crate::category::{
-    self, Category, CategoryFilter, CategoryTreeNode, CreateCategoryInput, UpdateCategoryInput,
+    Category, CategoryFilter, CategoryTreeNode, CreateCategoryInput, UpdateCategoryInput,
 };
 use crate::db::DbState;
 
@@ -23,7 +23,7 @@ pub fn create_category(
         .map_err(|e| format!("database lock failed: {e}"))?;
 
     authorize_category_mutation(&conn, &session_id)?;
-    category::create_category(&conn, request).map_err(|e| e.to_string())
+    crate::category::create_category(&conn, request).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -38,7 +38,7 @@ pub fn get_category(
         .map_err(|e| format!("database lock failed: {e}"))?;
 
     authorize_category_read(&conn, &session_id)?;
-    category::get_category(&conn, &id).map_err(|e| e.to_string())
+    crate::category::get_category(&conn, &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -53,7 +53,7 @@ pub fn update_category(
         .map_err(|e| format!("database lock failed: {e}"))?;
 
     authorize_category_mutation(&conn, &session_id)?;
-    category::update_category(&conn, request).map_err(|e| e.to_string())
+    crate::category::update_category(&conn, request).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -68,7 +68,7 @@ pub fn delete_category(
         .map_err(|e| format!("database lock failed: {e}"))?;
 
     authorize_category_mutation(&conn, &session_id)?;
-    category::delete_category(&conn, &id).map_err(|e| e.to_string())
+    crate::category::delete_category(&conn, &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -84,7 +84,7 @@ pub fn list_categories(
 
     authorize_category_read(&conn, &session_id)?;
     let f = filter.unwrap_or_default();
-    category::list_categories(&conn, &f).map_err(|e| e.to_string())
+    crate::category::list_categories(&conn, &f).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -99,6 +99,6 @@ pub fn get_category_tree(
         .map_err(|e| format!("database lock failed: {e}"))?;
 
     authorize_category_read(&conn, &session_id)?;
-    category::get_category_tree(&conn, include_inactive.unwrap_or_default())
+    crate::category::get_category_tree(&conn, include_inactive.unwrap_or_default())
         .map_err(|e| e.to_string())
 }
