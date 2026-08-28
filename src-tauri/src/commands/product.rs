@@ -1,44 +1,13 @@
 // Tauri command boundary for Product CRUD operations.
 // F2.01 — Product CRUD
 
-use crate::auth::middleware::{require_scoped_permission, AuthorizeRequest};
 use crate::db::DbState;
-use crate::permission::Permission;
-use crate::product::{
-    get_catalog_organization_id, CreateProductInput, Product, ProductFilter, UpdateProductInput,
+use crate::product::{CreateProductInput, Product, ProductFilter, UpdateProductInput};
+
+pub use super::{
+    authorize_catalog_mutation as authorize_product_mutation,
+    authorize_catalog_read as authorize_product_read,
 };
-
-pub fn authorize_product_mutation(
-    conn: &rusqlite::Connection,
-    session_id: &str,
-) -> Result<String, String> {
-    let catalog_org = get_catalog_organization_id(conn)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "no catalog organization configured".to_string())?;
-    require_scoped_permission(
-        conn,
-        session_id,
-        Permission::ProductsManage,
-        Some(&catalog_org),
-        None,
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(catalog_org)
-}
-
-pub fn authorize_product_read(
-    conn: &rusqlite::Connection,
-    session_id: &str,
-) -> Result<String, String> {
-    let catalog_org = get_catalog_organization_id(conn)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "no catalog organization configured".to_string())?;
-    AuthorizeRequest::new(session_id)
-        .with_organization_scope(&catalog_org)
-        .execute(conn)
-        .map_err(|e| e.to_string())?;
-    Ok(catalog_org)
-}
 
 #[tauri::command]
 pub fn create_product(

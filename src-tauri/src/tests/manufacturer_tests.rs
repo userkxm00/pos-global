@@ -44,8 +44,8 @@ fn test_validate_manufacturer_name_accepts_multibyte_unicode_up_to_255_chars() {
 
 #[test]
 fn test_validate_manufacturer_description() {
-    assert_eq!(validate_description(None), None);
-    assert_eq!(validate_description(Some("   ")), None);
+    assert!(validate_description(None).is_none());
+    assert!(validate_description(Some("   ")).is_none());
     assert_eq!(
         validate_description(Some("  OEM partner description  ")),
         Some("OEM partner description".to_string())

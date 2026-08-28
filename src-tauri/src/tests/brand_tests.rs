@@ -54,8 +54,8 @@ fn test_validate_brand_name_rejects_empty_and_too_long() {
 
 #[test]
 fn test_validate_brand_description() {
-    assert_eq!(validate_description(None), None);
-    assert_eq!(validate_description(Some("   ")), None);
+    assert!(validate_description(None).is_none());
+    assert!(validate_description(Some("   ")).is_none());
     assert_eq!(
         validate_description(Some("  Official brand gear  ")),
         Some("Official brand gear".to_string())
@@ -64,8 +64,8 @@ fn test_validate_brand_description() {
 
 #[test]
 fn test_validate_brand_website() {
-    assert_eq!(validate_website(None).expect("none"), None);
-    assert_eq!(validate_website(Some("   ")).expect("empty"), None);
+    assert!(validate_website(None).expect("none").is_none());
+    assert!(validate_website(Some("   ")).expect("empty").is_none());
     assert_eq!(
         validate_website(Some("  https://acme.com  ")).expect("valid"),
         Some("https://acme.com".to_string())

@@ -75,8 +75,8 @@ fn test_validate_category_name_rejects_over_255_unicode_chars() {
 
 #[test]
 fn test_validate_category_description() {
-    assert_eq!(validate_description(None), None);
-    assert_eq!(validate_description(Some("   ")), None);
+    assert!(validate_description(None).is_none());
+    assert!(validate_description(Some("   ")).is_none());
     assert_eq!(
         validate_description(Some("  Premium artisanal selections  ")),
         Some("Premium artisanal selections".to_string())
@@ -98,7 +98,7 @@ fn test_create_and_get_root_category() {
 
     let created = create_category(&conn, input).expect("category created");
     assert_eq!(created.name, "Beverages");
-    assert_eq!(created.parent_id, None);
+    assert!(created.parent_id.is_none());
     assert_eq!(created.description.as_deref(), Some("All drinks"));
     assert!(created.is_active);
     assert!(!created.id.is_empty());
@@ -241,7 +241,7 @@ fn test_update_category_safe_reparenting_and_root_reparenting() {
         },
     )
     .expect("reparent to root");
-    assert_eq!(root_item.parent_id, None);
+    assert!(root_item.parent_id.is_none());
 }
 
 // =========================================================================
