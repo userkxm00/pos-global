@@ -221,8 +221,7 @@ pub fn validate_barcode(barcode: Option<&str>) -> Option<String> {
 /// Validates product type. Allowed types: 'simple', 'variable', 'weighted'.
 pub fn validate_product_type(ptype: Option<&str>) -> Result<String, ProductError> {
     match ptype.map(str::trim).filter(|s| !s.is_empty()) {
-        None => Ok("simple".to_string()),
-        Some("simple") => Ok("simple".to_string()),
+        None | Some("simple") => Ok("simple".to_string()),
         Some("variable") => Ok("variable".to_string()),
         Some("weighted") => Ok("weighted".to_string()),
         Some(invalid) => Err(ProductError::Validation(format!(
