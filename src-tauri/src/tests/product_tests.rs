@@ -185,6 +185,10 @@ fn test_money_exact_round_trip_conversions() {
         (100, 1.0),
         (25000, 250.0),
         (12345678, 123456.78),
+        (
+            MAX_SAFE_MINOR_UNITS - 1,
+            (MAX_SAFE_MINOR_UNITS - 1) as f64 / 100.0,
+        ),
         (MAX_SAFE_MINOR_UNITS, MAX_SAFE_MINOR_UNITS as f64 / 100.0),
     ];
 
@@ -192,6 +196,46 @@ fn test_money_exact_round_trip_conversions() {
         assert_eq!(minor_to_real(minor), real);
         assert_eq!(real_to_minor(real), minor);
     }
+}
+
+#[test]
+fn test_product_price_full_persistence_roundtrip_at_bounds() {
+    let conn = setup_test_db();
+    let created = create_product(
+        &conn,
+        CreateProductInput {
+            name: "High Value Asset".to_string(),
+            description: None,
+            category_id: None,
+            barcode: Some("BC-BOUND-001".to_string()),
+            product_type: None,
+            base_price_minor: MAX_SAFE_MINOR_UNITS,
+            cost_price_minor: Some(MAX_SAFE_MINOR_UNITS - 100),
+            unit_type: None,
+            requires_expiry: None,
+            requires_serial: None,
+            warranty_months: None,
+            custom_attributes: None,
+        },
+    )
+    .expect("product created at maximum boundary");
+
+    assert_eq!(created.base_price_minor, MAX_SAFE_MINOR_UNITS);
+    assert_eq!(created.cost_price_minor, Some(MAX_SAFE_MINOR_UNITS - 100));
+
+    let fetched = get_product(&conn, &created.id)
+        .expect("query succeeds")
+        .expect("product found");
+
+    assert_eq!(
+        fetched.base_price_minor, MAX_SAFE_MINOR_UNITS,
+        "write -> SQLite REAL -> read must return exact base_price_minor without 1-unit deviation"
+    );
+    assert_eq!(
+        fetched.cost_price_minor,
+        Some(MAX_SAFE_MINOR_UNITS - 100),
+        "write -> SQLite REAL -> read must return exact cost_price_minor without 1-unit deviation"
+    );
 }
 
 // =========================================================================

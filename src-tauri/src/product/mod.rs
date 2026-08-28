@@ -207,20 +207,20 @@ pub fn validate_cost_price_minor(cost: Option<i64>) -> Result<Option<i64>, Produ
 /// Validates barcode. Trims whitespace and normalizes empty string to None.
 pub fn validate_barcode(barcode: Option<&str>) -> Option<String> {
     barcode
-        .map(|s| s.trim())
+        .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+        .map(ToString::to_string)
 }
 
 /// Validates product type. Allowed types: 'simple', 'variable', 'weighted'.
 pub fn validate_product_type(ptype: Option<&str>) -> Result<String, ProductError> {
-    match ptype.map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    match ptype.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok("simple".to_string()),
         Some("simple") => Ok("simple".to_string()),
         Some("variable") => Ok("variable".to_string()),
         Some("weighted") => Ok("weighted".to_string()),
-        Some(other) => Err(ProductError::Validation(format!(
-            "Invalid product type '{other}'. Allowed types: simple, variable, weighted"
+        Some(invalid) => Err(ProductError::Validation(format!(
+            "Invalid product_type '{invalid}'. Allowed: 'simple', 'variable', 'weighted'"
         ))),
     }
 }
@@ -551,7 +551,7 @@ pub fn list_products(
         (None, None) => {}
     }
 
-    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
     let mut stmt = conn.prepare(&sql)?;
     let product_iter = stmt.query_map(params_slice.as_slice(), map_product_row)?;
 
