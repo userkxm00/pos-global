@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Result, ToSql};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -125,7 +125,7 @@ pub fn validate_url_syntax(url: Option<&str>) -> Result<Option<String>, &'static
 /// Appends a query search clause for name and description with escaped LIKE wildcards.
 pub fn append_name_or_description_search(
     sql: &mut String,
-    params_vec: &mut Vec<Box<dyn rusqlite::ToSql>>,
+    params_vec: &mut Vec<Box<dyn ToSql>>,
     query: Option<&str>,
 ) {
     if let Some(q) = query {
@@ -133,8 +133,8 @@ pub fn append_name_or_description_search(
         if !trimmed.is_empty() {
             sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')");
             let pattern = format!("%{}%", escape_like_pattern(trimmed));
-            params_vec.push(Box::new(pattern.clone()));
-            params_vec.push(Box::new(pattern));
+            params_vec.push(Box::new(pattern.clone()) as Box<dyn ToSql>);
+            params_vec.push(Box::new(pattern) as Box<dyn ToSql>);
         }
     }
 }

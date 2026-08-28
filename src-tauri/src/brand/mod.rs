@@ -1,7 +1,6 @@
 // Brand domain model, validation rules, and SQLite database operations.
 // F2.02 — Categories, Brands, Manufacturers
 
-use crate::db::escape_like_pattern;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 

@@ -1,7 +1,6 @@
 // Category domain model, validation rules, hierarchy invariants, and database operations.
 // F2.02 — Categories, Brands, Manufacturers
 
-use crate::db::escape_like_pattern;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
