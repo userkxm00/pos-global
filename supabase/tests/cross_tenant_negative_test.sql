@@ -77,7 +77,7 @@ DECLARE
     reg_b_unpaired UUID := 'f1250003-bbbb-bbbb-bbbb-000000000002';
     user_b_id UUID := 'f1250004-bbbb-bbbb-bbbb-000000000002';
 
-    perm_id UUID := 'f1250005-aaaa-aaaa-aaaa-000000000001';
+    perm_id UUID;
 BEGIN
     -- Auth Users
     INSERT INTO auth.users (id, email) VALUES
@@ -131,10 +131,11 @@ BEGIN
     ON CONFLICT (id) DO NOTHING;
 
     -- Permissions Catalog & Role Permissions & User Permissions Override Fixture
-    INSERT INTO public.permissions (id, code, description) VALUES
-        (perm_id, 'sales.create', 'Permission to create sales transactions')
-    ON CONFLICT (code) DO UPDATE SET description = EXCLUDED.description
-    RETURNING id INTO perm_id;
+    INSERT INTO public.permissions (code, description) VALUES
+        ('sales.create', 'Permission to create sales transactions')
+    ON CONFLICT (code) DO UPDATE SET description = EXCLUDED.description;
+
+    SELECT id INTO perm_id FROM public.permissions WHERE code = 'sales.create' LIMIT 1;
 
     IF perm_id IS NULL THEN
         RAISE EXCEPTION 'FIXTURE ERROR: Failed to establish sales.create permission record';
@@ -503,11 +504,17 @@ DECLARE
     owner_a UUID := '11111111-1111-1111-1111-111111111111';
     user_b_id UUID := 'f1250004-bbbb-bbbb-bbbb-000000000002';
     org_b UUID := 'f1250001-bbbb-bbbb-bbbb-000000000002';
-    perm_id UUID := 'f1250005-aaaa-aaaa-aaaa-000000000001';
+    perm_id UUID;
 
     mutated_cnt INTEGER := 0;
     perm_count INTEGER := 0;
 BEGIN
+    -- Retrieve real permission ID for sales.create
+    SELECT id INTO perm_id FROM public.permissions WHERE code = 'sales.create' LIMIT 1;
+    IF perm_id IS NULL THEN
+        RAISE EXCEPTION 'FIXTURE ERROR: sales.create permission row missing';
+    END IF;
+
     -- Elevated pre-check: verify fixtures exist
     SELECT COUNT(*) INTO perm_count FROM public.user_permissions WHERE user_id = user_b_id AND permission_id = perm_id;
     IF perm_count < 1 THEN
