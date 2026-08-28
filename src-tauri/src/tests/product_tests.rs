@@ -20,6 +20,23 @@ use crate::tests::test_helpers::{
 use crate::user::session::{create_local_session, revoke_local_session};
 use rusqlite::params;
 
+fn make_product_fixture(name: &str, price_minor: i64, barcode: Option<&str>) -> CreateProductInput {
+    CreateProductInput {
+        name: name.to_string(),
+        description: None,
+        category_id: None,
+        barcode: barcode.map(ToString::to_string),
+        product_type: None,
+        base_price_minor: price_minor,
+        cost_price_minor: None,
+        unit_type: None,
+        requires_expiry: None,
+        requires_serial: None,
+        warranty_months: None,
+        custom_attributes: None,
+    }
+}
+
 // =========================================================================
 // 1. VALIDATION UNIT TESTS
 // =========================================================================
@@ -32,14 +49,12 @@ fn test_validate_name_trims_and_accepts_valid() {
 
 #[test]
 fn test_validate_name_accepts_multibyte_unicode_up_to_255_chars() {
-    // Non-Latin Arabic text: 45 Unicode chars, 94 UTF-8 bytes
     let arabic_name = "قهوة عربية أصيلة درجة أولى مع الهيل والزعفران";
     assert_eq!(arabic_name.chars().count(), 45);
     assert!(arabic_name.len() > 45);
     let result = validate_name(arabic_name).expect("multibyte unicode name accepted");
     assert_eq!(result, arabic_name);
 
-    // Exactly 255 Unicode characters (510 UTF-8 bytes)
     let exact_255_unicode: String = "ق".repeat(255);
     assert_eq!(exact_255_unicode.chars().count(), 255);
     assert_eq!(exact_255_unicode.len(), 510);
@@ -85,7 +100,6 @@ fn test_validate_base_price_minor_rejects_negative_and_lossy_overflow() {
     let err_neg = validate_base_price_minor(-1).unwrap_err();
     assert!(matches!(err_neg, ProductError::Validation(_)));
 
-    // Values above MAX_SAFE_MINOR_UNITS (e.g. at 2^52 - 1 where float rounding errors occur) are rejected
     let err_overflow = validate_base_price_minor(MAX_SAFE_MINOR_UNITS + 1).unwrap_err();
     assert!(matches!(err_overflow, ProductError::Validation(_)));
 
@@ -228,22 +242,7 @@ fn test_create_and_get_product_by_id() {
 #[test]
 fn test_get_product_by_barcode() {
     let conn = setup_test_db();
-
-    let input = CreateProductInput {
-        name: "Green Tea Box".to_string(),
-        description: None,
-        category_id: None,
-        barcode: Some("BARCODE-TEA-001".to_string()),
-        product_type: Some("simple".to_string()),
-        base_price_minor: 450,
-        cost_price_minor: None,
-        unit_type: None,
-        requires_expiry: None,
-        requires_serial: None,
-        warranty_months: None,
-        custom_attributes: None,
-    };
-
+    let input = make_product_fixture("Green Tea Box", 450, Some("BARCODE-TEA-001"));
     let created = create_product(&conn, input).expect("product created");
 
     let by_barcode = get_product_by_barcode(&conn, "BARCODE-TEA-001")
@@ -259,37 +258,10 @@ fn test_get_product_by_barcode() {
 #[test]
 fn test_duplicate_barcode_rejected() {
     let conn = setup_test_db();
-
-    let input1 = CreateProductInput {
-        name: "Product A".to_string(),
-        description: None,
-        category_id: None,
-        barcode: Some("UNIQUE-BARCODE-99".to_string()),
-        product_type: None,
-        base_price_minor: 1000,
-        cost_price_minor: None,
-        unit_type: None,
-        requires_expiry: None,
-        requires_serial: None,
-        warranty_months: None,
-        custom_attributes: None,
-    };
+    let input1 = make_product_fixture("Product A", 1000, Some("UNIQUE-BARCODE-99"));
     create_product(&conn, input1).expect("product A created");
 
-    let input2 = CreateProductInput {
-        name: "Product B".to_string(),
-        description: None,
-        category_id: None,
-        barcode: Some("UNIQUE-BARCODE-99".to_string()),
-        product_type: None,
-        base_price_minor: 2000,
-        cost_price_minor: None,
-        unit_type: None,
-        requires_expiry: None,
-        requires_serial: None,
-        warranty_months: None,
-        custom_attributes: None,
-    };
+    let input2 = make_product_fixture("Product B", 2000, Some("UNIQUE-BARCODE-99"));
     let err = create_product(&conn, input2).unwrap_err();
     assert!(matches!(err, ProductError::DuplicateBarcode(_)));
 }
@@ -297,41 +269,12 @@ fn test_duplicate_barcode_rejected() {
 #[test]
 fn test_archived_barcode_reuse_rejected_preserving_table_uniqueness() {
     let conn = setup_test_db();
-
-    let input1 = CreateProductInput {
-        name: "Archived Product".to_string(),
-        description: None,
-        category_id: None,
-        barcode: Some("BC-ARCHIVE-DUP".to_string()),
-        product_type: None,
-        base_price_minor: 1000,
-        cost_price_minor: None,
-        unit_type: None,
-        requires_expiry: None,
-        requires_serial: None,
-        warranty_months: None,
-        custom_attributes: None,
-    };
+    let input1 = make_product_fixture("Archived Product", 1000, Some("BC-ARCHIVE-DUP"));
     let created = create_product(&conn, input1).expect("product created");
 
-    // Soft-delete the product
     delete_product(&conn, &created.id).expect("soft delete succeeds");
 
-    // Existing products.barcode UNIQUE constraint enforces table-wide uniqueness
-    let input2 = CreateProductInput {
-        name: "New Product Attempting Same Barcode".to_string(),
-        description: None,
-        category_id: None,
-        barcode: Some("BC-ARCHIVE-DUP".to_string()),
-        product_type: None,
-        base_price_minor: 2000,
-        cost_price_minor: None,
-        unit_type: None,
-        requires_expiry: None,
-        requires_serial: None,
-        warranty_months: None,
-        custom_attributes: None,
-    };
+    let input2 = make_product_fixture("New Attempt Same BC", 2000, Some("BC-ARCHIVE-DUP"));
     let err = create_product(&conn, input2).unwrap_err();
     assert!(matches!(err, ProductError::DuplicateBarcode(_)));
 }
@@ -339,38 +282,10 @@ fn test_archived_barcode_reuse_rejected_preserving_table_uniqueness() {
 #[test]
 fn test_multiple_products_with_null_barcode_allowed() {
     let conn = setup_test_db();
-
-    let input1 = CreateProductInput {
-        name: "Fresh Bread".to_string(),
-        description: None,
-        category_id: None,
-        barcode: None,
-        product_type: None,
-        base_price_minor: 150,
-        cost_price_minor: None,
-        unit_type: None,
-        requires_expiry: None,
-        requires_serial: None,
-        warranty_months: None,
-        custom_attributes: None,
-    };
-    let p1 = create_product(&conn, input1).expect("product 1 created");
-
-    let input2 = CreateProductInput {
-        name: "Fresh Croissant".to_string(),
-        description: None,
-        category_id: None,
-        barcode: None,
-        product_type: None,
-        base_price_minor: 250,
-        cost_price_minor: None,
-        unit_type: None,
-        requires_expiry: None,
-        requires_serial: None,
-        warranty_months: None,
-        custom_attributes: None,
-    };
-    let p2 = create_product(&conn, input2).expect("product 2 created");
+    let p1 = create_product(&conn, make_product_fixture("Fresh Bread", 150, None))
+        .expect("product 1 created");
+    let p2 = create_product(&conn, make_product_fixture("Fresh Croissant", 250, None))
+        .expect("product 2 created");
 
     assert_ne!(p1.id, p2.id);
     assert_eq!(p1.barcode, None);
@@ -380,23 +295,9 @@ fn test_multiple_products_with_null_barcode_allowed() {
 #[test]
 fn test_update_product_success() {
     let conn = setup_test_db();
-
     let created = create_product(
         &conn,
-        CreateProductInput {
-            name: "Original Name".to_string(),
-            description: Some("Old description".to_string()),
-            category_id: None,
-            barcode: Some("BC-ORIGINAL".to_string()),
-            product_type: Some("simple".to_string()),
-            base_price_minor: 5000,
-            cost_price_minor: Some(3000),
-            unit_type: None,
-            requires_expiry: Some(false),
-            requires_serial: Some(false),
-            warranty_months: None,
-            custom_attributes: None,
-        },
+        make_product_fixture("Original Name", 5000, Some("BC-ORIGINAL")),
     )
     .expect("created");
 
@@ -435,7 +336,6 @@ fn test_update_product_success() {
 #[test]
 fn test_update_product_nonexistent_returns_not_found() {
     let conn = setup_test_db();
-
     let err = update_product(
         &conn,
         UpdateProductInput {
@@ -463,28 +363,13 @@ fn test_update_product_nonexistent_returns_not_found() {
 #[test]
 fn test_soft_delete_product_sets_is_active_zero_and_preserves_row() {
     let conn = setup_test_db();
-
     let created = create_product(
         &conn,
-        CreateProductInput {
-            name: "Archivable Item".to_string(),
-            description: None,
-            category_id: None,
-            barcode: Some("BC-ARCHIVE-01".to_string()),
-            product_type: None,
-            base_price_minor: 1200,
-            cost_price_minor: None,
-            unit_type: None,
-            requires_expiry: None,
-            requires_serial: None,
-            warranty_months: None,
-            custom_attributes: None,
-        },
+        make_product_fixture("Archivable Item", 1200, Some("BC-ARCHIVE-01")),
     )
     .expect("created");
 
     assert!(created.is_active);
-
     delete_product(&conn, &created.id).expect("soft delete succeeds");
 
     let fetched = get_product(&conn, &created.id)
@@ -498,7 +383,6 @@ fn test_soft_delete_product_sets_is_active_zero_and_preserves_row() {
     assert_eq!(fetched.id, created.id);
     assert_eq!(fetched.name, "Archivable Item");
 
-    // Idempotent delete call succeeds
     delete_product(&conn, &created.id).expect("idempotent delete succeeds");
 }
 
@@ -509,24 +393,10 @@ fn test_soft_delete_preserves_foreign_key_references() {
 
     let product = create_product(
         &conn,
-        CreateProductInput {
-            name: "Sold Item".to_string(),
-            description: None,
-            category_id: None,
-            barcode: Some("BC-SOLD-01".to_string()),
-            product_type: None,
-            base_price_minor: 2000,
-            cost_price_minor: None,
-            unit_type: None,
-            requires_expiry: None,
-            requires_serial: None,
-            warranty_months: None,
-            custom_attributes: None,
-        },
+        make_product_fixture("Sold Item", 2000, Some("BC-SOLD-01")),
     )
     .expect("product created");
 
-    // Create an inventory reference
     conn.execute(
         "INSERT INTO inventory (id, branch_id, product_id, quantity, low_stock_threshold)
          VALUES ('inv-ref-1', ?1, ?2, 10.0, 2.0)",
@@ -534,10 +404,8 @@ fn test_soft_delete_preserves_foreign_key_references() {
     )
     .expect("inventory row inserted");
 
-    // Soft delete product
     delete_product(&conn, &product.id).expect("soft delete succeeds");
 
-    // Inventory row and product row both still exist
     let inv_exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM inventory WHERE product_id = ?1)",
@@ -554,49 +422,19 @@ fn test_soft_delete_preserves_foreign_key_references() {
 #[test]
 fn test_list_products_filtering_and_query_search() {
     let conn = setup_test_db();
-
     let p1 = create_product(
         &conn,
-        CreateProductInput {
-            name: "Espresso Beans".to_string(),
-            description: None,
-            category_id: None,
-            barcode: Some("BC-ESP-1".to_string()),
-            product_type: None,
-            base_price_minor: 1500,
-            cost_price_minor: None,
-            unit_type: None,
-            requires_expiry: None,
-            requires_serial: None,
-            warranty_months: None,
-            custom_attributes: None,
-        },
+        make_product_fixture("Espresso Beans", 1500, Some("BC-ESP-1")),
     )
     .expect("p1 created");
-
     let p2 = create_product(
         &conn,
-        CreateProductInput {
-            name: "Latte Syrup Vanilla".to_string(),
-            description: None,
-            category_id: None,
-            barcode: Some("BC-LAT-2".to_string()),
-            product_type: None,
-            base_price_minor: 800,
-            cost_price_minor: None,
-            unit_type: None,
-            requires_expiry: None,
-            requires_serial: None,
-            warranty_months: None,
-            custom_attributes: None,
-        },
+        make_product_fixture("Latte Syrup Vanilla", 800, Some("BC-LAT-2")),
     )
     .expect("p2 created");
 
-    // Archive p2
     delete_product(&conn, &p2.id).expect("p2 archived");
 
-    // 1. List all active only
     let active_only = list_products(
         &conn,
         &ProductFilter {
@@ -608,11 +446,9 @@ fn test_list_products_filtering_and_query_search() {
     assert_eq!(active_only.len(), 1);
     assert_eq!(active_only[0].id, p1.id);
 
-    // 2. List all (active + inactive)
     let all = list_products(&conn, &ProductFilter::default()).expect("list all");
     assert_eq!(all.len(), 2);
 
-    // 3. Search query substring on name
     let search_latte = list_products(
         &conn,
         &ProductFilter {
@@ -624,7 +460,6 @@ fn test_list_products_filtering_and_query_search() {
     assert_eq!(search_latte.len(), 1);
     assert_eq!(search_latte[0].id, p2.id);
 
-    // 4. Search query exact on barcode
     let search_barcode = list_products(
         &conn,
         &ProductFilter {
@@ -644,25 +479,11 @@ fn test_list_products_offset_without_limit() {
     for i in 1..=5 {
         create_product(
             &conn,
-            CreateProductInput {
-                name: format!("Product Item {i:02}"),
-                description: None,
-                category_id: None,
-                barcode: None,
-                product_type: None,
-                base_price_minor: 100 * i,
-                cost_price_minor: None,
-                unit_type: None,
-                requires_expiry: None,
-                requires_serial: None,
-                warranty_months: None,
-                custom_attributes: None,
-            },
+            make_product_fixture(&format!("Product Item {i:02}"), 100 * i, None),
         )
         .expect("created");
     }
 
-    // Offset 2 without limit: skips first 2 and returns remaining 3
     let skipped = list_products(
         &conn,
         &ProductFilter {
@@ -681,85 +502,21 @@ fn test_list_products_offset_without_limit() {
 #[test]
 fn test_list_products_literal_like_wildcard_escaping() {
     let conn = setup_test_db();
-
-    // Create products with special characters in name
     create_product(
         &conn,
-        CreateProductInput {
-            name: "100% Arabica Blend".to_string(),
-            description: None,
-            category_id: None,
-            barcode: None,
-            product_type: None,
-            base_price_minor: 1500,
-            cost_price_minor: None,
-            unit_type: None,
-            requires_expiry: None,
-            requires_serial: None,
-            warranty_months: None,
-            custom_attributes: None,
-        },
+        make_product_fixture("100% Arabica Blend", 1500, None),
     )
     .expect("created 100%");
-
     create_product(
         &conn,
-        CreateProductInput {
-            name: "1000 Arabica Blend".to_string(),
-            description: None,
-            category_id: None,
-            barcode: None,
-            product_type: None,
-            base_price_minor: 1600,
-            cost_price_minor: None,
-            unit_type: None,
-            requires_expiry: None,
-            requires_serial: None,
-            warranty_months: None,
-            custom_attributes: None,
-        },
+        make_product_fixture("1000 Arabica Blend", 1600, None),
     )
     .expect("created 1000");
+    create_product(&conn, make_product_fixture("Item_1 Premium", 2000, None))
+        .expect("created Item_1");
+    create_product(&conn, make_product_fixture("ItemA1 Premium", 2100, None))
+        .expect("created ItemA1");
 
-    create_product(
-        &conn,
-        CreateProductInput {
-            name: "Item_1 Premium".to_string(),
-            description: None,
-            category_id: None,
-            barcode: None,
-            product_type: None,
-            base_price_minor: 2000,
-            cost_price_minor: None,
-            unit_type: None,
-            requires_expiry: None,
-            requires_serial: None,
-            warranty_months: None,
-            custom_attributes: None,
-        },
-    )
-    .expect("created Item_1");
-
-    create_product(
-        &conn,
-        CreateProductInput {
-            name: "ItemA1 Premium".to_string(),
-            description: None,
-            category_id: None,
-            barcode: None,
-            product_type: None,
-            base_price_minor: 2100,
-            cost_price_minor: None,
-            unit_type: None,
-            requires_expiry: None,
-            requires_serial: None,
-            warranty_months: None,
-            custom_attributes: None,
-        },
-    )
-    .expect("created ItemA1");
-
-    // 1. Searching for "100%" must ONLY match "100% Arabica Blend", NOT "1000 Arabica Blend"
     let percent_results = list_products(
         &conn,
         &ProductFilter {
@@ -771,7 +528,6 @@ fn test_list_products_literal_like_wildcard_escaping() {
     assert_eq!(percent_results.len(), 1);
     assert_eq!(percent_results[0].name, "100% Arabica Blend");
 
-    // 2. Searching for "Item_1" must ONLY match "Item_1 Premium", NOT "ItemA1 Premium"
     let underscore_results = list_products(
         &conn,
         &ProductFilter {
@@ -807,7 +563,6 @@ fn test_admin_and_manager_authorized_to_mutate_products() {
     let admin_session =
         create_local_session(&conn, &admin.id, &branch_id, "pin", None).expect("admin session");
 
-    // Admin has ProductsManage permission
     let admin_auth = require_permission(&conn, &admin_session.id, Permission::ProductsManage);
     assert!(
         admin_auth.is_ok(),
@@ -828,7 +583,6 @@ fn test_admin_and_manager_authorized_to_mutate_products() {
     let manager_session =
         create_local_session(&conn, &manager.id, &branch_id, "pin", None).expect("manager session");
 
-    // Manager has ProductsManage permission
     let manager_auth = require_permission(&conn, &manager_session.id, Permission::ProductsManage);
     assert!(
         manager_auth.is_ok(),
@@ -855,7 +609,6 @@ fn test_cashier_denied_product_mutation_but_allowed_product_reads() {
     let cashier_session =
         create_local_session(&conn, &cashier.id, &branch_id, "pin", None).expect("cashier session");
 
-    // 1. Cashier is DENIED ProductsManage permission (mutation)
     let mutation_auth = require_permission(&conn, &cashier_session.id, Permission::ProductsManage);
     assert!(
         matches!(
@@ -865,7 +618,6 @@ fn test_cashier_denied_product_mutation_but_allowed_product_reads() {
         "Cashier must be denied ProductsManage permission"
     );
 
-    // 2. Cashier is ALLOWED product reads (require_session)
     let read_auth = require_session(&conn, &cashier_session.id);
     assert!(
         read_auth.is_ok(),
