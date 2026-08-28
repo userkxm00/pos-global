@@ -2,8 +2,8 @@ use crate::auth::middleware::{require_permission, AuthMiddlewareError, Authorize
 use crate::branch::{create_branch, CreateBranchInput};
 use crate::category::{
     create_category, delete_category, get_category, get_category_tree, list_categories,
-    update_category, validate_name, CategoryError, CategoryFilter, CreateCategoryInput,
-    UpdateCategoryInput,
+    update_category, validate_description, validate_name, CategoryError, CategoryFilter,
+    CreateCategoryInput, UpdateCategoryInput,
 };
 use crate::organization::{create_organization, CreateOrganizationInput};
 use crate::permission::Permission;

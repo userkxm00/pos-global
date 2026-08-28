@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 pub struct DbState(pub Mutex<Connection>);
 
-const MIGRATIONS: &[(&str, &str)] = &[
+pub const MIGRATIONS: &[(&str, &str)] = &[
     ("001_initial", include_str!("migrations/001_initial.sql")),
     (
         "002_sync_and_suppliers",
