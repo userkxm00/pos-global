@@ -1,13 +1,20 @@
 // Product domain model, validation rules, and SQLite database operations.
 // F2.01 — Product CRUD
+//
+// Barcode Invariant (F2.01 vs F2.03 Boundary):
+// Per SQLite migrations 001_initial.sql and 009_remove_redundant_product_barcode_index.sql,
+// `products.barcode` enforces a table-wide `UNIQUE` constraint across all rows. Soft-deleted
+// products retain their stored barcode to protect historical sales, inventory, and audit ledger integrity.
+// Advanced barcode lifecycle management, symbologies, and barcode reassignment are scoped to F2.03.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 /// Maximum safe integer minor units that can be converted to and from IEEE 754 f64 without precision loss.
 /// For decimal currency scaled by 100, the bound is floor((2^53 - 1) / 100) = 90_071_992_547_409 minor units
-/// (over 900 billion units with 2 decimal places). Beyond this bound, division by 100 followed by
-/// multiplication by 100 can suffer 1-unit rounding errors (e.g. at 2^52 - 1).
+/// (over 900 billion units with 2 decimal places). For any integer x <= 90_071_992_547_409, the maximum
+/// absolute floating-point roundoff error in (x / 100.0) * 100.0 is strictly < 0.041 (over 12x below the
+/// 0.5 rounding boundary), guaranteeing exact lossless persistence through legacy SQLite REAL columns.
 pub const MAX_SAFE_MINOR_UNITS: i64 = 90_071_992_547_409;
 
 /// Canonical Product entity.
