@@ -737,7 +737,7 @@ fn test_category_hierarchy_depth_limit_and_deep_valid_chain() {
     for i in 0..10 {
         let cat = create_category(
             &conn,
-            make_category_fixture(&format!("Level {}", i), prev_id.as_deref()),
+            make_category_fixture(&format!("Level {i}"), prev_id.as_deref()),
         )
         .expect("create level");
         prev_id = Some(cat.id);
@@ -753,15 +753,16 @@ fn test_category_hierarchy_depth_limit_and_deep_valid_chain() {
     // Create chain exceeding MAX_DEFENSIVE_STEPS (50) to test HierarchyDepthExceeded
     let mut chain_head = None;
     for i in 0..52 {
-        let cat_id = format!("deep_cat_{:03}", i);
+        let cat_id = format!("deep_cat_{i:03}");
         let parent_id = if i == 0 {
             None
         } else {
-            Some(format!("deep_cat_{:03}", i - 1))
+            let prev_idx = i - 1;
+            Some(format!("deep_cat_{prev_idx:03}"))
         };
         conn.execute(
             "INSERT INTO categories (id, name, parent_id, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, 1, datetime('now'), datetime('now'))",
-            rusqlite::params![cat_id, format!("Deep Node {}", i), parent_id],
+            rusqlite::params![cat_id, format!("Deep Node {i}"), parent_id],
         ).expect("insert chain");
         chain_head = Some(cat_id);
     }
