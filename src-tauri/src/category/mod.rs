@@ -417,15 +417,13 @@ fn partition_categories(
     let mut root_categories: Vec<Category> = Vec::new();
 
     for cat in categories {
-        let is_orphan_or_root = match cat.parent_id.as_deref() {
-            None => true,
-            Some(pid) => !active_ids.contains(pid),
-        };
-
-        if is_orphan_or_root {
-            root_categories.push(cat);
-        } else if let Some(ref pid) = cat.parent_id {
-            children_by_parent.entry(pid.clone()).or_default().push(cat);
+        match cat.parent_id {
+            Some(ref pid) if active_ids.contains(pid.as_str()) => {
+                children_by_parent.entry(pid.clone()).or_default().push(cat);
+            }
+            _ => {
+                root_categories.push(cat);
+            }
         }
     }
     (root_categories, children_by_parent)
@@ -452,11 +450,7 @@ fn drain_stranded_categories(
     mut children_map: HashMap<String, Vec<Category>>,
     tree: &mut Vec<CategoryTreeNode>,
 ) {
-    while !children_map.is_empty() {
-        let next_key = match children_map.keys().next() {
-            Some(k) => k.clone(),
-            None => break,
-        };
+    while let Some(next_key) = children_map.keys().next().cloned() {
         if let Some(stranded_list) = children_map.remove(&next_key) {
             for stranded in stranded_list {
                 tree.push(build_category_tree_node(stranded, &mut children_map));
@@ -464,6 +458,7 @@ fn drain_stranded_categories(
         }
     }
 }
+
 
 /// Reconstructs the complete hierarchical category tree in memory in O(n) time.
 pub fn get_category_tree(
