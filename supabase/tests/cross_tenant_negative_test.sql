@@ -39,8 +39,21 @@ GRANT USAGE ON SCHEMA public, auth TO authenticated, anon;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth TO authenticated, anon;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO authenticated, anon;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public, auth TO authenticated, anon;
+
+-- Explicitly enforce migration 004 security model: revoke execution on privileged RPCs from anon / PUBLIC
+REVOKE ALL ON FUNCTION public.pair_device_to_register(UUID, TEXT) FROM anon, PUBLIC;
+REVOKE ALL ON FUNCTION public.revoke_device_pairing(UUID) FROM anon, PUBLIC;
+REVOKE ALL ON FUNCTION public.record_device_heartbeat(UUID, TEXT) FROM anon, PUBLIC;
+REVOKE ALL ON FUNCTION public.create_organization_with_initial_setup(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM anon, PUBLIC;
+REVOKE ALL ON FUNCTION public.set_organization_member_role(UUID, UUID, TEXT) FROM anon, PUBLIC;
+
+-- Ensure authenticated role retains execution on privileged RPCs
+GRANT EXECUTE ON FUNCTION public.pair_device_to_register(UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.revoke_device_pairing(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.record_device_heartbeat(UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.create_organization_with_initial_setup(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.set_organization_member_role(UUID, UUID, TEXT) TO authenticated;
 
 -- ============================================================
 -- 2. Test Fixtures Setup (Elevated Initial Context)
