@@ -228,7 +228,8 @@ pub fn check_category_cycle(
 
     if steps >= MAX_DEFENSIVE_STEPS {
         return Err(CategoryError::HierarchyDepthExceeded(format!(
-            "Hierarchy depth exceeds supported maximum of {MAX_DEFENSIVE_STEPS} levels"
+            "Hierarchy depth exceeds supported maximum of {} levels",
+            MAX_DEFENSIVE_STEPS
         )));
     }
 
