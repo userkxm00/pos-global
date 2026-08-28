@@ -412,13 +412,13 @@ pub fn list_categories(
 fn partition_categories(
     categories: Vec<Category>,
 ) -> (Vec<Category>, HashMap<String, Vec<Category>>) {
-    let active_ids: HashSet<&str> = categories.iter().map(|c| c.id.as_str()).collect();
+    let active_ids: HashSet<String> = categories.iter().map(|c| c.id.clone()).collect();
     let mut children_by_parent: HashMap<String, Vec<Category>> = HashMap::new();
     let mut root_categories: Vec<Category> = Vec::new();
 
     for cat in categories {
         match cat.parent_id {
-            Some(ref pid) if active_ids.contains(pid.as_str()) => {
+            Some(ref pid) if active_ids.contains(pid) => {
                 children_by_parent.entry(pid.clone()).or_default().push(cat);
             }
             _ => {
