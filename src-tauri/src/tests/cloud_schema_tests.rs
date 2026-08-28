@@ -20,6 +20,8 @@ const PRIVILEGED_FUNCTIONS_MIGRATION_SQL: &str =
     include_str!("../../../supabase/migrations/004_privileged_server_functions.sql");
 const PRIVILEGED_FUNCTIONS_TEST_SQL: &str =
     include_str!("../../../supabase/tests/privileged_server_functions_test.sql");
+const CROSS_TENANT_NEGATIVE_TEST_SQL: &str =
+    include_str!("../../../supabase/tests/cross_tenant_negative_test.sql");
 
 fn normalize_whitespace(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -759,5 +761,135 @@ fn f1_23_migration_uses_row_locking_for_device_operations() {
     assert!(
         revoke_fn.contains("WHERE id = p_register_id FOR UPDATE;"),
         "revoke_device_pairing must lock target register with FOR UPDATE to prevent TOCTOU races"
+    );
+}
+
+// ============================================================
+// F1.25 Cross-Tenant Negative Tests Structure Verification
+// ============================================================
+
+#[test]
+fn f1_25_test_suite_is_transaction_safe_and_fail_closed() {
+    let sql = normalize_whitespace(CROSS_TENANT_NEGATIVE_TEST_SQL);
+    assert!(
+        sql.starts_with("BEGIN;"),
+        "Cross-tenant negative test suite must start with BEGIN;"
+    );
+    assert!(
+        sql.ends_with("ROLLBACK;"),
+        "Cross-tenant negative test suite must end with ROLLBACK;"
+    );
+    assert!(
+        !sql.contains("WHEN OTHERS"),
+        "Cross-tenant negative test suite MUST NOT use broad WHEN OTHERS exception handlers"
+    );
+}
+
+#[test]
+fn f1_25_test_suite_covers_all_25_negative_scenarios() {
+    let sql = normalize_whitespace(CROSS_TENANT_NEGATIVE_TEST_SQL);
+    let scenarios = [
+        "PASS N01:",
+        "PASS N02:",
+        "PASS N03:",
+        "PASS N04:",
+        "PASS N05:",
+        "PASS N06:",
+        "PASS N07:",
+        "PASS N08:",
+        "PASS N09:",
+        "PASS N10:",
+        "PASS N11:",
+        "PASS N12a:",
+        "PASS N12b:",
+        "PASS N12c:",
+        "PASS N13:",
+        "PASS N14:",
+        "PASS N15:",
+        "PASS N16:",
+        "PASS N17:",
+        "PASS N18:",
+        "PASS N19:",
+        "PASS N20:",
+        "PASS N21:",
+        "PASS N22a:",
+        "PASS N22b:",
+        "PASS N23a:",
+        "PASS N23b:",
+        "PASS N23c:",
+        "PASS N24a:",
+        "PASS N24b:",
+        "PASS N24c:",
+        "PASS N24d:",
+        "PASS N24e:",
+        "PASS N25a:",
+        "PASS N25b:",
+        "PASS N25c:",
+        "PASS N25d:",
+        "PASS N25e:",
+    ];
+
+    for sc in scenarios {
+        assert!(
+            sql.contains(sc),
+            "Cross-tenant negative test suite must verify scenario {sc}"
+        );
+    }
+}
+
+#[test]
+fn f1_25_test_suite_structures_all_six_security_suites() {
+    let sql = normalize_whitespace(CROSS_TENANT_NEGATIVE_TEST_SQL);
+
+    // Suite 1: Composite FKs
+    assert!(
+        sql.contains("Suite 1: Composite Foreign-Key & Tenant Boundary Invariants"),
+        "Expected Suite 1 definition in F1.25 test SQL"
+    );
+    assert!(
+        sql.contains("foreign_key_violation"),
+        "Expected foreign_key_violation exception handler in Suite 1"
+    );
+
+    // Suite 2: Entity Reassignment / Organization Hijacking
+    assert!(
+        sql.contains("Suite 2: Cross-Tenant Entity Reassignment & Boundary Jumping"),
+        "Expected Suite 2 definition in F1.25 test SQL"
+    );
+
+    // Suite 3: Device Identity / Active Device Reuse
+    assert!(
+        sql.contains("Suite 3: Cross-Tenant Device Identity, Hijacking & Active Reuse"),
+        "Expected Suite 3 definition in F1.25 test SQL"
+    );
+    assert!(
+        sql.contains("idx_registers_active_device_unique"),
+        "Expected idx_registers_active_device_unique reference in Suite 3"
+    );
+
+    // Suite 4: Privileged RPC Attacks & Parameter Injection
+    assert!(
+        sql.contains("Suite 4: Cross-Tenant Privileged RPC Attacks & Parameter Injection"),
+        "Expected Suite 4 definition in F1.25 test SQL"
+    );
+    assert!(
+        sql.contains("set_organization_member_role"),
+        "Expected set_organization_member_role calls in Suite 4"
+    );
+
+    // Suite 5: Membership, Permissions & Catalog Tampering
+    assert!(
+        sql.contains("Suite 5: Cross-Tenant Membership, Permissions & Catalog Tampering"),
+        "Expected Suite 5 definition in F1.25 test SQL"
+    );
+
+    // Suite 6: Anonymous & Unaffiliated Penetration
+    assert!(
+        sql.contains("Suite 6: Anonymous & Unaffiliated Adversarial Penetration"),
+        "Expected Suite 6 definition in F1.25 test SQL"
+    );
+    assert!(
+        sql.contains("SET LOCAL ROLE anon"),
+        "Expected anonymous role execution in Suite 6"
     );
 }
