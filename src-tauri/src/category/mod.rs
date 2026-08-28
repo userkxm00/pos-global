@@ -46,8 +46,8 @@ pub struct UpdateCategoryInput {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CategoryFilter {
     pub query: Option<String>,
-    /// None = all; Some(None) = roots only (parent_id IS NULL); Some(Some(id)) = children of id
-    pub parent_id: Option<Option<String>>,
+    /// None = all; Some("root") / Some("") = roots only (parent_id IS NULL); Some(id) = children of id
+    pub parent_id: Option<String>,
     pub is_active: Option<bool>,
 }
 
@@ -196,24 +196,14 @@ pub fn check_category_cycle(
     const MAX_DEFENSIVE_STEPS: usize = 50;
 
     while steps < MAX_DEFENSIVE_STEPS {
-        let parent_of_current: Option<Option<String>> = conn
-            .query_row(
-                "SELECT parent_id FROM categories WHERE id = ?1",
-                [&current],
-                |row| row.get(0),
-            )
-            .optional()?;
+        let parent_result: Result<Option<String>, _> = conn.query_row(
+            "SELECT parent_id FROM categories WHERE id = ?1",
+            [&current],
+            |row| row.get(0),
+        );
 
-        match parent_of_current {
-            None => {
-                // Ancestor doesn't exist; referential integrity will be caught
-                break;
-            }
-            Some(None) => {
-                // Reached a root category; no cycle
-                return Ok(());
-            }
-            Some(Some(ancestor_id)) => {
+        match parent_result {
+            Ok(Some(ancestor_id)) => {
                 if ancestor_id == category_id {
                     return Err(CategoryError::CycleDetected(format!(
                         "Category '{category_id}' cannot be parented under its own descendant '{target_parent_id}'"
@@ -222,6 +212,15 @@ pub fn check_category_cycle(
                 current = ancestor_id;
                 steps += 1;
             }
+            Ok(None) => {
+                // Reached a root category; no cycle
+                return Ok(());
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                // Ancestor doesn't exist; referential integrity will catch it
+                break;
+            }
+            Err(e) => return Err(CategoryError::Database(e.to_string())),
         }
     }
 
@@ -378,20 +377,16 @@ pub fn list_categories(
         params_vec.push(Box::new(if active { 1 } else { 0 }));
     }
 
-    if let Some(ref p_opt) = filter.parent_id {
-        match p_opt {
-            None => {
-                sql.push_str(" AND parent_id IS NULL");
-            }
-            Some(pid) => {
-                let trimmed = pid.trim();
-                if trimmed.is_empty() {
-                    sql.push_str(" AND parent_id IS NULL");
-                } else {
-                    sql.push_str(" AND parent_id = ?");
-                    params_vec.push(Box::new(trimmed.to_string()));
-                }
-            }
+    if let Some(ref pid) = filter.parent_id {
+        let trimmed = pid.trim();
+        if trimmed.is_empty()
+            || trimmed.eq_ignore_ascii_case("root")
+            || trimmed.eq_ignore_ascii_case("null")
+        {
+            sql.push_str(" AND parent_id IS NULL");
+        } else {
+            sql.push_str(" AND parent_id = ?");
+            params_vec.push(Box::new(trimmed.to_string()));
         }
     }
 

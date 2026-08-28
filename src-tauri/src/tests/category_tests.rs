@@ -403,7 +403,7 @@ fn test_list_categories_filters() {
         &conn,
         &CategoryFilter {
             query: None,
-            parent_id: Some(None),
+            parent_id: Some("root".to_string()),
             is_active: Some(true),
         },
     )
@@ -415,7 +415,7 @@ fn test_list_categories_filters() {
         &conn,
         &CategoryFilter {
             query: None,
-            parent_id: Some(Some(root1.id.clone())),
+            parent_id: Some(root1.id.clone()),
             is_active: None,
         },
     )
@@ -720,12 +720,11 @@ fn test_category_tree_includes_active_child_under_inactive_parent() {
 
     // When querying active tree, child must be visible at top-level instead of silently disappearing
     let active_tree = get_category_tree(&conn, false).expect("active tree");
-    let found_child = active_tree.iter().find(|node| node.category.id == child.id);
-    assert!(
-        found_child.is_some(),
-        "Active child under inactive parent must be visible in active tree"
-    );
-    assert_eq!(found_child.unwrap().category.name, "Active Evergreen Child");
+    let child_node = active_tree
+        .iter()
+        .find(|node| node.category.id == child.id)
+        .expect("Active child under inactive parent must be visible in active tree");
+    assert_eq!(child_node.category.name, "Active Evergreen Child");
 }
 
 #[test]

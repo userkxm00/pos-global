@@ -345,13 +345,13 @@ mod tests {
 
     #[test]
     fn test_validate_url_syntax() {
-        assert!(super::validate_url_syntax(None).unwrap().is_none());
+        assert_eq!(super::validate_url_syntax(None).expect("none"), None);
         assert_eq!(
-            super::validate_url_syntax(Some("https://example.com")).unwrap(),
+            super::validate_url_syntax(Some("https://example.com")).expect("valid url"),
             Some("https://example.com".to_string())
         );
         assert_eq!(
-            super::validate_url_syntax(Some("brand.co.uk/store")).unwrap(),
+            super::validate_url_syntax(Some("brand.co.uk/store")).expect("valid domain"),
             Some("brand.co.uk/store".to_string())
         );
         assert!(super::validate_url_syntax(Some("http://")).is_err());
