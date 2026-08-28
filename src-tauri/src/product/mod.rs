@@ -4,8 +4,11 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-/// Maximum safe integer minor units that can be converted to and from IEEE 754 f64 without precision loss (2^53 - 1).
-pub const MAX_SAFE_MINOR_UNITS: i64 = 9_007_199_254_740_991;
+/// Maximum safe integer minor units that can be converted to and from IEEE 754 f64 without precision loss.
+/// For decimal currency scaled by 100, the bound is floor((2^53 - 1) / 100) = 90_071_992_547_409 minor units
+/// (over 900 billion units with 2 decimal places). Beyond this bound, division by 100 followed by
+/// multiplication by 100 can suffer 1-unit rounding errors (e.g. at 2^52 - 1).
+pub const MAX_SAFE_MINOR_UNITS: i64 = 90_071_992_547_409;
 
 /// Canonical Product entity.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -110,6 +113,35 @@ impl From<rusqlite::Error> for ProductError {
         }
         ProductError::Database(e.to_string())
     }
+}
+
+/// Resolves the organization ownership of the local product catalog from business_settings or branches.
+pub fn get_catalog_organization_id(conn: &Connection) -> Result<Option<String>, rusqlite::Error> {
+    // 1. Check business_settings if configured
+    let org_from_settings: Option<String> = conn
+        .query_row(
+            "SELECT organization_id FROM business_settings WHERE organization_id IS NOT NULL LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if org_from_settings.is_some() {
+        return Ok(org_from_settings);
+    }
+
+    // 2. Fallback to unique organization from local branches
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT organization_id FROM branches WHERE organization_id IS NOT NULL",
+    )?;
+    let orgs: Vec<String> = stmt
+        .query_map([], |row| row.get(0))?
+        .filter_map(Result::ok)
+        .collect();
+    if orgs.len() == 1 {
+        return Ok(Some(orgs[0].clone()));
+    }
+
+    Ok(None)
 }
 
 /// Converts a floating-point database price into integer minor units (cents).

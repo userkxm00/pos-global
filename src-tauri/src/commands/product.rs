@@ -1,10 +1,12 @@
 // Tauri command boundary for Product CRUD operations.
 // F2.01 — Product CRUD
 
-use crate::auth::middleware::{require_permission, require_session};
+use crate::auth::middleware::{require_scoped_permission, AuthorizeRequest};
 use crate::db::DbState;
 use crate::permission::Permission;
-use crate::product::{CreateProductInput, Product, ProductFilter, UpdateProductInput};
+use crate::product::{
+    get_catalog_organization_id, CreateProductInput, Product, ProductFilter, UpdateProductInput,
+};
 
 #[tauri::command]
 pub fn create_product(
@@ -17,9 +19,16 @@ pub fn create_product(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // Authorization: mutating product catalog requires products.manage
-    require_permission(&conn, &session_id, Permission::ProductsManage)
-        .map_err(|e| e.to_string())?;
+    // Authorization & Scope: mutating product catalog requires products.manage within catalog organization
+    let catalog_org = get_catalog_organization_id(&conn).map_err(|e| e.to_string())?;
+    require_scoped_permission(
+        &conn,
+        &session_id,
+        Permission::ProductsManage,
+        catalog_org.as_deref(),
+        None,
+    )
+    .map_err(|e| e.to_string())?;
 
     crate::product::create_product(&conn, request).map_err(|e| e.to_string())
 }
@@ -35,8 +44,13 @@ pub fn get_product(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // Authorization: reading products requires an active authenticated session
-    require_session(&conn, &session_id).map_err(|e| e.to_string())?;
+    // Authorization & Scope: reading products requires an active session scoped to the catalog organization
+    let catalog_org = get_catalog_organization_id(&conn).map_err(|e| e.to_string())?;
+    let mut req = AuthorizeRequest::new(&session_id);
+    if let Some(ref org) = catalog_org {
+        req = req.with_organization_scope(org);
+    }
+    req.execute(&conn).map_err(|e| e.to_string())?;
 
     match crate::product::get_product(&conn, &product_id).map_err(|e| e.to_string())? {
         Some(p) => Ok(p),
@@ -55,8 +69,13 @@ pub fn get_product_by_barcode(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // Authorization: reading products requires an active authenticated session
-    require_session(&conn, &session_id).map_err(|e| e.to_string())?;
+    // Authorization & Scope: reading products requires an active session scoped to the catalog organization
+    let catalog_org = get_catalog_organization_id(&conn).map_err(|e| e.to_string())?;
+    let mut req = AuthorizeRequest::new(&session_id);
+    if let Some(ref org) = catalog_org {
+        req = req.with_organization_scope(org);
+    }
+    req.execute(&conn).map_err(|e| e.to_string())?;
 
     match crate::product::get_product_by_barcode(&conn, &barcode).map_err(|e| e.to_string())? {
         Some(p) => Ok(p),
@@ -75,9 +94,16 @@ pub fn update_product(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // Authorization: mutating product catalog requires products.manage
-    require_permission(&conn, &session_id, Permission::ProductsManage)
-        .map_err(|e| e.to_string())?;
+    // Authorization & Scope: mutating product catalog requires products.manage within catalog organization
+    let catalog_org = get_catalog_organization_id(&conn).map_err(|e| e.to_string())?;
+    require_scoped_permission(
+        &conn,
+        &session_id,
+        Permission::ProductsManage,
+        catalog_org.as_deref(),
+        None,
+    )
+    .map_err(|e| e.to_string())?;
 
     crate::product::update_product(&conn, request).map_err(|e| e.to_string())
 }
@@ -93,9 +119,16 @@ pub fn delete_product(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // Authorization: deleting/archiving products requires products.manage
-    require_permission(&conn, &session_id, Permission::ProductsManage)
-        .map_err(|e| e.to_string())?;
+    // Authorization & Scope: deleting/archiving products requires products.manage within catalog organization
+    let catalog_org = get_catalog_organization_id(&conn).map_err(|e| e.to_string())?;
+    require_scoped_permission(
+        &conn,
+        &session_id,
+        Permission::ProductsManage,
+        catalog_org.as_deref(),
+        None,
+    )
+    .map_err(|e| e.to_string())?;
 
     crate::product::delete_product(&conn, &product_id).map_err(|e| e.to_string())
 }
@@ -111,8 +144,13 @@ pub fn list_catalog_products(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // Authorization: reading products requires an active authenticated session
-    require_session(&conn, &session_id).map_err(|e| e.to_string())?;
+    // Authorization & Scope: reading products requires an active session scoped to the catalog organization
+    let catalog_org = get_catalog_organization_id(&conn).map_err(|e| e.to_string())?;
+    let mut req = AuthorizeRequest::new(&session_id);
+    if let Some(ref org) = catalog_org {
+        req = req.with_organization_scope(org);
+    }
+    req.execute(&conn).map_err(|e| e.to_string())?;
 
     crate::product::list_products(&conn, &filter).map_err(|e| e.to_string())
 }

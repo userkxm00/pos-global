@@ -1,17 +1,23 @@
 // Unit, repository, exact-money, and authorization tests for F2.01 Product CRUD.
 
-use crate::auth::middleware::{require_permission, require_session, AuthMiddlewareError};
+use crate::auth::middleware::{
+    require_permission, require_scoped_permission, require_session, AuthMiddlewareError,
+    AuthorizeRequest,
+};
+use crate::branch::{create_branch, CreateBranchInput};
+use crate::organization::{create_organization, CreateOrganizationInput};
 use crate::permission::Permission;
 use crate::product::{
-    create_product, delete_product, get_product, get_product_by_barcode, list_products,
-    minor_to_real, real_to_minor, update_product, validate_barcode, validate_base_price_minor,
-    validate_cost_price_minor, validate_name, validate_product_type, CreateProductInput,
-    ProductError, ProductFilter, UpdateProductInput, MAX_SAFE_MINOR_UNITS,
+    create_product, delete_product, get_catalog_organization_id, get_product,
+    get_product_by_barcode, list_products, minor_to_real, real_to_minor, update_product,
+    validate_barcode, validate_base_price_minor, validate_cost_price_minor, validate_name,
+    validate_product_type, CreateProductInput, ProductError, ProductFilter, UpdateProductInput,
+    MAX_SAFE_MINOR_UNITS,
 };
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
 };
-use crate::user::session::create_local_session;
+use crate::user::session::{create_local_session, revoke_local_session};
 use rusqlite::params;
 
 // =========================================================================
@@ -26,7 +32,7 @@ fn test_validate_name_trims_and_accepts_valid() {
 
 #[test]
 fn test_validate_name_accepts_multibyte_unicode_up_to_255_chars() {
-    // Non-Latin Arabic text: 50 Unicode chars, 94 UTF-8 bytes
+    // Non-Latin Arabic text: 45 Unicode chars, 94 UTF-8 bytes
     let arabic_name = "قهوة عربية أصيلة درجة أولى مع الهيل والزعفران";
     assert_eq!(arabic_name.chars().count(), 45);
     assert!(arabic_name.len() > 45);
@@ -75,12 +81,17 @@ fn test_validate_base_price_minor_accepts_zero_and_positive() {
 }
 
 #[test]
-fn test_validate_base_price_minor_rejects_negative_and_overflow() {
+fn test_validate_base_price_minor_rejects_negative_and_lossy_overflow() {
     let err_neg = validate_base_price_minor(-1).unwrap_err();
     assert!(matches!(err_neg, ProductError::Validation(_)));
 
+    // Values above MAX_SAFE_MINOR_UNITS (e.g. at 2^52 - 1 where float rounding errors occur) are rejected
     let err_overflow = validate_base_price_minor(MAX_SAFE_MINOR_UNITS + 1).unwrap_err();
     assert!(matches!(err_overflow, ProductError::Validation(_)));
+
+    let lossy_val = 4_503_599_627_370_495_i64; // 2^52 - 1 (demonstrated float round-trip loss)
+    let err_lossy = validate_base_price_minor(lossy_val).unwrap_err();
+    assert!(matches!(err_lossy, ProductError::Validation(_)));
 }
 
 #[test]
@@ -160,6 +171,7 @@ fn test_money_exact_round_trip_conversions() {
         (100, 1.0),
         (25000, 250.0),
         (12345678, 123456.78),
+        (MAX_SAFE_MINOR_UNITS, MAX_SAFE_MINOR_UNITS as f64 / 100.0),
     ];
 
     for &(minor, real) in test_cases {
@@ -269,6 +281,48 @@ fn test_duplicate_barcode_rejected() {
         description: None,
         category_id: None,
         barcode: Some("UNIQUE-BARCODE-99".to_string()),
+        product_type: None,
+        base_price_minor: 2000,
+        cost_price_minor: None,
+        unit_type: None,
+        requires_expiry: None,
+        requires_serial: None,
+        warranty_months: None,
+        custom_attributes: None,
+    };
+    let err = create_product(&conn, input2).unwrap_err();
+    assert!(matches!(err, ProductError::DuplicateBarcode(_)));
+}
+
+#[test]
+fn test_archived_barcode_reuse_rejected_preserving_table_uniqueness() {
+    let conn = setup_test_db();
+
+    let input1 = CreateProductInput {
+        name: "Archived Product".to_string(),
+        description: None,
+        category_id: None,
+        barcode: Some("BC-ARCHIVE-DUP".to_string()),
+        product_type: None,
+        base_price_minor: 1000,
+        cost_price_minor: None,
+        unit_type: None,
+        requires_expiry: None,
+        requires_serial: None,
+        warranty_months: None,
+        custom_attributes: None,
+    };
+    let created = create_product(&conn, input1).expect("product created");
+
+    // Soft-delete the product
+    delete_product(&conn, &created.id).expect("soft delete succeeds");
+
+    // Existing products.barcode UNIQUE constraint enforces table-wide uniqueness
+    let input2 = CreateProductInput {
+        name: "New Product Attempting Same Barcode".to_string(),
+        description: None,
+        category_id: None,
+        barcode: Some("BC-ARCHIVE-DUP".to_string()),
         product_type: None,
         base_price_minor: 2000,
         cost_price_minor: None,
@@ -731,7 +785,7 @@ fn test_list_products_literal_like_wildcard_escaping() {
 }
 
 // =========================================================================
-// 4. AUTHORIZATION TESTS
+// 4. AUTHORIZATION & TENANT ISOLATION TESTS
 // =========================================================================
 
 #[test]
@@ -820,19 +874,183 @@ fn test_cashier_denied_product_mutation_but_allowed_product_reads() {
 }
 
 #[test]
-fn test_unauthenticated_or_revoked_session_denied_all_product_operations() {
+fn test_product_organization_isolation_enforced() {
     let conn = setup_test_db();
 
-    // 1. Nonexistent session ID
+    // 1. Setup Tenant Alpha
+    let org_a = create_organization(
+        &conn,
+        CreateOrganizationInput {
+            name: "Organization Alpha".to_string(),
+            default_currency: Some("USD".to_string()),
+            default_language: Some("en".to_string()),
+        },
+    )
+    .expect("create org a");
+
+    let branch_a = create_branch(
+        &conn,
+        CreateBranchInput {
+            organization_id: org_a.id.clone(),
+            name: "Branch Alpha".to_string(),
+            address: None,
+            currency: Some("USD".to_string()),
+            is_active: Some(true),
+        },
+    )
+    .expect("create branch a");
+
+    let admin_a = create_test_user_with_creds(
+        &conn,
+        &branch_a.id,
+        "Admin Alpha",
+        Some("admin_alpha"),
+        None,
+        None,
+        "admin",
+    )
+    .expect("create admin a");
+
+    let session_a = create_local_session(&conn, &admin_a.id, &branch_a.id, "pin", None)
+        .expect("session a created");
+
+    // 2. Setup Tenant Beta
+    let org_b = create_organization(
+        &conn,
+        CreateOrganizationInput {
+            name: "Organization Beta".to_string(),
+            default_currency: Some("EUR".to_string()),
+            default_language: Some("de".to_string()),
+        },
+    )
+    .expect("create org b");
+
+    let branch_b = create_branch(
+        &conn,
+        CreateBranchInput {
+            organization_id: org_b.id.clone(),
+            name: "Branch Beta".to_string(),
+            address: None,
+            currency: Some("EUR".to_string()),
+            is_active: Some(true),
+        },
+    )
+    .expect("create branch b");
+
+    let admin_b = create_test_user_with_creds(
+        &conn,
+        &branch_b.id,
+        "Admin Beta",
+        Some("admin_beta"),
+        None,
+        None,
+        "admin",
+    )
+    .expect("create admin b");
+
+    let session_b = create_local_session(&conn, &admin_b.id, &branch_b.id, "pin", None)
+        .expect("session b created");
+
+    // 3. Set business settings to Org A
+    conn.execute(
+        "UPDATE business_settings SET organization_id = ?1",
+        params![org_a.id],
+    )
+    .expect("business settings updated");
+
+    let catalog_org = get_catalog_organization_id(&conn).expect("get catalog org");
+    assert_eq!(catalog_org.as_deref(), Some(org_a.id.as_str()));
+
+    // 4. Session A (matching Org A) has valid scoped authorization
+    let auth_a = require_scoped_permission(
+        &conn,
+        &session_a.id,
+        Permission::ProductsManage,
+        catalog_org.as_deref(),
+        None,
+    );
+    assert!(auth_a.is_ok(), "Org A admin authorized for Org A catalog");
+
+    let read_a = AuthorizeRequest::new(&session_a.id)
+        .with_organization_scope(org_a.id.as_str())
+        .execute(&conn);
+    assert!(
+        read_a.is_ok(),
+        "Org A admin authorized to read Org A catalog"
+    );
+
+    // 5. Session B (cross-tenant Org B) is rejected on scoped mutation and read
+    let auth_b = require_scoped_permission(
+        &conn,
+        &session_b.id,
+        Permission::ProductsManage,
+        catalog_org.as_deref(),
+        None,
+    );
+    assert!(
+        matches!(auth_b, Err(AuthMiddlewareError::ScopeMismatch { .. })),
+        "Org B admin must be rejected with ScopeMismatch for Org A catalog"
+    );
+
+    let read_b = AuthorizeRequest::new(&session_b.id)
+        .with_organization_scope(org_a.id.as_str())
+        .execute(&conn);
+    assert!(
+        matches!(read_b, Err(AuthMiddlewareError::ScopeMismatch { .. })),
+        "Org B admin must be rejected with ScopeMismatch for Org A catalog reads"
+    );
+}
+
+#[test]
+fn test_unauthenticated_or_revoked_session_denied_all_product_operations() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+
+    let user = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Test Revocation User",
+        Some("test_revocation_user"),
+        None,
+        None,
+        "admin",
+    )
+    .expect("user created");
+
+    let session =
+        create_local_session(&conn, &user.id, &branch_id, "pin", None).expect("session created");
+
+    // 1. Session is initially active and valid
+    assert!(require_session(&conn, &session.id).is_ok());
+    assert!(require_permission(&conn, &session.id, Permission::ProductsManage).is_ok());
+
+    // 2. Explicitly revoke the session using production revocation function
+    revoke_local_session(&conn, &session.id).expect("session revoked");
+
+    // 3. Revoked session is rejected fail-closed
+    let err_revoked_session = require_session(&conn, &session.id).unwrap_err();
+    assert!(
+        matches!(err_revoked_session, AuthMiddlewareError::SessionRevoked(_)),
+        "Revoked session must be rejected with SessionRevoked"
+    );
+
+    let err_revoked_perm =
+        require_permission(&conn, &session.id, Permission::ProductsManage).unwrap_err();
+    assert!(
+        matches!(err_revoked_perm, AuthMiddlewareError::SessionRevoked(_)),
+        "Revoked session must be rejected with SessionRevoked for permission checks"
+    );
+
+    // 4. Nonexistent session ID is rejected as Unauthenticated
     let err_unauth = require_session(&conn, "nonexistent-session-id");
     assert!(
         matches!(err_unauth, Err(AuthMiddlewareError::Unauthenticated(_))),
-        "Nonexistent session must be denied"
+        "Nonexistent session must be denied as Unauthenticated"
     );
 
     let err_perm = require_permission(&conn, "nonexistent-session-id", Permission::ProductsManage);
     assert!(
         matches!(err_perm, Err(AuthMiddlewareError::Unauthenticated(_))),
-        "Nonexistent session must be denied for permission checks"
+        "Nonexistent session must be denied as Unauthenticated for permission checks"
     );
 }
