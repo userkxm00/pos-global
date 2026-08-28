@@ -5,9 +5,12 @@
 
 mod auth;
 mod branch;
+mod brand;
+mod category;
 mod commands;
 mod db;
 mod licence;
+mod manufacturer;
 mod organization;
 mod permission;
 mod product;
@@ -55,6 +58,22 @@ fn main() {
             commands::product::update_product,
             commands::product::delete_product,
             commands::product::list_catalog_products,
+            commands::category::create_category,
+            commands::category::get_category,
+            commands::category::update_category,
+            commands::category::delete_category,
+            commands::category::list_categories,
+            commands::category::get_category_tree,
+            commands::brand::create_brand,
+            commands::brand::get_brand,
+            commands::brand::update_brand,
+            commands::brand::delete_brand,
+            commands::brand::list_brands,
+            commands::manufacturer::create_manufacturer,
+            commands::manufacturer::get_manufacturer,
+            commands::manufacturer::update_manufacturer,
+            commands::manufacturer::delete_manufacturer,
+            commands::manufacturer::list_manufacturers,
             commands::organization::create_organization,
             commands::organization::get_organization,
             commands::organization::update_organization,
