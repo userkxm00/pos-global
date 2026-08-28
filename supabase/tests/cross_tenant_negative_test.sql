@@ -92,6 +92,9 @@ DECLARE
 
     perm_id UUID;
 BEGIN
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+
     -- Auth Users
     INSERT INTO auth.users (id, email) VALUES
         (owner_a, 'f125_owner_a@tenant-a.com'),
@@ -176,6 +179,9 @@ DECLARE
     user_a_id UUID := 'f1250004-aaaa-aaaa-aaaa-000000000001';
     reg_a_paired UUID := 'f1250003-aaaa-aaaa-aaaa-000000000001';
 BEGIN
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+
     -- N01: Attempting to insert a user with Org A and Branch B (belonging to Org B)
     BEGIN
         INSERT INTO public.users (id, organization_id, branch_id, full_name, username, role)
@@ -217,6 +223,8 @@ BEGIN
         WHEN foreign_key_violation THEN
             RAISE NOTICE 'PASS N04: Register cross-tenant branch reassignment blocked by composite FK (fk_registers_branch_org)';
     END;
+
+    RESET ROLE;
 END $$;
 
 -- ============================================================
@@ -239,6 +247,7 @@ DECLARE
     mutated_cnt INTEGER := 0;
     curr_org UUID;
 BEGIN
+    RESET ROLE;
     SET LOCAL ROLE authenticated;
 
     -- N05: Admin A attempts to transfer branch ownership from Org A to Org B
@@ -306,6 +315,8 @@ BEGIN
         WHEN insufficient_privilege THEN
             RAISE NOTICE 'PASS N08: Organization member reassignment rejected by RLS policy';
     END;
+
+    RESET ROLE;
 END $$;
 
 -- ============================================================
@@ -330,6 +341,9 @@ DECLARE
     curr_device TEXT;
     curr_status TEXT;
 BEGIN
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+
     -- Baseline verification in elevated context
     SELECT device_last_seen_at INTO initial_last_seen FROM public.registers WHERE id = reg_b_paired;
     IF initial_last_seen IS NULL THEN
@@ -406,6 +420,7 @@ BEGIN
 
     -- Reset to elevated role to verify Tenant B timestamp was untouched
     RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
     SELECT device_last_seen_at INTO current_last_seen FROM public.registers WHERE id = reg_b_paired;
     IF current_last_seen IS DISTINCT FROM initial_last_seen THEN
         RAISE EXCEPTION 'HEARTBEAT INVARIANT BROKEN: Target register device_last_seen_at was altered by spoofed heartbeat (initial: %, current: %)', initial_last_seen, current_last_seen;
@@ -429,6 +444,7 @@ BEGIN
 
     -- Verify Tenant B register state in elevated context
     RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
     SELECT device_pairing_status, device_identifier INTO curr_status, curr_device FROM public.registers WHERE id = reg_b_paired;
     IF curr_status <> 'paired' OR curr_device <> 'dev-beta-active-01' THEN
         RAISE EXCEPTION 'INVARIANT BROKEN: Tenant B register was mutated by unauthorized caller';
@@ -450,6 +466,7 @@ DECLARE
     org_a UUID := 'f1250001-aaaa-aaaa-aaaa-000000000001';
     org_b UUID := 'f1250001-bbbb-bbbb-bbbb-000000000002';
 BEGIN
+    RESET ROLE;
     SET LOCAL ROLE authenticated;
 
     -- N14: Owner A calls set_organization_member_role targeting Tenant B
@@ -504,6 +521,8 @@ BEGIN
         WHEN SQLSTATE '23514' THEN
             RAISE NOTICE 'PASS N18: Sole owner demotion rejected with 23514 check constraint violation';
     END;
+
+    RESET ROLE;
 END $$;
 
 -- ============================================================
@@ -522,7 +541,10 @@ DECLARE
     mutated_cnt INTEGER := 0;
     perm_count INTEGER := 0;
 BEGIN
-    -- Retrieve real permission ID for sales.create
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+
+    -- Retrieve real permission ID for sales.create in elevated context
     SELECT id INTO perm_id FROM public.permissions WHERE code = 'sales.create' LIMIT 1;
     IF perm_id IS NULL THEN
         RAISE EXCEPTION 'FIXTURE ERROR: sales.create permission row missing';
@@ -580,6 +602,7 @@ BEGIN
 
     -- Elevated verification: confirm User B user_permissions row was NOT deleted
     RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
     SELECT COUNT(*) INTO perm_count FROM public.user_permissions WHERE user_id = user_b_id AND permission_id = perm_id;
     IF perm_count < 1 THEN
         RAISE EXCEPTION 'INVARIANT BROKEN: User B permission override was deleted by unauthorized caller';
@@ -613,6 +636,7 @@ BEGIN
 
     -- Elevated verification: confirm role_permissions row for cashier was NOT deleted
     RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
     SELECT COUNT(*) INTO perm_count FROM public.role_permissions WHERE role = 'cashier' AND permission_id = perm_id;
     IF perm_count < 1 THEN
         RAISE EXCEPTION 'INVARIANT BROKEN: Global role_permissions catalog row was deleted by tenant owner';
@@ -634,6 +658,7 @@ DECLARE
 
     mutated_cnt INTEGER := 0;
 BEGIN
+    RESET ROLE;
     -- N23: Unaffiliated authenticated user calling privileged RPCs
     SET LOCAL ROLE authenticated;
     PERFORM set_config('request.jwt.claim.sub', unaffiliated::text, true);
@@ -777,6 +802,8 @@ BEGIN
         WHEN insufficient_privilege THEN
             RAISE NOTICE 'PASS N25e: Anonymous set_organization_member_role rejected by privilege check';
     END;
+
+    RESET ROLE;
 END $$;
 
 ROLLBACK;
