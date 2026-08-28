@@ -110,7 +110,9 @@ fn test_validate_base_price_minor_rejects_negative_and_lossy_overflow() {
 
 #[test]
 fn test_validate_cost_price_minor_accepts_none_zero_positive() {
-    assert_eq!(validate_cost_price_minor(None).expect("none cost"), None);
+    assert!(validate_cost_price_minor(None)
+        .expect("none cost")
+        .is_none());
     assert_eq!(
         validate_cost_price_minor(Some(0)).expect("zero cost"),
         Some(0)
@@ -136,9 +138,9 @@ fn test_validate_cost_price_minor_rejects_negative_and_overflow() {
 
 #[test]
 fn test_validate_barcode_normalizes_empty_and_trims() {
-    assert_eq!(validate_barcode(None), None);
-    assert_eq!(validate_barcode(Some("")), None);
-    assert_eq!(validate_barcode(Some("   ")), None);
+    assert!(validate_barcode(None).is_none());
+    assert!(validate_barcode(Some("")).is_none());
+    assert!(validate_barcode(Some("   ")).is_none());
     assert_eq!(
         validate_barcode(Some("  123456789  ")),
         Some("123456789".to_string())
@@ -332,8 +334,8 @@ fn test_multiple_products_with_null_barcode_allowed() {
         .expect("product 2 created");
 
     assert_ne!(p1.id, p2.id);
-    assert_eq!(p1.barcode, None);
-    assert_eq!(p2.barcode, None);
+    assert!(p1.barcode.is_none());
+    assert!(p2.barcode.is_none());
 }
 
 #[test]
@@ -919,7 +921,7 @@ fn test_multiple_organizations_without_configured_catalog_org_fails_closed() {
 
     // 3. get_catalog_organization_id must return Ok(None) due to ambiguous multi-org presence
     let catalog_org = get_catalog_organization_id(&conn).expect("lookup succeeds");
-    assert_eq!(catalog_org, None);
+    assert!(catalog_org.is_none());
 
     // 4. Mutation and read command authorizers must fail closed
     let mutation_err =

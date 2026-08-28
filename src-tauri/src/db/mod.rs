@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn test_validate_url_syntax() {
-        assert_eq!(super::validate_url_syntax(None).expect("none"), None);
+        assert!(super::validate_url_syntax(None).expect("none").is_none());
         assert_eq!(
             super::validate_url_syntax(Some("https://example.com")).expect("valid url"),
             Some("https://example.com".to_string())

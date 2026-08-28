@@ -146,14 +146,14 @@ fn permission_catalog_exact_matching_and_fail_closed() {
     }
 
     // Fail-closed verification: case, whitespace, prefixes, and unknown strings
-    assert_eq!(Permission::parse("sales.Create"), None);
-    assert_eq!(Permission::parse("SALES.CREATE"), None);
-    assert_eq!(Permission::parse(" sales.create "), None);
-    assert_eq!(Permission::parse("sales."), None);
-    assert_eq!(Permission::parse("sales.create.extra"), None);
-    assert_eq!(Permission::parse("sales.*"), None);
-    assert_eq!(Permission::parse(""), None);
-    assert_eq!(Permission::parse("unknown_permission"), None);
+    assert!(Permission::parse("sales.Create").is_none());
+    assert!(Permission::parse("SALES.CREATE").is_none());
+    assert!(Permission::parse(" sales.create ").is_none());
+    assert!(Permission::parse("sales.").is_none());
+    assert!(Permission::parse("sales.create.extra").is_none());
+    assert!(Permission::parse("sales.*").is_none());
+    assert!(Permission::parse("").is_none());
+    assert!(Permission::parse("unknown_permission").is_none());
 }
 
 #[test]
@@ -167,13 +167,13 @@ fn role_exact_matching_and_fail_closed() {
     assert_eq!(Role::Cashier.as_str(), "cashier");
 
     // Fail-closed verification
-    assert_eq!(Role::parse("Admin"), None);
-    assert_eq!(Role::parse("MANAGER"), None);
-    assert_eq!(Role::parse(" cashier "), None);
-    assert_eq!(Role::parse("superuser"), None);
-    assert_eq!(Role::parse("root"), None);
-    assert_eq!(Role::parse("guest"), None);
-    assert_eq!(Role::parse(""), None);
+    assert!(Role::parse("Admin").is_none());
+    assert!(Role::parse("MANAGER").is_none());
+    assert!(Role::parse(" cashier ").is_none());
+    assert!(Role::parse("superuser").is_none());
+    assert!(Role::parse("root").is_none());
+    assert!(Role::parse("guest").is_none());
+    assert!(Role::parse("").is_none());
 }
 
 #[test]
