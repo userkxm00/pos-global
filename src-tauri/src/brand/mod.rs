@@ -64,17 +64,16 @@ impl std::error::Error for BrandError {}
 
 impl From<rusqlite::Error> for BrandError {
     fn from(e: rusqlite::Error) -> Self {
-        if let rusqlite::Error::SqliteFailure(ref f, Some(ref msg)) = e {
-            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
-                && (msg.contains("idx_brands_name_active")
-                    || msg.contains("UNIQUE constraint failed: brands.name"))
+        match e {
+            rusqlite::Error::SqliteFailure(ref f, Some(ref msg))
+                if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+                    && (msg.contains("idx_brands_name_active")
+                        || msg.contains("UNIQUE constraint failed: brands.name")) =>
             {
-                return BrandError::DuplicateName(
-                    "An active brand with this name already exists".into(),
-                );
+                BrandError::DuplicateName("An active brand with this name already exists".into())
             }
+            _ => BrandError::Database(e.to_string()),
         }
-        BrandError::Database(e.to_string())
     }
 }
 

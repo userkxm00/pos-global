@@ -88,23 +88,25 @@ impl std::error::Error for CategoryError {}
 
 impl From<rusqlite::Error> for CategoryError {
     fn from(e: rusqlite::Error) -> Self {
-        if let rusqlite::Error::SqliteFailure(ref f, Some(ref msg)) = e {
-            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
-                && (msg.contains("idx_categories_root_name_active")
-                    || msg.contains("idx_categories_sibling_name_active")
-                    || msg.contains("UNIQUE constraint failed: categories.name"))
+        match e {
+            rusqlite::Error::SqliteFailure(ref f, Some(ref msg))
+                if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+                    && (msg.contains("idx_categories_root_name_active")
+                        || msg.contains("idx_categories_sibling_name_active")
+                        || msg.contains("UNIQUE constraint failed: categories.name")) =>
             {
-                return CategoryError::DuplicateName(
+                CategoryError::DuplicateName(
                     "An active category with this name already exists in this scope".into(),
-                );
+                )
             }
-            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
-                && msg.contains("FOREIGN KEY constraint failed")
+            rusqlite::Error::SqliteFailure(ref f, Some(ref msg))
+                if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+                    && msg.contains("FOREIGN KEY constraint failed") =>
             {
-                return CategoryError::NotFound("Parent category not found".into());
+                CategoryError::NotFound("Parent category not found".into())
             }
+            _ => CategoryError::Database(e.to_string()),
         }
-        CategoryError::Database(e.to_string())
     }
 }
 
@@ -414,14 +416,14 @@ fn partition_categories(
     let mut root_categories: Vec<Category> = Vec::new();
 
     for cat in categories {
-        match cat.parent_id {
-            Some(ref pid) if active_ids.contains(pid) => {
-                children_by_parent.entry(pid.clone()).or_default().push(cat);
-            }
-            _ => {
-                root_categories.push(cat);
+        if let Some(ref pid) = cat.parent_id {
+            if active_ids.contains(pid) {
+                let parent_key = pid.clone();
+                children_by_parent.entry(parent_key).or_default().push(cat);
+                continue;
             }
         }
+        root_categories.push(cat);
     }
     (root_categories, children_by_parent)
 }

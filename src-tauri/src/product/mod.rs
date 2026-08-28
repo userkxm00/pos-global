@@ -108,17 +108,16 @@ impl std::error::Error for ProductError {}
 
 impl From<rusqlite::Error> for ProductError {
     fn from(e: rusqlite::Error) -> Self {
-        if let rusqlite::Error::SqliteFailure(ref f, Some(ref msg)) = e {
-            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
-                && (msg.contains("products.barcode")
-                    || msg.contains("UNIQUE constraint failed: products.barcode"))
+        match e {
+            rusqlite::Error::SqliteFailure(ref f, Some(ref msg))
+                if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+                    && (msg.contains("products.barcode")
+                        || msg.contains("UNIQUE constraint failed: products.barcode")) =>
             {
-                return ProductError::DuplicateBarcode(
-                    "Barcode already assigned to another product".into(),
-                );
+                ProductError::DuplicateBarcode("Barcode already assigned to another product".into())
             }
+            _ => ProductError::Database(e.to_string()),
         }
-        ProductError::Database(e.to_string())
     }
 }
 

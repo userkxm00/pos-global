@@ -206,7 +206,7 @@ impl RateLimiter {
     #[cfg(test)]
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.state.lock().map(|s| s.map.is_empty()).unwrap_or(true)
     }
 
     /// Checks if a client-identity key is currently locked out or subject to client admission throttle.

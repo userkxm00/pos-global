@@ -70,17 +70,18 @@ impl std::error::Error for ManufacturerError {}
 
 impl From<rusqlite::Error> for ManufacturerError {
     fn from(e: rusqlite::Error) -> Self {
-        if let rusqlite::Error::SqliteFailure(ref f, Some(ref msg)) = e {
-            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
-                && (msg.contains("idx_manufacturers_name_active")
-                    || msg.contains("UNIQUE constraint failed: manufacturers.name"))
+        match e {
+            rusqlite::Error::SqliteFailure(ref f, Some(ref msg))
+                if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+                    && (msg.contains("idx_manufacturers_name_active")
+                        || msg.contains("UNIQUE constraint failed: manufacturers.name")) =>
             {
-                return ManufacturerError::DuplicateName(
+                ManufacturerError::DuplicateName(
                     "An active manufacturer with this name already exists".into(),
-                );
+                )
             }
+            _ => ManufacturerError::Database(e.to_string()),
         }
-        ManufacturerError::Database(e.to_string())
     }
 }
 
