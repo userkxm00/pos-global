@@ -114,39 +114,7 @@ pub fn validate_description(desc: Option<&str>) -> Option<String> {
 
 /// Validates brand website. Conservative check: <= 2048 chars, no spaces, valid host.
 pub fn validate_website(url: Option<&str>) -> Result<Option<String>, BrandError> {
-    match url.map(str::trim).filter(|s| !s.is_empty()) {
-        None => Ok(None),
-        Some(s) => {
-            if s.chars().count() > 2048 {
-                return Err(BrandError::Validation(
-                    "Website URL exceeds maximum length of 2048 characters".into(),
-                ));
-            }
-            if s.contains(char::is_whitespace) {
-                return Err(BrandError::Validation(
-                    "Website URL cannot contain whitespace".into(),
-                ));
-            }
-            let host_part = if let Some(stripped) = s.strip_prefix("https://") {
-                stripped
-            } else if let Some(stripped) = s.strip_prefix("http://") {
-                stripped
-            } else {
-                s
-            };
-            let host = host_part.split(['/', '?', '#', ':']).next().unwrap_or("");
-            if host.is_empty()
-                || !host.contains('.')
-                || host.starts_with('.')
-                || host.ends_with('.')
-            {
-                return Err(BrandError::Validation(
-                    "Website URL must be a valid web address or domain".into(),
-                ));
-            }
-            Ok(Some(s.to_string()))
-        }
-    }
+    crate::db::validate_url_syntax(url).map_err(|e| BrandError::Validation(e.to_string()))
 }
 
 const BRAND_COLUMNS: &str = "id, name, description, website, is_active, created_at, updated_at";
@@ -252,15 +220,11 @@ pub fn list_brands(conn: &Connection, filter: &BrandFilter) -> Result<Vec<Brand>
         params_vec.push(Box::new(if active { 1 } else { 0 }));
     }
 
-    if let Some(ref q) = filter.query {
-        let trimmed = q.trim();
-        if !trimmed.is_empty() {
-            sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')");
-            let pattern = format!("%{}%", escape_like_pattern(trimmed));
-            params_vec.push(Box::new(pattern.clone()));
-            params_vec.push(Box::new(pattern));
-        }
-    }
+    crate::db::append_name_or_description_search(
+        &mut sql,
+        &mut params_vec,
+        filter.query.as_deref(),
+    );
 
     sql.push_str(" ORDER BY name COLLATE NOCASE ASC");
 

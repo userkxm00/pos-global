@@ -403,15 +403,11 @@ pub fn list_categories(
         }
     }
 
-    if let Some(ref q) = filter.query {
-        let trimmed = q.trim();
-        if !trimmed.is_empty() {
-            sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')");
-            let pattern = format!("%{}%", escape_like_pattern(trimmed));
-            params_vec.push(Box::new(pattern.clone()));
-            params_vec.push(Box::new(pattern));
-        }
-    }
+    crate::db::append_name_or_description_search(
+        &mut sql,
+        &mut params_vec,
+        filter.query.as_deref(),
+    );
 
     sql.push_str(" ORDER BY name COLLATE NOCASE ASC");
 

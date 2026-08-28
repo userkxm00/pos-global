@@ -79,8 +79,69 @@ pub fn init_database(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Safely escapes special LIKE wildcard characters (`%`, `_`, `\`) with a backslash escape.
+pub fn escape_like_pattern(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for c in input.chars() {
+        if c == '%' || c == '_' || c == '\\' {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
+/// Validates website URL syntax conservatively: <= 2048 chars, no spaces, valid host part with dot.
+pub fn validate_url_syntax(url: Option<&str>) -> Result<Option<String>, &'static str> {
+    match url.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(None),
+        Some(s) => {
+            if s.chars().count() > 2048 {
+                return Err("Website URL exceeds maximum length of 2048 characters");
+            }
+            if s.contains(char::is_whitespace) {
+                return Err("Website URL cannot contain whitespace");
+            }
+            let host_part = if let Some(stripped) = s.strip_prefix("https://") {
+                stripped
+            } else if let Some(stripped) = s.strip_prefix("http://") {
+                stripped
+            } else {
+                s
+            };
+            let host = host_part.split(['/', '?', '#', ':']).next().unwrap_or("");
+            if host.is_empty()
+                || !host.contains('.')
+                || host.starts_with('.')
+                || host.ends_with('.')
+            {
+                return Err("Website URL must be a valid web address or domain");
+            }
+            Ok(Some(s.to_string()))
+        }
+    }
+}
+
+/// Appends a query search clause for name and description with escaped LIKE wildcards.
+pub fn append_name_or_description_search(
+    sql: &mut String,
+    params_vec: &mut Vec<Box<dyn rusqlite::ToSql>>,
+    query: Option<&str>,
+) {
+    if let Some(q) = query {
+        let trimmed = q.trim();
+        if !trimmed.is_empty() {
+            sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')");
+            let pattern = format!("%{}%", escape_like_pattern(trimmed));
+            params_vec.push(Box::new(pattern.clone()));
+            params_vec.push(Box::new(pattern));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
     use super::init_database;
     use rusqlite::Connection;
 
@@ -284,16 +345,15 @@ mod tests {
         assert_eq!(super::escape_like_pattern("path\\to"), "path\\\\to");
         assert_eq!(super::escape_like_pattern("normal"), "normal");
     }
-}
 
-/// Safely escapes special LIKE wildcard characters (`%`, `_`, `\`) with a backslash escape.
-pub fn escape_like_pattern(input: &str) -> String {
-    let mut escaped = String::with_capacity(input.len());
-    for c in input.chars() {
-        if c == '%' || c == '_' || c == '\\' {
-            escaped.push('\\');
-        }
-        escaped.push(c);
+    #[test]
+    fn test_validate_url_syntax() {
+        assert!(super::validate_url_syntax(None).unwrap().is_none());
+        assert_eq!(
+            super::validate_url_syntax(Some("https://example.com")).unwrap(),
+            Some("https://example.com".to_string())
+        );
+        assert!(super::validate_url_syntax(Some("https://")).is_err());
+        assert!(super::validate_url_syntax(Some(".invalid")).is_err());
     }
-    escaped
 }
