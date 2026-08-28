@@ -78,18 +78,6 @@ impl From<rusqlite::Error> for BrandError {
     }
 }
 
-/// Escapes wildcard characters (% and _) in user queries for SQL LIKE with ESCAPE '\\'.
-pub fn escape_like_pattern(input: &str) -> String {
-    let mut escaped = String::with_capacity(input.len());
-    for c in input.chars() {
-        if c == '%' || c == '_' || c == '\\' {
-            escaped.push('\\');
-        }
-        escaped.push(c);
-    }
-    escaped
-}
-
 /// Validates brand name. Must be non-empty and <= 255 Unicode characters.
 pub fn validate_name(name: &str) -> Result<String, BrandError> {
     let trimmed = name.trim();
