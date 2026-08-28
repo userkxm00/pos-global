@@ -58,6 +58,7 @@ pub enum CategoryError {
     InactiveParent(String),
     SelfParenting(String),
     CycleDetected(String),
+    HierarchyDepthExceeded(String),
     HasActiveChildren(String),
     Database(String),
 }
@@ -71,6 +72,9 @@ impl std::fmt::Display for CategoryError {
             CategoryError::InactiveParent(msg) => write!(f, "Inactive parent error: {msg}"),
             CategoryError::SelfParenting(msg) => write!(f, "Self parenting error: {msg}"),
             CategoryError::CycleDetected(msg) => write!(f, "Cycle detected error: {msg}"),
+            CategoryError::HierarchyDepthExceeded(msg) => {
+                write!(f, "Hierarchy depth exceeded: {msg}")
+            }
             CategoryError::HasActiveChildren(msg) => {
                 write!(f, "Category has active children: {msg}")
             }
@@ -229,10 +233,9 @@ pub fn check_category_cycle(
     }
 
     if steps >= MAX_DEFENSIVE_STEPS {
-        return Err(CategoryError::CycleDetected(
-            "Hierarchy depth exceeded defensive safety bound (possible cycle in existing data)"
-                .into(),
-        ));
+        return Err(CategoryError::HierarchyDepthExceeded(format!(
+            "Hierarchy depth exceeds supported maximum of {MAX_DEFENSIVE_STEPS} levels"
+        )));
     }
 
     Ok(())
@@ -421,7 +424,7 @@ pub fn list_categories(
     Ok(categories)
 }
 
-/// Reconstructs the complete hierarchical category tree in memory.
+/// Reconstructs the complete hierarchical category tree in memory in O(n) time.
 pub fn get_category_tree(
     conn: &Connection,
     include_inactive: bool,
@@ -433,32 +436,52 @@ pub fn get_category_tree(
     };
 
     let all_categories = list_categories(conn, &filter)?;
+    let active_ids: std::collections::HashSet<String> =
+        all_categories.iter().map(|c| c.id.clone()).collect();
 
-    fn build_nodes(parent_id: Option<&str>, all: &[Category]) -> Vec<CategoryTreeNode> {
-        let mut nodes = Vec::new();
-        for cat in all {
-            let matches_parent = match (cat.parent_id.as_deref(), parent_id) {
-                (None, None) => true,
-                (Some(p), Some(target)) => p == target,
-                _ => false,
-            };
+    let mut children_by_parent: std::collections::HashMap<String, Vec<Category>> =
+        std::collections::HashMap::new();
+    let mut root_categories: Vec<Category> = Vec::new();
 
-            if matches_parent {
-                let children = build_nodes(Some(&cat.id), all);
-                nodes.push(CategoryTreeNode {
-                    category: cat.clone(),
-                    children,
-                });
-            }
+    for cat in all_categories {
+        let is_orphan_or_root = match cat.parent_id.as_ref() {
+            None => true,
+            Some(pid) => !active_ids.contains(pid),
+        };
+
+        if is_orphan_or_root {
+            root_categories.push(cat);
+        } else {
+            let pid = cat.parent_id.clone().unwrap();
+            children_by_parent.entry(pid).or_default().push(cat);
         }
-        nodes.sort_by(|a, b| {
-            a.category
-                .name
-                .to_lowercase()
-                .cmp(&b.category.name.to_lowercase())
-        });
-        nodes
     }
 
-    Ok(build_nodes(None, &all_categories))
+    fn build_node_recursive(
+        cat: Category,
+        children_map: &mut std::collections::HashMap<String, Vec<Category>>,
+    ) -> CategoryTreeNode {
+        let children = if let Some(mut raw_children) = children_map.remove(&cat.id) {
+            raw_children.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            raw_children
+                .into_iter()
+                .map(|child| build_node_recursive(child, children_map))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        CategoryTreeNode {
+            category: cat,
+            children,
+        }
+    }
+
+    root_categories.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    let tree = root_categories
+        .into_iter()
+        .map(|root| build_node_recursive(root, &mut children_by_parent))
+        .collect();
+
+    Ok(tree)
 }

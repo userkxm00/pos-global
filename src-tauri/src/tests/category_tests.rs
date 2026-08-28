@@ -274,7 +274,7 @@ fn test_duplicate_active_sibling_category_rejected() {
 }
 
 #[test]
-fn test_duplicate_category_name_in_different_branches_allowed() {
+fn test_duplicate_category_name_under_different_parents_allowed() {
     let conn = setup_test_db();
     let root_a = create_category(&conn, make_category_fixture("Branch A", None)).expect("A");
     let root_b = create_category(&conn, make_category_fixture("Branch B", None)).expect("B");
@@ -585,8 +585,13 @@ fn test_migration_011_upgrade_from_010_with_existing_data() {
     )
     .expect("migrations table");
 
-    // Apply migrations 001 through 010
-    for (name, sql) in &crate::db::MIGRATIONS[..10] {
+    let mig_011_idx = crate::db::MIGRATIONS
+        .iter()
+        .position(|(name, _)| *name == "011_categories_brands_manufacturers")
+        .expect("migration 011 exists");
+
+    // Apply migrations prior to 011
+    for (name, sql) in &crate::db::MIGRATIONS[..mig_011_idx] {
         let tx = conn.unchecked_transaction().expect("tx");
         tx.execute_batch(sql).expect("apply migration");
         tx.execute("INSERT INTO _migrations(name) VALUES (?1)", [name])
@@ -607,7 +612,7 @@ fn test_migration_011_upgrade_from_010_with_existing_data() {
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
         .expect("count");
-    assert_eq!(count, 11);
+    assert_eq!(count, crate::db::MIGRATIONS.len() as i64);
 
     // Verify legacy category has default is_active=1 and updated_at populated
     let cat = get_category(&conn, "legacy-cat-1")
@@ -615,6 +620,7 @@ fn test_migration_011_upgrade_from_010_with_existing_data() {
         .expect("found");
     assert_eq!(cat.name, "Groceries");
     assert!(cat.is_active);
+    assert!(!cat.updated_at.is_empty());
 }
 
 #[test]
@@ -630,8 +636,13 @@ fn test_migration_011_conflict_rollback() {
     )
     .expect("migrations table");
 
-    // Apply migrations 001 through 010
-    for (name, sql) in &crate::db::MIGRATIONS[..10] {
+    let mig_011_idx = crate::db::MIGRATIONS
+        .iter()
+        .position(|(name, _)| *name == "011_categories_brands_manufacturers")
+        .expect("migration 011 exists");
+
+    // Apply migrations prior to 011
+    for (name, sql) in &crate::db::MIGRATIONS[..mig_011_idx] {
         let tx = conn.unchecked_transaction().expect("tx");
         tx.execute_batch(sql).expect("apply migration");
         tx.execute("INSERT INTO _migrations(name) VALUES (?1)", [name])
@@ -651,23 +662,118 @@ fn test_migration_011_conflict_rollback() {
     )
     .expect("insert 2");
 
-    // Attempt to apply 011; should fail atomically because of duplicate root index
-    let sql_011 = crate::db::MIGRATIONS[10].1;
-    let mut tx = conn.unchecked_transaction().expect("tx");
-    let result = tx.execute_batch(sql_011);
+    // Full runner must fail atomically when 011 encounters conflicting data
+    let result = crate::db::init_database(&conn);
     assert!(
         result.is_err(),
-        "Migration 011 must fail on conflicting data"
+        "init_database must fail when migration 011 encounters conflicting active names"
     );
-    tx.rollback().expect("rollback succeeds");
 
-    // Ensure database remained intact and original data was not silently corrupted
-    let c1_exists: i64 = conn
+    // Verify migration 011 was NOT recorded in _migrations
+    let mig_011_recorded: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM categories WHERE id = 'cat-1'",
+            "SELECT COUNT(*) FROM _migrations WHERE name = '011_categories_brands_manufacturers'",
             [],
             |r| r.get(0),
         )
         .expect("query");
-    assert_eq!(c1_exists, 1);
+    assert_eq!(
+        mig_011_recorded, 0,
+        "Failed migration 011 must not be recorded in ledger"
+    );
+
+    // Verify prior migrations remain recorded
+    let prior_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM _migrations", [], |r| r.get(0))
+        .expect("query");
+    assert_eq!(prior_count, mig_011_idx as i64);
+
+    // Verify existing conflicting data remains untouched and uncorrupted
+    let c1_name: String = conn
+        .query_row("SELECT name FROM categories WHERE id = 'cat-1'", [], |r| {
+            r.get(0)
+        })
+        .expect("query");
+    let c2_name: String = conn
+        .query_row("SELECT name FROM categories WHERE id = 'cat-2'", [], |r| {
+            r.get(0)
+        })
+        .expect("query");
+    assert_eq!(c1_name, "Snacks");
+    assert_eq!(c2_name, "snacks");
+}
+
+#[test]
+fn test_category_tree_includes_active_child_under_inactive_parent() {
+    let conn = setup_test_db();
+    let parent = create_category(
+        &conn,
+        make_category_fixture("Seasonal Inactive Parent", None),
+    )
+    .expect("parent created");
+    let child = create_category(
+        &conn,
+        make_category_fixture("Active Evergreen Child", Some(&parent.id)),
+    )
+    .expect("child created");
+
+    // Inactivate parent directly in DB (simulating legacy/inconsistent state)
+    conn.execute(
+        "UPDATE categories SET is_active = 0 WHERE id = ?1",
+        [&parent.id],
+    )
+    .expect("archive parent in DB");
+
+    // When querying active tree, child must be visible at top-level instead of silently disappearing
+    let active_tree = get_category_tree(&conn, false).expect("active tree");
+    let found_child = active_tree.iter().find(|node| node.category.id == child.id);
+    assert!(
+        found_child.is_some(),
+        "Active child under inactive parent must be visible in active tree"
+    );
+    assert_eq!(found_child.unwrap().category.name, "Active Evergreen Child");
+}
+
+#[test]
+fn test_category_hierarchy_depth_limit_and_deep_valid_chain() {
+    let conn = setup_test_db();
+
+    // 10-level deep legitimate chain succeeds
+    let mut prev_id = None;
+    for i in 0..10 {
+        let cat = create_category(
+            &conn,
+            make_category_fixture(&format!("Level {}", i), prev_id.as_deref()),
+        )
+        .expect("create level");
+        prev_id = Some(cat.id);
+    }
+
+    // Cycle check on valid 10-level child moving under another root succeeds
+    let new_root =
+        create_category(&conn, make_category_fixture("New Root", None)).expect("new root");
+    let check =
+        crate::category::check_category_cycle(&conn, prev_id.as_ref().unwrap(), &new_root.id);
+    assert!(check.is_ok());
+
+    // Create chain exceeding MAX_DEFENSIVE_STEPS (50) to test HierarchyDepthExceeded
+    let mut chain_head = None;
+    for i in 0..52 {
+        let cat_id = format!("deep_cat_{:03}", i);
+        let parent_id = if i == 0 {
+            None
+        } else {
+            Some(format!("deep_cat_{:03}", i - 1))
+        };
+        conn.execute(
+            "INSERT INTO categories (id, name, parent_id, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, 1, datetime('now'), datetime('now'))",
+            rusqlite::params![cat_id, format!("Deep Node {}", i), parent_id],
+        ).expect("insert chain");
+        chain_head = Some(cat_id);
+    }
+
+    let deep_err =
+        crate::category::check_category_cycle(&conn, "unrelated_id", chain_head.as_ref().unwrap())
+            .unwrap_err();
+    assert!(matches!(deep_err, CategoryError::HierarchyDepthExceeded(_)));
 }
