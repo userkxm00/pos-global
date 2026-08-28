@@ -163,11 +163,13 @@ pub fn validate_email(email: Option<&str>) -> Result<Option<String>, Manufacture
                 ));
             }
             let parts: Vec<&str> = s.split('@').collect();
-            if parts.len() != 2
-                || parts[0].is_empty()
-                || parts[1].is_empty()
-                || !parts[1].contains('.')
-            {
+            if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+                return Err(ManufacturerError::Validation(
+                    "Support email must be a valid email address".into(),
+                ));
+            }
+            let domain_labels: Vec<&str> = parts[1].split('.').collect();
+            if domain_labels.len() < 2 || domain_labels.iter().any(|label| label.is_empty()) {
                 return Err(ManufacturerError::Validation(
                     "Support email must be a valid email address".into(),
                 ));

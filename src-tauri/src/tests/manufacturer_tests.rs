@@ -56,6 +56,10 @@ fn test_validate_manufacturer_contacts_international() {
         Err(ManufacturerError::Validation(_))
     ));
     assert!(matches!(
+        validate_phone(Some("+")),
+        Err(ManufacturerError::Validation(_))
+    ));
+    assert!(matches!(
         validate_phone(Some("---")),
         Err(ManufacturerError::Validation(_))
     ));
@@ -81,6 +85,22 @@ fn test_validate_manufacturer_contacts_international() {
         validate_email(Some("user @domain.com")),
         Err(ManufacturerError::Validation(_))
     ));
+    assert!(matches!(
+        validate_email(Some("a@.b")),
+        Err(ManufacturerError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_email(Some("a@b..com")),
+        Err(ManufacturerError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_email(Some("a@.example.com")),
+        Err(ManufacturerError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_email(Some("a@example.com.")),
+        Err(ManufacturerError::Validation(_))
+    ));
 
     // Website validation
     assert!(matches!(
@@ -97,6 +117,10 @@ fn test_validate_manufacturer_contacts_international() {
     ));
     assert!(matches!(
         validate_website(Some("invalid.")),
+        Err(ManufacturerError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_website(Some("https://invalid..com")),
         Err(ManufacturerError::Validation(_))
     ));
 }

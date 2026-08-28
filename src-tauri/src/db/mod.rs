@@ -110,11 +110,8 @@ pub fn validate_url_syntax(url: Option<&str>) -> Result<Option<String>, &'static
                 s
             };
             let host = host_part.split(['/', '?', '#', ':']).next().unwrap_or("");
-            if host.is_empty()
-                || !host.contains('.')
-                || host.starts_with('.')
-                || host.ends_with('.')
-            {
+            let labels: Vec<&str> = host.split('.').collect();
+            if labels.len() < 2 || labels.iter().any(|l| l.is_empty()) {
                 return Err("Website URL must be a valid web address or domain");
             }
             Ok(Some(s.to_string()))
@@ -353,7 +350,15 @@ mod tests {
             super::validate_url_syntax(Some("https://example.com")).unwrap(),
             Some("https://example.com".to_string())
         );
+        assert_eq!(
+            super::validate_url_syntax(Some("brand.co.uk/store")).unwrap(),
+            Some("brand.co.uk/store".to_string())
+        );
+        assert!(super::validate_url_syntax(Some("http://")).is_err());
         assert!(super::validate_url_syntax(Some("https://")).is_err());
         assert!(super::validate_url_syntax(Some(".invalid")).is_err());
+        assert!(super::validate_url_syntax(Some("invalid.")).is_err());
+        assert!(super::validate_url_syntax(Some("https://invalid..com")).is_err());
+        assert!(super::validate_url_syntax(Some("https://invalid .com")).is_err());
     }
 }

@@ -459,7 +459,6 @@ fn drain_stranded_categories(
     }
 }
 
-
 /// Reconstructs the complete hierarchical category tree in memory in O(n) time.
 pub fn get_category_tree(
     conn: &Connection,

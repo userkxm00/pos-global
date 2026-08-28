@@ -83,6 +83,10 @@ fn test_validate_brand_website() {
         validate_website(Some("invalid.")),
         Err(BrandError::Validation(_))
     ));
+    assert!(matches!(
+        validate_website(Some("https://invalid..com")),
+        Err(BrandError::Validation(_))
+    ));
 }
 
 // =========================================================================
