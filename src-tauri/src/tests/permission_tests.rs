@@ -139,7 +139,7 @@ fn permission_catalog_exact_matching_and_fail_closed() {
 
     assert_eq!(Permission::ALL.len(), 17);
     for code in all_codes {
-        let perm = Permission::parse(code).unwrap_or_else(|| panic!("failed to parse {code}"));
+        let perm = Permission::parse(code).expect("failed to parse permission code");
         assert_eq!(perm.as_str(), code);
         assert_eq!(perm.to_string(), code);
         assert!(!perm.description().is_empty());
