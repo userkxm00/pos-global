@@ -6,5 +6,6 @@ pub mod branch;
 pub mod inventory;
 pub mod licence;
 pub mod organization;
+pub mod product;
 pub mod register;
 pub mod sales;

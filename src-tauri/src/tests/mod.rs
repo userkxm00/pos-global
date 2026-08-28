@@ -12,6 +12,8 @@ mod cloud_schema_tests;
 mod organization_tests;
 #[path = "permission_tests.rs"]
 mod permission_tests;
+#[path = "product_tests.rs"]
+mod product_tests;
 #[path = "register_tests.rs"]
 mod register_tests;
 #[path = "rls_migration_tests.rs"]
