@@ -54,7 +54,7 @@ fn main() {
             commands::product::get_product_by_barcode,
             commands::product::update_product,
             commands::product::delete_product,
-            commands::product::list_products,
+            commands::product::list_catalog_products,
             commands::organization::create_organization,
             commands::organization::get_organization,
             commands::organization::update_organization,

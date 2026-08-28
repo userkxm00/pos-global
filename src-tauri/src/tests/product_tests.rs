@@ -6,7 +6,7 @@ use crate::product::{
     create_product, delete_product, get_product, get_product_by_barcode, list_products,
     minor_to_real, real_to_minor, update_product, validate_barcode, validate_base_price_minor,
     validate_cost_price_minor, validate_name, validate_product_type, CreateProductInput,
-    ProductError, ProductFilter, UpdateProductInput,
+    ProductError, ProductFilter, UpdateProductInput, MAX_SAFE_MINOR_UNITS,
 };
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
@@ -25,6 +25,23 @@ fn test_validate_name_trims_and_accepts_valid() {
 }
 
 #[test]
+fn test_validate_name_accepts_multibyte_unicode_up_to_255_chars() {
+    // Non-Latin Arabic text: 50 Unicode chars, 94 UTF-8 bytes
+    let arabic_name = "قهوة عربية أصيلة درجة أولى مع الهيل والزعفران";
+    assert_eq!(arabic_name.chars().count(), 45);
+    assert!(arabic_name.len() > 45);
+    let result = validate_name(arabic_name).expect("multibyte unicode name accepted");
+    assert_eq!(result, arabic_name);
+
+    // Exactly 255 Unicode characters (510 UTF-8 bytes)
+    let exact_255_unicode: String = "ق".repeat(255);
+    assert_eq!(exact_255_unicode.chars().count(), 255);
+    assert_eq!(exact_255_unicode.len(), 510);
+    let result_255 = validate_name(&exact_255_unicode).expect("255 unicode chars accepted");
+    assert_eq!(result_255, exact_255_unicode);
+}
+
+#[test]
 fn test_validate_name_rejects_empty_and_whitespace() {
     let err_empty = validate_name("").unwrap_err();
     assert!(matches!(err_empty, ProductError::Validation(_)));
@@ -38,6 +55,10 @@ fn test_validate_name_rejects_too_long() {
     let long_name = "A".repeat(256);
     let err = validate_name(&long_name).unwrap_err();
     assert!(matches!(err, ProductError::Validation(_)));
+
+    let long_unicode = "ق".repeat(256);
+    let err_unicode = validate_name(&long_unicode).unwrap_err();
+    assert!(matches!(err_unicode, ProductError::Validation(_)));
 }
 
 #[test]
@@ -47,12 +68,19 @@ fn test_validate_base_price_minor_accepts_zero_and_positive() {
         validate_base_price_minor(25000).expect("positive price"),
         25000
     );
+    assert_eq!(
+        validate_base_price_minor(MAX_SAFE_MINOR_UNITS).expect("max safe price"),
+        MAX_SAFE_MINOR_UNITS
+    );
 }
 
 #[test]
-fn test_validate_base_price_minor_rejects_negative() {
-    let err = validate_base_price_minor(-1).unwrap_err();
-    assert!(matches!(err, ProductError::Validation(_)));
+fn test_validate_base_price_minor_rejects_negative_and_overflow() {
+    let err_neg = validate_base_price_minor(-1).unwrap_err();
+    assert!(matches!(err_neg, ProductError::Validation(_)));
+
+    let err_overflow = validate_base_price_minor(MAX_SAFE_MINOR_UNITS + 1).unwrap_err();
+    assert!(matches!(err_overflow, ProductError::Validation(_)));
 }
 
 #[test]
@@ -66,12 +94,19 @@ fn test_validate_cost_price_minor_accepts_none_zero_positive() {
         validate_cost_price_minor(Some(12500)).expect("positive cost"),
         Some(12500)
     );
+    assert_eq!(
+        validate_cost_price_minor(Some(MAX_SAFE_MINOR_UNITS)).expect("max safe cost"),
+        Some(MAX_SAFE_MINOR_UNITS)
+    );
 }
 
 #[test]
-fn test_validate_cost_price_minor_rejects_negative() {
-    let err = validate_cost_price_minor(Some(-500)).unwrap_err();
-    assert!(matches!(err, ProductError::Validation(_)));
+fn test_validate_cost_price_minor_rejects_negative_and_overflow() {
+    let err_neg = validate_cost_price_minor(Some(-500)).unwrap_err();
+    assert!(matches!(err_neg, ProductError::Validation(_)));
+
+    let err_overflow = validate_cost_price_minor(Some(MAX_SAFE_MINOR_UNITS + 1)).unwrap_err();
+    assert!(matches!(err_overflow, ProductError::Validation(_)));
 }
 
 #[test]
@@ -546,6 +581,153 @@ fn test_list_products_filtering_and_query_search() {
     .expect("search barcode");
     assert_eq!(search_barcode.len(), 1);
     assert_eq!(search_barcode[0].id, p1.id);
+}
+
+#[test]
+fn test_list_products_offset_without_limit() {
+    let conn = setup_test_db();
+
+    for i in 1..=5 {
+        create_product(
+            &conn,
+            CreateProductInput {
+                name: format!("Product Item {i:02}"),
+                description: None,
+                category_id: None,
+                barcode: None,
+                product_type: None,
+                base_price_minor: 100 * i,
+                cost_price_minor: None,
+                unit_type: None,
+                requires_expiry: None,
+                requires_serial: None,
+                warranty_months: None,
+                custom_attributes: None,
+            },
+        )
+        .expect("created");
+    }
+
+    // Offset 2 without limit: skips first 2 and returns remaining 3
+    let skipped = list_products(
+        &conn,
+        &ProductFilter {
+            offset: Some(2),
+            ..Default::default()
+        },
+    )
+    .expect("offset query succeeds");
+
+    assert_eq!(skipped.len(), 3);
+    assert_eq!(skipped[0].name, "Product Item 03");
+    assert_eq!(skipped[1].name, "Product Item 04");
+    assert_eq!(skipped[2].name, "Product Item 05");
+}
+
+#[test]
+fn test_list_products_literal_like_wildcard_escaping() {
+    let conn = setup_test_db();
+
+    // Create products with special characters in name
+    create_product(
+        &conn,
+        CreateProductInput {
+            name: "100% Arabica Blend".to_string(),
+            description: None,
+            category_id: None,
+            barcode: None,
+            product_type: None,
+            base_price_minor: 1500,
+            cost_price_minor: None,
+            unit_type: None,
+            requires_expiry: None,
+            requires_serial: None,
+            warranty_months: None,
+            custom_attributes: None,
+        },
+    )
+    .expect("created 100%");
+
+    create_product(
+        &conn,
+        CreateProductInput {
+            name: "1000 Arabica Blend".to_string(),
+            description: None,
+            category_id: None,
+            barcode: None,
+            product_type: None,
+            base_price_minor: 1600,
+            cost_price_minor: None,
+            unit_type: None,
+            requires_expiry: None,
+            requires_serial: None,
+            warranty_months: None,
+            custom_attributes: None,
+        },
+    )
+    .expect("created 1000");
+
+    create_product(
+        &conn,
+        CreateProductInput {
+            name: "Item_1 Premium".to_string(),
+            description: None,
+            category_id: None,
+            barcode: None,
+            product_type: None,
+            base_price_minor: 2000,
+            cost_price_minor: None,
+            unit_type: None,
+            requires_expiry: None,
+            requires_serial: None,
+            warranty_months: None,
+            custom_attributes: None,
+        },
+    )
+    .expect("created Item_1");
+
+    create_product(
+        &conn,
+        CreateProductInput {
+            name: "ItemA1 Premium".to_string(),
+            description: None,
+            category_id: None,
+            barcode: None,
+            product_type: None,
+            base_price_minor: 2100,
+            cost_price_minor: None,
+            unit_type: None,
+            requires_expiry: None,
+            requires_serial: None,
+            warranty_months: None,
+            custom_attributes: None,
+        },
+    )
+    .expect("created ItemA1");
+
+    // 1. Searching for "100%" must ONLY match "100% Arabica Blend", NOT "1000 Arabica Blend"
+    let percent_results = list_products(
+        &conn,
+        &ProductFilter {
+            query: Some("100%".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("search with %");
+    assert_eq!(percent_results.len(), 1);
+    assert_eq!(percent_results[0].name, "100% Arabica Blend");
+
+    // 2. Searching for "Item_1" must ONLY match "Item_1 Premium", NOT "ItemA1 Premium"
+    let underscore_results = list_products(
+        &conn,
+        &ProductFilter {
+            query: Some("Item_1".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("search with _");
+    assert_eq!(underscore_results.len(), 1);
+    assert_eq!(underscore_results[0].name, "Item_1 Premium");
 }
 
 // =========================================================================

@@ -4,6 +4,9 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+/// Maximum safe integer minor units that can be converted to and from IEEE 754 f64 without precision loss (2^53 - 1).
+pub const MAX_SAFE_MINOR_UNITS: i64 = 9_007_199_254_740_991;
+
 /// Canonical Product entity.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Product {
@@ -109,17 +112,19 @@ impl From<rusqlite::Error> for ProductError {
     }
 }
 
-/// Converts a floating-point database price into authoritative integer minor units (cents).
+/// Converts a floating-point database price into integer minor units (cents).
+/// Exact conversion holds for integer minor units within `[-MAX_SAFE_MINOR_UNITS, MAX_SAFE_MINOR_UNITS]`.
 pub fn real_to_minor(real: f64) -> i64 {
     (real * 100.0).round() as i64
 }
 
-/// Converts authoritative integer minor units into floating-point database representation.
+/// Converts integer minor units into floating-point database representation.
+/// Exact conversion holds for integer minor units within `[-MAX_SAFE_MINOR_UNITS, MAX_SAFE_MINOR_UNITS]`.
 pub fn minor_to_real(minor: i64) -> f64 {
     minor as f64 / 100.0
 }
 
-/// Validates product name. Must be non-empty and <= 255 characters.
+/// Validates product name. Must be non-empty and <= 255 Unicode characters.
 pub fn validate_name(name: &str) -> Result<String, ProductError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -127,7 +132,7 @@ pub fn validate_name(name: &str) -> Result<String, ProductError> {
             "Product name cannot be empty".into(),
         ));
     }
-    if trimmed.len() > 255 {
+    if trimmed.chars().count() > 255 {
         return Err(ProductError::Validation(
             "Product name exceeds maximum length of 255 characters".into(),
         ));
@@ -135,22 +140,32 @@ pub fn validate_name(name: &str) -> Result<String, ProductError> {
     Ok(trimmed.to_string())
 }
 
-/// Validates base price in minor units. Must be non-negative.
+/// Validates base price in minor units. Must be non-negative and within safe precision range.
 pub fn validate_base_price_minor(price: i64) -> Result<i64, ProductError> {
     if price < 0 {
         return Err(ProductError::Validation(
             "Base price cannot be negative".into(),
         ));
     }
+    if price > MAX_SAFE_MINOR_UNITS {
+        return Err(ProductError::Validation(
+            "Base price exceeds maximum supported precision".into(),
+        ));
+    }
     Ok(price)
 }
 
-/// Validates cost price in minor units if provided. Must be non-negative.
+/// Validates cost price in minor units if provided. Must be non-negative and within safe precision range.
 pub fn validate_cost_price_minor(cost: Option<i64>) -> Result<Option<i64>, ProductError> {
     if let Some(c) = cost {
         if c < 0 {
             return Err(ProductError::Validation(
                 "Cost price cannot be negative".into(),
+            ));
+        }
+        if c > MAX_SAFE_MINOR_UNITS {
+            return Err(ProductError::Validation(
+                "Cost price exceeds maximum supported precision".into(),
             ));
         }
     }
@@ -207,6 +222,18 @@ fn map_product_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Product> {
 }
 
 const PRODUCT_COLUMNS: &str = "id, category_id, name, description, barcode, product_type, base_price, cost_price, unit_type, requires_expiry, requires_serial, warranty_months, custom_attributes, is_active, created_at, updated_at";
+
+/// Escapes SQL LIKE wildcards ('%', '_', and '\') using '\' as the escape character.
+fn escape_like_pattern(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for c in input.chars() {
+        if c == '\\' || c == '%' || c == '_' {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
 
 /// Creates a new product in the local SQLite database.
 pub fn create_product(
@@ -466,8 +493,8 @@ pub fn list_products(
     if let Some(ref q) = filter.query {
         let trimmed_q = q.trim();
         if !trimmed_q.is_empty() {
-            sql.push_str(" AND (name LIKE ? OR barcode = ?)");
-            let pattern = format!("%{trimmed_q}%");
+            sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR barcode = ?)");
+            let pattern = format!("%{}%", escape_like_pattern(trimmed_q));
             params_vec.push(Box::new(pattern));
             params_vec.push(Box::new(trimmed_q.to_string()));
         }
@@ -475,13 +502,21 @@ pub fn list_products(
 
     sql.push_str(" ORDER BY name COLLATE NOCASE ASC");
 
-    if let Some(limit) = filter.limit {
-        sql.push_str(" LIMIT ?");
-        params_vec.push(Box::new(limit));
-        if let Some(offset) = filter.offset {
-            sql.push_str(" OFFSET ?");
+    match (filter.limit, filter.offset) {
+        (Some(limit), Some(offset)) => {
+            sql.push_str(" LIMIT ? OFFSET ?");
+            params_vec.push(Box::new(limit));
             params_vec.push(Box::new(offset));
         }
+        (Some(limit), None) => {
+            sql.push_str(" LIMIT ?");
+            params_vec.push(Box::new(limit));
+        }
+        (None, Some(offset)) => {
+            sql.push_str(" LIMIT -1 OFFSET ?");
+            params_vec.push(Box::new(offset));
+        }
+        (None, None) => {}
     }
 
     let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();

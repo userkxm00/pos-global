@@ -101,7 +101,7 @@ pub fn delete_product(
 }
 
 #[tauri::command]
-pub fn list_products(
+pub fn list_catalog_products(
     state: tauri::State<DbState>,
     session_id: String,
     filter: ProductFilter,
