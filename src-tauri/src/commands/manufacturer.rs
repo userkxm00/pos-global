@@ -6,7 +6,7 @@ use crate::manufacturer::{
     self, CreateManufacturerInput, Manufacturer, ManufacturerFilter, UpdateManufacturerInput,
 };
 
-pub use super::{
+use super::{
     authorize_catalog_mutation as authorize_manufacturer_mutation,
     authorize_catalog_read as authorize_manufacturer_read,
 };

@@ -4,7 +4,7 @@
 use crate::brand::{self, Brand, BrandFilter, CreateBrandInput, UpdateBrandInput};
 use crate::db::DbState;
 
-pub use super::{
+use super::{
     authorize_catalog_mutation as authorize_brand_mutation,
     authorize_catalog_read as authorize_brand_read,
 };

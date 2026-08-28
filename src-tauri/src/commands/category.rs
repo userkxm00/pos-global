@@ -6,7 +6,7 @@ use crate::category::{
 };
 use crate::db::DbState;
 
-pub use super::{
+use super::{
     authorize_catalog_mutation as authorize_category_mutation,
     authorize_catalog_read as authorize_category_read,
 };

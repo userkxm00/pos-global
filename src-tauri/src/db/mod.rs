@@ -133,8 +133,8 @@ pub fn append_name_or_description_search(
         if !trimmed.is_empty() {
             sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')");
             let pattern = format!("%{}%", escape_like_pattern(trimmed));
-            params_vec.push(Box::new(pattern.clone()) as Box<dyn ToSql>);
-            params_vec.push(Box::new(pattern) as Box<dyn ToSql>);
+            params_vec.push(Box::new(pattern.clone()));
+            params_vec.push(Box::new(pattern));
         }
     }
 }

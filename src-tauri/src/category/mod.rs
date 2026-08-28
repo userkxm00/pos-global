@@ -429,15 +429,15 @@ fn partition_categories(
     let mut root_categories: Vec<Category> = Vec::new();
 
     for cat in categories {
-        let is_orphan_or_root = match cat.parent_id.as_ref() {
+        let is_orphan_or_root = match cat.parent_id.as_deref() {
             None => true,
             Some(pid) => !active_ids.contains(pid),
         };
 
         if is_orphan_or_root {
             root_categories.push(cat);
-        } else if let Some(pid) = cat.parent_id.clone() {
-            children_by_parent.entry(pid).or_default().push(cat);
+        } else if let Some(ref pid) = cat.parent_id {
+            children_by_parent.entry(pid.clone()).or_default().push(cat);
         }
     }
     (root_categories, children_by_parent)
