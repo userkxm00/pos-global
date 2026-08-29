@@ -458,7 +458,9 @@ fn test_archived_barcode_reuse_and_soft_delete_lifecycle() {
     assert_eq!(p2.barcode.as_deref(), Some("REUSE-BARCODE-123"));
 
     // get_product_by_barcode resolves directly to Product B
-    let found = get_product_by_barcode(&conn, "REUSE-BARCODE-123").unwrap().unwrap();
+    let found = get_product_by_barcode(&conn, "REUSE-BARCODE-123")
+        .unwrap()
+        .unwrap();
     assert_eq!(found.0.id, p2_id);
 }
 
@@ -495,4 +497,3 @@ fn test_validation_errors_on_empty_and_whitespace_inputs() {
     )
     .is_err());
 }
-

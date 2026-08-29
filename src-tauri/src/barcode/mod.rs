@@ -509,8 +509,7 @@ pub fn get_product_by_barcode(
         .optional()?;
 
     if let Some(bc) = barcode_row {
-        let product = crate::product::get_product(conn, &bc.product_id)?
-            .filter(|p| p.is_active);
+        let product = crate::product::get_product(conn, &bc.product_id)?.filter(|p| p.is_active);
         if let Some(p) = product {
             return Ok(Some((p, Some(bc))));
         }

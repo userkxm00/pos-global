@@ -289,8 +289,8 @@ fn validate_and_check_sku(
         Some(val) if !val.trim().is_empty() => val.trim(),
         _ => return Ok(None),
     };
-    let sanitized = crate::barcode::validate_sku(s)
-        .map_err(|e| ProductError::Validation(e.to_string()))?;
+    let sanitized =
+        crate::barcode::validate_sku(s).map_err(|e| ProductError::Validation(e.to_string()))?;
 
     let conflict: Option<String> = if let Some(ex_id) = exclude_id {
         conn.query_row(
@@ -326,7 +326,9 @@ fn check_barcode_conflict(
         _ => return Ok(()),
     };
 
-    let (prod_conflict, reg_conflict): (Option<String>, Option<String>) = if let Some(ex_id) = exclude_id {
+    let (prod_conflict, reg_conflict): (Option<String>, Option<String>) = if let Some(ex_id) =
+        exclude_id
+    {
         let p_c = conn
             .query_row(
                 "SELECT id FROM products WHERE barcode = ?1 COLLATE NOCASE AND id != ?2 AND is_active = 1",
