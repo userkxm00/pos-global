@@ -109,7 +109,17 @@ pub fn validate_url_syntax(url: Option<&str>) -> Result<Option<String>, &'static
             } else {
                 s
             };
-            let host = host_part.split(['/', '?', '#', ':']).next().unwrap_or("");
+            let authority = host_part.split(['/', '?', '#']).next().unwrap_or("");
+            let (host, port_opt) = match authority.rsplit_once(':') {
+                Some((h, p)) => (h, Some(p)),
+                None => (authority, None),
+            };
+            if let Some(port_str) = port_opt {
+                match port_str.parse::<u16>() {
+                    Ok(p) if p > 0 => (),
+                    _ => return Err("Website URL must be a valid web address or domain"),
+                }
+            }
             let labels: Vec<&str> = host.split('.').collect();
             if labels.len() < 2 || labels.iter().any(|s| s.is_empty()) {
                 return Err("Website URL must be a valid web address or domain");
@@ -354,11 +364,19 @@ mod tests {
             super::validate_url_syntax(Some("brand.co.uk/store")).expect("valid domain"),
             Some("brand.co.uk/store".to_string())
         );
+        assert_eq!(
+            super::validate_url_syntax(Some("https://example.com:8080")).expect("valid port"),
+            Some("https://example.com:8080".to_string())
+        );
         assert!(super::validate_url_syntax(Some("http://")).is_err());
         assert!(super::validate_url_syntax(Some("https://")).is_err());
         assert!(super::validate_url_syntax(Some(".invalid")).is_err());
         assert!(super::validate_url_syntax(Some("invalid.")).is_err());
         assert!(super::validate_url_syntax(Some("https://invalid..com")).is_err());
         assert!(super::validate_url_syntax(Some("https://invalid .com")).is_err());
+        assert!(super::validate_url_syntax(Some("https://example.com:abc")).is_err());
+        assert!(super::validate_url_syntax(Some("https://example.com:65536")).is_err());
+        assert!(super::validate_url_syntax(Some("https://example.com:")).is_err());
+        assert!(super::validate_url_syntax(Some("https://example.com:0")).is_err());
     }
 }

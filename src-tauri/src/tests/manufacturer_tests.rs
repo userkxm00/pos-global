@@ -139,6 +139,14 @@ fn test_validate_manufacturer_contacts_international() {
         validate_website(Some("https://invalid..com")),
         Err(ManufacturerError::Validation(_))
     ));
+    assert!(matches!(
+        validate_website(Some("https://acme.com:abc")),
+        Err(ManufacturerError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_website(Some("https://acme.com:65536")),
+        Err(ManufacturerError::Validation(_))
+    ));
 }
 
 // =========================================================================

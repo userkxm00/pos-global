@@ -102,6 +102,14 @@ fn test_validate_brand_website() {
         validate_website(Some("https://invalid..com")),
         Err(BrandError::Validation(_))
     ));
+    assert!(matches!(
+        validate_website(Some("https://acme.com:abc")),
+        Err(BrandError::Validation(_))
+    ));
+    assert!(matches!(
+        validate_website(Some("https://acme.com:65536")),
+        Err(BrandError::Validation(_))
+    ));
 }
 
 // =========================================================================
