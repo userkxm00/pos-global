@@ -91,42 +91,58 @@ pub fn escape_like_pattern(input: &str) -> String {
     escaped
 }
 
+fn extract_authority_from_url(url: &str) -> &str {
+    let host_part = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    host_part.split(['/', '?', '#']).next().unwrap_or("")
+}
+
+fn validate_authority_port(port_str: &str) -> Result<(), &'static str> {
+    match port_str.parse::<u16>() {
+        Ok(p) if p > 0 => Ok(()),
+        _ => Err("Website URL must be a valid web address or domain"),
+    }
+}
+
+fn validate_host_labels(host: &str) -> Result<(), &'static str> {
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 || labels.iter().any(|s| s.is_empty()) {
+        return Err("Website URL must be a valid web address or domain");
+    }
+    Ok(())
+}
+
+fn validate_authority(authority: &str) -> Result<(), &'static str> {
+    let (host, port_opt) = match authority.rsplit_once(':') {
+        Some((h, p)) => (h, Some(p)),
+        None => (authority, None),
+    };
+    if let Some(port_str) = port_opt {
+        validate_authority_port(port_str)?;
+    }
+    validate_host_labels(host)
+}
+
 /// Validates website URL syntax conservatively: <= 2048 chars, no spaces, valid host part with dot.
 pub fn validate_url_syntax(url: Option<&str>) -> Result<Option<String>, &'static str> {
-    match url.map(str::trim).filter(|s| !s.is_empty()) {
-        None => Ok(None),
-        Some(s) => {
-            if s.chars().count() > 2048 {
-                return Err("Website URL exceeds maximum length of 2048 characters");
-            }
-            if s.contains(char::is_whitespace) {
-                return Err("Website URL cannot contain whitespace");
-            }
-            let host_part = if let Some(stripped) = s.strip_prefix("https://") {
-                stripped
-            } else if let Some(stripped) = s.strip_prefix("http://") {
-                stripped
-            } else {
-                s
-            };
-            let authority = host_part.split(['/', '?', '#']).next().unwrap_or("");
-            let (host, port_opt) = match authority.rsplit_once(':') {
-                Some((h, p)) => (h, Some(p)),
-                None => (authority, None),
-            };
-            if let Some(port_str) = port_opt {
-                match port_str.parse::<u16>() {
-                    Ok(p) if p > 0 => (),
-                    _ => return Err("Website URL must be a valid web address or domain"),
-                }
-            }
-            let labels: Vec<&str> = host.split('.').collect();
-            if labels.len() < 2 || labels.iter().any(|s| s.is_empty()) {
-                return Err("Website URL must be a valid web address or domain");
-            }
-            Ok(Some(s.to_string()))
-        }
+    let s = match url.map(str::trim).filter(|s| !s.is_empty()) {
+        None => return Ok(None),
+        Some(s) => s,
+    };
+
+    if s.chars().count() > 2048 {
+        return Err("Website URL exceeds maximum length of 2048 characters");
     }
+    if s.contains(char::is_whitespace) {
+        return Err("Website URL cannot contain whitespace");
+    }
+
+    let authority = extract_authority_from_url(s);
+    validate_authority(authority)?;
+
+    Ok(Some(s.to_string()))
 }
 
 /// Appends a query search clause for name and description with escaped LIKE wildcards.
