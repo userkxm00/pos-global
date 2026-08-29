@@ -66,7 +66,6 @@ pub fn create_test_user_with_creds(
 }
 
 /// Creates a full sample hierarchy: Organization -> Branch -> User.
-#[allow(dead_code)]
 pub fn create_test_user_hierarchy(conn: &Connection) -> (String, String, User) {
     let (org_id, branch_id) = create_test_org_and_branch(conn);
     let dynamic_pw = ["fixture", "pass", "123"].join("_");

@@ -1,10 +1,10 @@
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Result, ToSql};
 use std::path::Path;
 use std::sync::Mutex;
 
 pub struct DbState(pub Mutex<Connection>);
 
-const MIGRATIONS: &[(&str, &str)] = &[
+pub const MIGRATIONS: &[(&str, &str)] = &[
     ("001_initial", include_str!("migrations/001_initial.sql")),
     (
         "002_sync_and_suppliers",
@@ -42,6 +42,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "010_registers",
         include_str!("migrations/010_registers.sql"),
     ),
+    (
+        "011_categories_brands_manufacturers",
+        include_str!("migrations/011_categories_brands_manufacturers.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {
@@ -75,8 +79,92 @@ pub fn init_database(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Safely escapes special LIKE wildcard characters (`%`, `_`, `\`) with a backslash escape.
+pub fn escape_like_pattern(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for c in input.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
+fn extract_authority_from_url(url: &str) -> &str {
+    let host_part = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    host_part.split(['/', '?', '#']).next().unwrap_or("")
+}
+
+fn validate_authority_port(port_str: &str) -> Result<(), &'static str> {
+    match port_str.parse::<u16>() {
+        Ok(p) if p > 0 => Ok(()),
+        _ => Err("Website URL must be a valid web address or domain"),
+    }
+}
+
+fn validate_host_labels(host: &str) -> Result<(), &'static str> {
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 || labels.iter().any(|s| s.is_empty()) {
+        return Err("Website URL must be a valid web address or domain");
+    }
+    Ok(())
+}
+
+fn validate_authority(authority: &str) -> Result<(), &'static str> {
+    let (host, port_opt) = match authority.rsplit_once(':') {
+        Some((h, p)) => (h, Some(p)),
+        None => (authority, None),
+    };
+    if let Some(port_str) = port_opt {
+        validate_authority_port(port_str)?;
+    }
+    validate_host_labels(host)
+}
+
+/// Validates website URL syntax conservatively: <= 2048 chars, no spaces, valid host part with dot.
+pub fn validate_url_syntax(url: Option<&str>) -> Result<Option<String>, &'static str> {
+    let s = match url.map(str::trim).filter(|s| !s.is_empty()) {
+        None => return Ok(None),
+        Some(s) => s,
+    };
+
+    if s.chars().count() > 2048 {
+        return Err("Website URL exceeds maximum length of 2048 characters");
+    }
+    if s.contains(char::is_whitespace) {
+        return Err("Website URL cannot contain whitespace");
+    }
+
+    let authority = extract_authority_from_url(s);
+    validate_authority(authority)?;
+
+    Ok(Some(s.to_string()))
+}
+
+/// Appends a query search clause for name and description with escaped LIKE wildcards.
+pub fn append_name_or_description_search(
+    sql: &mut String,
+    params_vec: &mut Vec<Box<dyn ToSql>>,
+    query: Option<&str>,
+) {
+    if let Some(q) = query {
+        let trimmed = q.trim();
+        if !trimmed.is_empty() {
+            sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')");
+            let pattern = format!("%{}%", escape_like_pattern(trimmed));
+            params_vec.push(Box::new(pattern.clone()));
+            params_vec.push(Box::new(pattern));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
     use super::init_database;
     use rusqlite::Connection;
 
@@ -88,7 +176,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 10);
+        assert_eq!(applied, 11);
 
         for table in [
             "business_settings",
@@ -105,6 +193,9 @@ mod tests {
             "debt_ledger",
             "loyalty_ledger",
             "registers",
+            "categories",
+            "brands",
+            "manufacturers",
         ] {
             let exists: i64 = conn
                 .query_row(
@@ -126,7 +217,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 10);
+        assert_eq!(applied, 11);
 
         let capability_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM capabilities", [], |row| row.get(0))
@@ -268,5 +359,40 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM rollback_probe", [], |row| row.get(0))
             .expect("rollback probe should remain queryable");
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_escape_like_pattern() {
+        assert_eq!(super::escape_like_pattern("100% pure"), "100\\% pure");
+        assert_eq!(super::escape_like_pattern("item_one"), "item\\_one");
+        assert_eq!(super::escape_like_pattern("path\\to"), "path\\\\to");
+        assert_eq!(super::escape_like_pattern("normal"), "normal");
+    }
+
+    #[test]
+    fn test_validate_url_syntax() {
+        assert!(super::validate_url_syntax(None).expect("none").is_none());
+        assert_eq!(
+            super::validate_url_syntax(Some("https://example.com")).expect("valid url"),
+            Some("https://example.com".to_string())
+        );
+        assert_eq!(
+            super::validate_url_syntax(Some("brand.co.uk/store")).expect("valid domain"),
+            Some("brand.co.uk/store".to_string())
+        );
+        assert_eq!(
+            super::validate_url_syntax(Some("https://example.com:8080")).expect("valid port"),
+            Some("https://example.com:8080".to_string())
+        );
+        assert!(super::validate_url_syntax(Some("http://")).is_err());
+        assert!(super::validate_url_syntax(Some("https://")).is_err());
+        assert!(super::validate_url_syntax(Some(".invalid")).is_err());
+        assert!(super::validate_url_syntax(Some("invalid.")).is_err());
+        assert!(super::validate_url_syntax(Some("https://invalid..com")).is_err());
+        assert!(super::validate_url_syntax(Some("https://invalid .com")).is_err());
+        assert!(super::validate_url_syntax(Some("https://example.com:abc")).is_err());
+        assert!(super::validate_url_syntax(Some("https://example.com:65536")).is_err());
+        assert!(super::validate_url_syntax(Some("https://example.com:")).is_err());
+        assert!(super::validate_url_syntax(Some("https://example.com:0")).is_err());
     }
 }
