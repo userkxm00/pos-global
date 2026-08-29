@@ -46,6 +46,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "011_categories_brands_manufacturers",
         include_str!("migrations/011_categories_brands_manufacturers.sql"),
     ),
+    (
+        "012_sku_and_multi_barcode",
+        include_str!("migrations/012_sku_and_multi_barcode.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {

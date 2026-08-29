@@ -4,6 +4,8 @@ mod auth_integration_tests;
 mod auth_middleware_tests;
 #[path = "auth_tests.rs"]
 mod auth_tests;
+#[path = "barcode_tests.rs"]
+mod barcode_tests;
 #[path = "branch_tests.rs"]
 mod branch_tests;
 #[path = "brand_tests.rs"]
@@ -29,6 +31,8 @@ mod rls_migration_tests;
 mod sales_tests;
 #[path = "session_tests.rs"]
 mod session_tests;
+#[path = "sku_tests.rs"]
+mod sku_tests;
 #[path = "tenant_isolation_tests.rs"]
 mod tenant_isolation_tests;
 #[path = "test_helpers.rs"]

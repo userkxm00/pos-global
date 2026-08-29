@@ -1,20 +1,10 @@
 // Product domain model, validation rules, and SQLite database operations.
-// F2.01 — Product CRUD
-//
-// Barcode Invariant (F2.01 vs F2.03 Boundary):
-// Per SQLite migrations 001_initial.sql and 009_remove_redundant_product_barcode_index.sql,
-// `products.barcode` enforces a table-wide `UNIQUE` constraint across all rows. Soft-deleted
-// products retain their stored barcode to protect historical sales, inventory, and audit ledger integrity.
-// Advanced barcode lifecycle management, symbologies, and barcode reassignment are scoped to F2.03.
+// F2.01 / F2.03 — Product CRUD & SKU / Barcode Management
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 /// Maximum safe integer minor units that can be converted to and from IEEE 754 f64 without precision loss.
-/// For decimal currency scaled by 100, the bound is floor((2^53 - 1) / 100) = 90_071_992_547_409 minor units
-/// (over 900 billion units with 2 decimal places). For any integer x <= 90_071_992_547_409, the maximum
-/// absolute floating-point roundoff error in (x / 100.0) * 100.0 is strictly < 0.041 (over 12x below the
-/// 0.5 rounding boundary), guaranteeing exact lossless persistence through legacy SQLite REAL columns.
 pub const MAX_SAFE_MINOR_UNITS: i64 = 90_071_992_547_409;
 
 /// Canonical Product entity.
@@ -22,6 +12,7 @@ pub const MAX_SAFE_MINOR_UNITS: i64 = 90_071_992_547_409;
 pub struct Product {
     pub id: String,
     pub category_id: Option<String>,
+    pub sku: Option<String>,
     pub name: String,
     pub description: Option<String>,
     pub barcode: Option<String>,
@@ -44,6 +35,7 @@ pub struct CreateProductInput {
     pub name: String,
     pub description: Option<String>,
     pub category_id: Option<String>,
+    pub sku: Option<String>,
     pub barcode: Option<String>,
     pub product_type: Option<String>,
     pub base_price_minor: i64,
@@ -62,6 +54,7 @@ pub struct UpdateProductInput {
     pub name: String,
     pub description: Option<String>,
     pub category_id: Option<String>,
+    pub sku: Option<String>,
     pub barcode: Option<String>,
     pub product_type: String,
     pub base_price_minor: i64,
@@ -90,6 +83,7 @@ pub enum ProductError {
     Validation(String),
     NotFound(String),
     DuplicateBarcode(String),
+    DuplicateSku(String),
     Database(String),
 }
 
@@ -99,6 +93,7 @@ impl std::fmt::Display for ProductError {
             ProductError::Validation(msg) => write!(f, "Validation error: {msg}"),
             ProductError::NotFound(msg) => write!(f, "Product not found: {msg}"),
             ProductError::DuplicateBarcode(msg) => write!(f, "Duplicate barcode error: {msg}"),
+            ProductError::DuplicateSku(msg) => write!(f, "Duplicate SKU error: {msg}"),
             ProductError::Database(msg) => write!(f, "Database error: {msg}"),
         }
     }
@@ -109,13 +104,24 @@ impl std::error::Error for ProductError {}
 impl From<rusqlite::Error> for ProductError {
     fn from(e: rusqlite::Error) -> Self {
         if let rusqlite::Error::SqliteFailure(ref f, Some(ref msg)) = e {
-            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
-                && (msg.contains("products.barcode")
-                    || msg.contains("UNIQUE constraint failed: products.barcode"))
-            {
-                return ProductError::DuplicateBarcode(
-                    "Barcode already assigned to another product".into(),
-                );
+            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation {
+                if msg.contains("products.barcode")
+                    || msg.contains("UNIQUE constraint failed: products.barcode")
+                    || msg.contains("product_barcodes.barcode")
+                    || msg.contains("idx_product_barcodes_unique_active")
+                {
+                    return ProductError::DuplicateBarcode(
+                        "Barcode already assigned to another product".into(),
+                    );
+                }
+                if msg.contains("products.sku")
+                    || msg.contains("idx_products_sku_active")
+                    || msg.contains("UNIQUE constraint failed: products.sku")
+                {
+                    return ProductError::DuplicateSku(
+                        "SKU already assigned to another product".into(),
+                    );
+                }
             }
         }
         ProductError::Database(e.to_string())
@@ -124,7 +130,6 @@ impl From<rusqlite::Error> for ProductError {
 
 /// Resolves the organization ownership of the local product catalog from business_settings or branches.
 pub fn get_catalog_organization_id(conn: &Connection) -> Result<Option<String>, rusqlite::Error> {
-    // 1. Check business_settings if configured
     let org_from_settings: Option<String> = conn
         .query_row(
             "SELECT organization_id FROM business_settings WHERE organization_id IS NOT NULL LIMIT 1",
@@ -136,7 +141,6 @@ pub fn get_catalog_organization_id(conn: &Connection) -> Result<Option<String>, 
         return Ok(org_from_settings);
     }
 
-    // 2. Fallback to unique organization from local branches
     let mut stmt = conn.prepare(
         "SELECT DISTINCT organization_id FROM branches WHERE organization_id IS NOT NULL",
     )?;
@@ -152,13 +156,11 @@ pub fn get_catalog_organization_id(conn: &Connection) -> Result<Option<String>, 
 }
 
 /// Converts a floating-point database price into integer minor units (cents).
-/// Exact conversion holds for integer minor units within `[-MAX_SAFE_MINOR_UNITS, MAX_SAFE_MINOR_UNITS]`.
 pub fn real_to_minor(real: f64) -> i64 {
     (real * 100.0).round() as i64
 }
 
 /// Converts integer minor units into floating-point database representation.
-/// Exact conversion holds for integer minor units within `[-MAX_SAFE_MINOR_UNITS, MAX_SAFE_MINOR_UNITS]`.
 pub fn minor_to_real(minor: i64) -> f64 {
     minor as f64 / 100.0
 }
@@ -222,8 +224,7 @@ pub fn validate_barcode(barcode: Option<&str>) -> Option<String> {
 /// Validates product type. Allowed types: 'simple', 'variable', 'weighted'.
 pub fn validate_product_type(ptype: Option<&str>) -> Result<String, ProductError> {
     match ptype.map(str::trim).filter(|s| !s.is_empty()) {
-        None => Ok("simple".to_string()),
-        Some("simple") => Ok("simple".to_string()),
+        None | Some("simple") => Ok("simple".to_string()),
         Some("variable") => Ok("variable".to_string()),
         Some("weighted") => Ok("weighted".to_string()),
         Some(invalid) => Err(ProductError::Validation(format!(
@@ -243,6 +244,7 @@ fn map_product_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Product> {
     Ok(Product {
         id: row.get("id")?,
         category_id: row.get("category_id")?,
+        sku: row.get("sku")?,
         name: row.get("name")?,
         description: row.get("description")?,
         barcode: row.get("barcode")?,
@@ -260,7 +262,7 @@ fn map_product_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Product> {
     })
 }
 
-const PRODUCT_COLUMNS: &str = "id, category_id, name, description, barcode, product_type, base_price, cost_price, unit_type, requires_expiry, requires_serial, warranty_months, custom_attributes, is_active, created_at, updated_at";
+const PRODUCT_COLUMNS: &str = "id, category_id, sku, name, description, barcode, product_type, base_price, cost_price, unit_type, requires_expiry, requires_serial, warranty_months, custom_attributes, is_active, created_at, updated_at";
 
 /// Escapes SQL LIKE wildcards ('%', '_', and '\') using '\' as the escape character.
 fn escape_like_pattern(input: &str) -> String {
@@ -285,16 +287,57 @@ pub fn create_product(
     let barcode = validate_barcode(input.barcode.as_deref());
     let product_type = validate_product_type(input.product_type.as_deref())?;
 
+    let sku = if let Some(ref s) = input.sku {
+        let val = s.trim();
+        if val.is_empty() {
+            None
+        } else {
+            let sanitized = crate::barcode::validate_sku(val)
+                .map_err(|e| ProductError::Validation(e.to_string()))?;
+            // Check active SKU conflict
+            let existing_sku: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM products WHERE sku = ?1 COLLATE NOCASE AND is_active = 1",
+                    params![sanitized],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(conflict_id) = existing_sku {
+                return Err(ProductError::DuplicateSku(format!(
+                    "SKU '{sanitized}' is already assigned to product '{conflict_id}'"
+                )));
+            }
+            Some(sanitized)
+        }
+    } else {
+        None
+    };
+
     // Check barcode conflict proactively if barcode is present
     if let Some(ref bc) = barcode {
         let existing: Option<String> = conn
-            .query_row("SELECT id FROM products WHERE barcode = ?1", [bc], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT id FROM products WHERE barcode = ?1 COLLATE NOCASE AND is_active = 1",
+                params![bc],
+                |row| row.get(0),
+            )
             .optional()?;
         if let Some(existing_id) = existing {
             return Err(ProductError::DuplicateBarcode(format!(
                 "Barcode '{bc}' is already assigned to product '{existing_id}'"
+            )));
+        }
+
+        let existing_in_registry: Option<String> = conn
+            .query_row(
+                "SELECT product_id FROM product_barcodes WHERE barcode = ?1 COLLATE NOCASE AND is_active = 1",
+                params![bc],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(existing_reg_id) = existing_in_registry {
+            return Err(ProductError::DuplicateBarcode(format!(
+                "Barcode '{bc}' is already assigned to product '{existing_reg_id}'"
             )));
         }
     }
@@ -327,17 +370,18 @@ pub fn create_product(
 
     conn.execute(
         "INSERT INTO products (
-            id, category_id, name, description, barcode, product_type,
+            id, category_id, sku, name, description, barcode, product_type,
             base_price, cost_price, unit_type, requires_expiry, requires_serial,
             warranty_months, custom_attributes, is_active, created_at, updated_at
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6,
-            ?7, ?8, ?9, ?10, ?11,
-            ?12, ?13, 1, datetime('now'), datetime('now')
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+            ?8, ?9, ?10, ?11, ?12,
+            ?13, ?14, 1, datetime('now'), datetime('now')
         )",
         params![
             id,
             category_id,
+            sku,
             name,
             description,
             barcode,
@@ -351,6 +395,17 @@ pub fn create_product(
             input.custom_attributes,
         ],
     )?;
+
+    // If barcode was supplied, also insert into product_barcodes canonical registry as primary
+    if let Some(ref bc) = barcode {
+        let symbology = crate::barcode::detect_symbology(bc);
+        let barcode_id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO product_barcodes (id, product_id, barcode, symbology, is_primary, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 1, 1, datetime('now'), datetime('now'))",
+            params![barcode_id, id, bc, symbology.as_str()],
+        )?;
+    }
 
     get_product(conn, &id)?
         .ok_or_else(|| ProductError::Database("Failed to retrieve created product".into()))
@@ -372,7 +427,7 @@ pub fn get_product_by_barcode(
     if trimmed.is_empty() {
         return Ok(None);
     }
-    let sql = format!("SELECT {PRODUCT_COLUMNS} FROM products WHERE barcode = ?1");
+    let sql = format!("SELECT {PRODUCT_COLUMNS} FROM products WHERE barcode = ?1 COLLATE NOCASE");
     let result = conn
         .query_row(&sql, [trimmed], map_product_row)
         .optional()?;
@@ -392,23 +447,58 @@ pub fn update_product(
 
     // Check that product exists
     let existing = get_product(conn, &input.id)?;
-    if existing.is_none() {
-        return Err(ProductError::NotFound(format!(
-            "Product with ID '{}' not found",
-            input.id
-        )));
-    }
+    let _existing_prod = existing.ok_or_else(|| {
+        ProductError::NotFound(format!("Product with ID '{}' not found", input.id))
+    })?;
+
+    let sku = if let Some(ref s) = input.sku {
+        let val = s.trim();
+        if val.is_empty() {
+            None
+        } else {
+            let sanitized = crate::barcode::validate_sku(val)
+                .map_err(|e| ProductError::Validation(e.to_string()))?;
+            let existing_sku: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM products WHERE sku = ?1 COLLATE NOCASE AND id != ?2 AND is_active = 1",
+                    params![sanitized, input.id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(conflict_id) = existing_sku {
+                return Err(ProductError::DuplicateSku(format!(
+                    "SKU '{sanitized}' is already assigned to product '{conflict_id}'"
+                )));
+            }
+            Some(sanitized)
+        }
+    } else {
+        None
+    };
 
     // Check barcode conflict if barcode is changing to another product's barcode
     if let Some(ref bc) = barcode {
         let conflict_id: Option<String> = conn
             .query_row(
-                "SELECT id FROM products WHERE barcode = ?1 AND id != ?2",
+                "SELECT id FROM products WHERE barcode = ?1 COLLATE NOCASE AND id != ?2 AND is_active = 1",
                 params![bc, input.id],
                 |row| row.get(0),
             )
             .optional()?;
         if let Some(conflict) = conflict_id {
+            return Err(ProductError::DuplicateBarcode(format!(
+                "Barcode '{bc}' is already assigned to product '{conflict}'"
+            )));
+        }
+
+        let reg_conflict: Option<String> = conn
+            .query_row(
+                "SELECT product_id FROM product_barcodes WHERE barcode = ?1 COLLATE NOCASE AND product_id != ?2 AND is_active = 1",
+                params![bc, input.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(conflict) = reg_conflict {
             return Err(ProductError::DuplicateBarcode(format!(
                 "Barcode '{bc}' is already assigned to product '{conflict}'"
             )));
@@ -436,22 +526,24 @@ pub fn update_product(
     let affected = conn.execute(
         "UPDATE products SET
             category_id = ?1,
-            name = ?2,
-            description = ?3,
-            barcode = ?4,
-            product_type = ?5,
-            base_price = ?6,
-            cost_price = ?7,
-            unit_type = ?8,
-            requires_expiry = ?9,
-            requires_serial = ?10,
-            warranty_months = ?11,
-            custom_attributes = ?12,
-            is_active = ?13,
+            sku = ?2,
+            name = ?3,
+            description = ?4,
+            barcode = ?5,
+            product_type = ?6,
+            base_price = ?7,
+            cost_price = ?8,
+            unit_type = ?9,
+            requires_expiry = ?10,
+            requires_serial = ?11,
+            warranty_months = ?12,
+            custom_attributes = ?13,
+            is_active = ?14,
             updated_at = datetime('now')
-        WHERE id = ?14",
+        WHERE id = ?15",
         params![
             category_id,
+            sku,
             name,
             description,
             barcode,
@@ -475,15 +567,56 @@ pub fn update_product(
         )));
     }
 
+    // Sync canonical registry with primary barcode update
+    if let Some(ref bc) = barcode {
+        // Demote existing primaries on this product
+        conn.execute(
+            "UPDATE product_barcodes SET is_primary = 0, updated_at = datetime('now') WHERE product_id = ?1",
+            params![input.id],
+        )?;
+
+        // Check if barcode already exists in product_barcodes for this product
+        let existing_barcode_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM product_barcodes WHERE product_id = ?1 AND barcode = ?2 COLLATE NOCASE",
+                params![input.id, bc],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        if let Some(b_id) = existing_barcode_id {
+            conn.execute(
+                "UPDATE product_barcodes SET is_primary = 1, is_active = 1, updated_at = datetime('now') WHERE id = ?1",
+                params![b_id],
+            )?;
+        } else {
+            let symbology = crate::barcode::detect_symbology(bc);
+            let b_id = uuid::Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO product_barcodes (id, product_id, barcode, symbology, is_primary, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 1, 1, datetime('now'), datetime('now'))",
+                params![b_id, input.id, bc, symbology.as_str()],
+            )?;
+        }
+    } else {
+        // Clear primary flags in product_barcodes if product now has no primary barcode
+        conn.execute(
+            "UPDATE product_barcodes SET is_primary = 0, updated_at = datetime('now') WHERE product_id = ?1",
+            params![input.id],
+        )?;
+    }
+
     get_product(conn, &input.id)?
         .ok_or_else(|| ProductError::Database("Failed to retrieve updated product".into()))
 }
 
 /// Soft-deletes / archives a product by setting `is_active = 0`.
 /// Preserves historical foreign key relationships. Never issues a hard DELETE.
+/// Clears `products.barcode = NULL` and deactivates all associated rows in `product_barcodes`.
 pub fn delete_product(conn: &Connection, id: &str) -> Result<(), ProductError> {
     let affected = conn.execute(
         "UPDATE products SET
+            barcode = NULL,
             is_active = 0,
             updated_at = datetime('now')
         WHERE id = ?1 AND is_active = 1",
@@ -491,19 +624,29 @@ pub fn delete_product(conn: &Connection, id: &str) -> Result<(), ProductError> {
     )?;
 
     if affected == 0 {
-        // Check if it exists but was already inactive
         let exists: Option<i64> = conn
             .query_row("SELECT is_active FROM products WHERE id = ?1", [id], |r| {
                 r.get(0)
             })
             .optional()?;
         match exists {
-            Some(_) => Ok(()), // Already archived / idempotent
+            Some(_) => {
+                // Ensure barcodes are deactivated
+                conn.execute(
+                    "UPDATE product_barcodes SET is_active = 0, is_primary = 0, updated_at = datetime('now') WHERE product_id = ?1",
+                    [id],
+                )?;
+                Ok(())
+            }
             None => Err(ProductError::NotFound(format!(
                 "Product with ID '{id}' not found"
             ))),
         }
     } else {
+        conn.execute(
+            "UPDATE product_barcodes SET is_active = 0, is_primary = 0, updated_at = datetime('now') WHERE product_id = ?1",
+            [id],
+        )?;
         Ok(())
     }
 }
@@ -532,9 +675,10 @@ pub fn list_products(
     if let Some(ref q) = filter.query {
         let trimmed_q = q.trim();
         if !trimmed_q.is_empty() {
-            sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR barcode = ?)");
+            sql.push_str(" AND (name LIKE ? ESCAPE '\\' OR barcode = ? OR sku = ?)");
             let pattern = format!("%{}%", escape_like_pattern(trimmed_q));
             params_vec.push(Box::new(pattern));
+            params_vec.push(Box::new(trimmed_q.to_string()));
             params_vec.push(Box::new(trimmed_q.to_string()));
         }
     }

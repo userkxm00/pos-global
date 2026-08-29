@@ -25,6 +25,7 @@ fn make_product_fixture(name: &str, price_minor: i64, barcode: Option<&str>) -> 
         name: name.to_string(),
         description: None,
         category_id: None,
+        sku: None,
         barcode: barcode.map(ToString::to_string),
         product_type: None,
         base_price_minor: price_minor,
@@ -252,6 +253,7 @@ fn test_create_and_get_product_by_id() {
         name: "Artisan Coffee Beans".to_string(),
         description: Some("Single origin Ethiopian roast".to_string()),
         category_id: None,
+        sku: None,
         barcode: Some("6131234567890".to_string()),
         product_type: Some("simple".to_string()),
         base_price_minor: 18500,       // 185.00
@@ -313,16 +315,17 @@ fn test_duplicate_barcode_rejected() {
 }
 
 #[test]
-fn test_archived_barcode_reuse_rejected_preserving_table_uniqueness() {
+fn test_archived_barcode_reuse_succeeds_in_f203() {
     let conn = setup_test_db();
     let input1 = make_product_fixture("Archived Product", 1000, Some("BC-ARCHIVE-DUP"));
     let created = create_product(&conn, input1).expect("product created");
 
     delete_product(&conn, &created.id).expect("soft delete succeeds");
 
+    // In F2.03, soft-deleting frees the barcode mirror and archives it, so reusing it on an active product succeeds
     let input2 = make_product_fixture("New Attempt Same BC", 2000, Some("BC-ARCHIVE-DUP"));
-    let err = create_product(&conn, input2).unwrap_err();
-    assert!(matches!(err, ProductError::DuplicateBarcode(_)));
+    let created2 = create_product(&conn, input2).expect("product 2 created with reused barcode");
+    assert_eq!(created2.barcode.as_deref(), Some("BC-ARCHIVE-DUP"));
 }
 
 #[test]
@@ -354,6 +357,7 @@ fn test_update_product_success() {
             name: "Updated Name".to_string(),
             description: Some("New description".to_string()),
             category_id: None,
+            sku: None,
             barcode: Some("BC-UPDATED".to_string()),
             product_type: "simple".to_string(),
             base_price_minor: 6500,
@@ -389,6 +393,7 @@ fn test_update_product_nonexistent_returns_not_found() {
             name: "Does Not Exist".to_string(),
             description: None,
             category_id: None,
+            sku: None,
             barcode: None,
             product_type: "simple".to_string(),
             base_price_minor: 100,

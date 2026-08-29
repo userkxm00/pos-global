@@ -2,6 +2,7 @@
 // The frontend must not access SQLite/files directly.
 
 pub mod auth;
+pub mod barcode;
 pub mod branch;
 pub mod brand;
 pub mod category;
