@@ -111,7 +111,7 @@ pub fn validate_url_syntax(url: Option<&str>) -> Result<Option<String>, &'static
             };
             let host = host_part.split(['/', '?', '#', ':']).next().unwrap_or("");
             let labels: Vec<&str> = host.split('.').collect();
-            if labels.len() < 2 || labels.iter().any(str::is_empty) {
+            if labels.len() < 2 || labels.iter().any(|s| s.is_empty()) {
                 return Err("Website URL must be a valid web address or domain");
             }
             Ok(Some(s.to_string()))

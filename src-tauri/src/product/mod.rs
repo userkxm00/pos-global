@@ -108,16 +108,17 @@ impl std::error::Error for ProductError {}
 
 impl From<rusqlite::Error> for ProductError {
     fn from(e: rusqlite::Error) -> Self {
-        match e {
-            rusqlite::Error::SqliteFailure(ref f, Some(ref msg))
-                if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
-                    && (msg.contains("products.barcode")
-                        || msg.contains("UNIQUE constraint failed: products.barcode")) =>
+        if let rusqlite::Error::SqliteFailure(ref f, Some(ref msg)) = e {
+            if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+                && (msg.contains("products.barcode")
+                    || msg.contains("UNIQUE constraint failed: products.barcode"))
             {
-                ProductError::DuplicateBarcode("Barcode already assigned to another product".into())
+                return ProductError::DuplicateBarcode(
+                    "Barcode already assigned to another product".into(),
+                );
             }
-            _ => ProductError::Database(e.to_string()),
         }
+        ProductError::Database(e.to_string())
     }
 }
 
@@ -221,7 +222,8 @@ pub fn validate_barcode(barcode: Option<&str>) -> Option<String> {
 /// Validates product type. Allowed types: 'simple', 'variable', 'weighted'.
 pub fn validate_product_type(ptype: Option<&str>) -> Result<String, ProductError> {
     match ptype.map(str::trim).filter(|s| !s.is_empty()) {
-        None | Some("simple") => Ok("simple".to_string()),
+        None => Ok("simple".to_string()),
+        Some("simple") => Ok("simple".to_string()),
         Some("variable") => Ok("variable".to_string()),
         Some("weighted") => Ok("weighted".to_string()),
         Some(invalid) => Err(ProductError::Validation(format!(
@@ -259,10 +261,6 @@ fn map_product_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Product> {
 }
 
 const PRODUCT_COLUMNS: &str = "id, category_id, name, description, barcode, product_type, base_price, cost_price, unit_type, requires_expiry, requires_serial, warranty_months, custom_attributes, is_active, created_at, updated_at";
-
-const GET_PRODUCT_SQL: &str = "SELECT id, category_id, name, description, barcode, product_type, base_price, cost_price, unit_type, requires_expiry, requires_serial, warranty_months, custom_attributes, is_active, created_at, updated_at FROM products WHERE id = ?1";
-
-const GET_PRODUCT_BY_BARCODE_SQL: &str = "SELECT id, category_id, name, description, barcode, product_type, base_price, cost_price, unit_type, requires_expiry, requires_serial, warranty_months, custom_attributes, is_active, created_at, updated_at FROM products WHERE barcode = ?1";
 
 /// Escapes SQL LIKE wildcards ('%', '_', and '\') using '\' as the escape character.
 fn escape_like_pattern(input: &str) -> String {
@@ -360,9 +358,8 @@ pub fn create_product(
 
 /// Retrieves a product by its unique ID.
 pub fn get_product(conn: &Connection, id: &str) -> Result<Option<Product>, ProductError> {
-    let result = conn
-        .query_row(GET_PRODUCT_SQL, [id], map_product_row)
-        .optional()?;
+    let sql = format!("SELECT {PRODUCT_COLUMNS} FROM products WHERE id = ?1");
+    let result = conn.query_row(&sql, [id], map_product_row).optional()?;
     Ok(result)
 }
 
@@ -375,8 +372,9 @@ pub fn get_product_by_barcode(
     if trimmed.is_empty() {
         return Ok(None);
     }
+    let sql = format!("SELECT {PRODUCT_COLUMNS} FROM products WHERE barcode = ?1");
     let result = conn
-        .query_row(GET_PRODUCT_BY_BARCODE_SQL, [trimmed], map_product_row)
+        .query_row(&sql, [trimmed], map_product_row)
         .optional()?;
     Ok(result)
 }

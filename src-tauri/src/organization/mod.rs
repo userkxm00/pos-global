@@ -78,7 +78,7 @@ pub fn validate_name(name: &str) -> Result<String, OrganizationError> {
 /// Validates currency code. Must be a 3-character uppercase ISO code.
 pub fn validate_currency(currency: &str) -> Result<String, OrganizationError> {
     let trimmed = currency.trim();
-    if trimmed.len() != 3 || !trimmed.chars().all(char::is_ascii_uppercase) {
+    if trimmed.len() != 3 || !trimmed.chars().all(|c| c.is_ascii_uppercase()) {
         return Err(OrganizationError::Validation(format!(
             "Invalid ISO currency code '{trimmed}'"
         )));

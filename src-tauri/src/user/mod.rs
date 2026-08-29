@@ -93,7 +93,7 @@ pub fn hash_secret(secret: &str) -> Result<String, UserError> {
     let argon2 = Argon2::default();
     argon2
         .hash_password(secret.as_bytes(), &salt)
-        .map(ToString::to_string)
+        .map(|h| h.to_string())
         .map_err(|e| UserError::Database(format!("Argon2 hashing error: {e}")))
 }
 
@@ -206,7 +206,7 @@ impl RateLimiter {
     #[cfg(test)]
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
-        self.state.lock().map(|s| s.map.is_empty()).unwrap_or(true)
+        self.len() == 0
     }
 
     /// Checks if a client-identity key is currently locked out or subject to client admission throttle.
