@@ -336,7 +336,7 @@ fn test_reactivate_category_with_duplicate_conflict_rejected() {
     let cat1 = create_category(&conn, make_category_fixture("Hardware", None)).expect("cat1");
     delete_category(&conn, &cat1.id).expect("cat1 archived");
 
-    let cat2 =
+    let _cat2 =
         create_category(&conn, make_category_fixture("Hardware", None)).expect("cat2 active");
 
     // Attempt to reactivate cat1
@@ -361,7 +361,7 @@ fn test_reactivate_category_with_duplicate_conflict_rejected() {
 #[test]
 fn test_get_category_tree_hierarchy() {
     let conn = setup_test_db();
-    let food = create_category(&conn, make_category_fixture("Food", None)).expect("food");
+    let _food = create_category(&conn, make_category_fixture("Food", None)).expect("food");
     let drinks = create_category(&conn, make_category_fixture("Drinks", None)).expect("drinks");
 
     let hot = create_category(&conn, make_category_fixture("Hot", Some(&drinks.id))).expect("hot");
@@ -390,7 +390,7 @@ fn test_get_category_tree_hierarchy() {
 fn test_list_categories_filters() {
     let conn = setup_test_db();
     let root1 = create_category(&conn, make_category_fixture("Bakery", None)).expect("root1");
-    let root2 = create_category(&conn, make_category_fixture("Dairy", None)).expect("root2");
+    let _root2 = create_category(&conn, make_category_fixture("Dairy", None)).expect("root2");
     let child1 =
         create_category(&conn, make_category_fixture("Pastry", Some(&root1.id))).expect("c1");
     delete_category(&conn, &child1.id).expect("c1 archived");
@@ -490,9 +490,11 @@ fn test_category_authorization_admin_and_manager_permitted_cashier_denied() {
     )
     .expect("cashier");
 
-    let admin_sess = create_local_session(&conn, &admin.id, &branch_id, None, 8).expect("sess");
-    let manager_sess = create_local_session(&conn, &manager.id, &branch_id, None, 8).expect("sess");
-    let cashier_sess = create_local_session(&conn, &cashier.id, &branch_id, None, 8).expect("sess");
+    let admin_sess = create_local_session(&conn, &admin.id, &branch_id, "pin", None).expect("sess");
+    let manager_sess =
+        create_local_session(&conn, &manager.id, &branch_id, "pin", None).expect("sess");
+    let cashier_sess =
+        create_local_session(&conn, &cashier.id, &branch_id, "pin", None).expect("sess");
 
     // Admin & Manager have ProductsManage
     assert!(require_permission(&conn, &admin_sess.id, Permission::ProductsManage).is_ok());
@@ -500,7 +502,7 @@ fn test_category_authorization_admin_and_manager_permitted_cashier_denied() {
 
     // Cashier denied ProductsManage
     let err = require_permission(&conn, &cashier_sess.id, Permission::ProductsManage).unwrap_err();
-    assert!(matches!(err, AuthMiddlewareError::PermissionDenied(_)));
+    assert!(matches!(err, AuthMiddlewareError::PermissionDenied { .. }));
 
     // Cashier CAN read with active session
     let auth_read = AuthorizeRequest::new(&cashier_sess.id).execute(&conn);

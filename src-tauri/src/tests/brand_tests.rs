@@ -181,7 +181,7 @@ fn test_reactivate_brand_with_duplicate_conflict_rejected() {
     let b1 = create_brand(&conn, make_brand_fixture("LG")).expect("b1");
     delete_brand(&conn, &b1.id).expect("b1 archived");
 
-    let b2 = create_brand(&conn, make_brand_fixture("LG")).expect("b2 active");
+    let _b2 = create_brand(&conn, make_brand_fixture("LG")).expect("b2 active");
 
     let err = update_brand(
         &conn,
@@ -256,10 +256,11 @@ fn test_brand_authorization() {
     )
     .expect("cashier");
 
-    let admin_sess = create_local_session(&conn, &admin.id, &branch_id, None, 8).expect("sess");
-    let cashier_sess = create_local_session(&conn, &cashier.id, &branch_id, None, 8).expect("sess");
+    let admin_sess = create_local_session(&conn, &admin.id, &branch_id, "pin", None).expect("sess");
+    let cashier_sess =
+        create_local_session(&conn, &cashier.id, &branch_id, "pin", None).expect("sess");
 
     assert!(require_permission(&conn, &admin_sess.id, Permission::ProductsManage).is_ok());
     let err = require_permission(&conn, &cashier_sess.id, Permission::ProductsManage).unwrap_err();
-    assert!(matches!(err, AuthMiddlewareError::PermissionDenied(_)));
+    assert!(matches!(err, AuthMiddlewareError::PermissionDenied { .. }));
 }

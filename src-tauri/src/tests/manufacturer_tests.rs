@@ -219,7 +219,7 @@ fn test_reactivate_manufacturer_with_duplicate_conflict_rejected() {
     let m1 = create_manufacturer(&conn, make_manufacturer_fixture("Makita")).expect("m1");
     delete_manufacturer(&conn, &m1.id).expect("m1 archived");
 
-    let m2 = create_manufacturer(&conn, make_manufacturer_fixture("Makita")).expect("m2 active");
+    let _m2 = create_manufacturer(&conn, make_manufacturer_fixture("Makita")).expect("m2 active");
 
     let err = update_manufacturer(
         &conn,
@@ -297,10 +297,11 @@ fn test_manufacturer_authorization() {
     )
     .expect("cashier");
 
-    let admin_sess = create_local_session(&conn, &admin.id, &branch_id, None, 8).expect("sess");
-    let cashier_sess = create_local_session(&conn, &cashier.id, &branch_id, None, 8).expect("sess");
+    let admin_sess = create_local_session(&conn, &admin.id, &branch_id, "pin", None).expect("sess");
+    let cashier_sess =
+        create_local_session(&conn, &cashier.id, &branch_id, "pin", None).expect("sess");
 
     assert!(require_permission(&conn, &admin_sess.id, Permission::ProductsManage).is_ok());
     let err = require_permission(&conn, &cashier_sess.id, Permission::ProductsManage).unwrap_err();
-    assert!(matches!(err, AuthMiddlewareError::PermissionDenied(_)));
+    assert!(matches!(err, AuthMiddlewareError::PermissionDenied { .. }));
 }
