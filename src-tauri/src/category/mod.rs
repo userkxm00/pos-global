@@ -93,7 +93,12 @@ impl From<rusqlite::Error> for CategoryError {
                 if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation
                     && (msg.contains("idx_categories_root_name_active")
                         || msg.contains("idx_categories_sibling_name_active")
-                        || msg.contains("UNIQUE constraint failed: categories.name")) =>
+                        || msg.contains("UNIQUE constraint failed: categories.name")
+                        || msg.contains(
+                            "UNIQUE constraint failed: categories.parent_id, categories.name",
+                        )
+                        || (msg.contains("UNIQUE constraint failed")
+                            && msg.contains("categories.name"))) =>
             {
                 CategoryError::DuplicateName(
                     "An active category with this name already exists in this scope".into(),

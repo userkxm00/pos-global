@@ -775,15 +775,21 @@ fn test_category_hierarchy_depth_limit_and_deep_valid_chain() {
 fn test_category_tree_surfaces_stranded_cyclic_data() {
     let conn = setup_test_db();
 
-    // Directly insert a cyclic pair (A -> B -> A) as might occur in corrupted/imported legacy data
+    // Directly insert a cyclic pair (A -> B -> A) as might occur in corrupted/imported legacy data.
+    // Insert with valid referential sequence under active foreign key constraints:
     conn.execute(
-        "INSERT INTO categories (id, name, parent_id, is_active, created_at, updated_at) VALUES ('cyc_a', 'Cycle A', 'cyc_b', 1, datetime('now'), datetime('now'))",
+        "INSERT INTO categories (id, name, parent_id, is_active, created_at, updated_at) VALUES ('cyc_a', 'Cycle A', NULL, 1, datetime('now'), datetime('now'))",
         [],
     ).expect("insert cyc_a");
     conn.execute(
         "INSERT INTO categories (id, name, parent_id, is_active, created_at, updated_at) VALUES ('cyc_b', 'Cycle B', 'cyc_a', 1, datetime('now'), datetime('now'))",
         [],
     ).expect("insert cyc_b");
+    conn.execute(
+        "UPDATE categories SET parent_id = 'cyc_b' WHERE id = 'cyc_a'",
+        [],
+    )
+    .expect("update cyc_a parent to cyc_b");
 
     // Also insert a normal root category
     create_category(&conn, make_category_fixture("Normal Root", None)).expect("normal root");
