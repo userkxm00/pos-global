@@ -150,7 +150,7 @@ pub fn generate_internal_barcode(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    authorize_barcode_read(&conn, &session_id)?;
+    authorize_barcode_mutation(&conn, &session_id)?;
     generate_internal_ean13(&conn, prefix.as_deref()).map_err(|e| e.to_string())
 }
 
@@ -165,7 +165,7 @@ pub fn generate_product_sku(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    authorize_barcode_read(&conn, &session_id)?;
+    authorize_barcode_mutation(&conn, &session_id)?;
     generate_next_sku(&conn, prefix.as_deref()).map_err(|e| e.to_string())
 }
 

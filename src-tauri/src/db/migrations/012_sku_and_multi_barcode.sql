@@ -42,13 +42,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_product_barcodes_one_active_primary
     WHERE is_active = 1 AND is_primary = 1;
 
 -- 5. Deterministic Data Backfill: Active products
+-- If case-insensitive collisions existed in legacy data, earliest created product gets the canonical entry.
 INSERT INTO product_barcodes (id, product_id, barcode, symbology, is_primary, is_active, created_at, updated_at)
 SELECT lower(hex(randomblob(16))), id, trim(barcode), 'UNKNOWN', 1, 1, created_at, updated_at
-FROM products
-WHERE is_active = 1 
-  AND barcode IS NOT NULL 
-  AND trim(barcode) != ''
-ON CONFLICT DO NOTHING;
+FROM (
+    SELECT id, barcode, created_at, updated_at,
+           ROW_NUMBER() OVER (PARTITION BY trim(barcode) COLLATE NOCASE ORDER BY created_at ASC, id ASC) as rn
+    FROM products
+    WHERE is_active = 1 
+      AND barcode IS NOT NULL 
+      AND length(trim(barcode)) > 0
+)
+WHERE rn = 1;
+
+-- Clear legacy mirror for any active product whose colliding barcode was not backfilled
+UPDATE products
+SET barcode = NULL
+WHERE is_active = 1
+  AND barcode IS NOT NULL
+  AND id NOT IN (
+      SELECT product_id FROM product_barcodes WHERE is_active = 1 AND is_primary = 1
+  );
 
 -- 6. Deterministic Data Backfill: Inactive (soft-deleted) products
 INSERT INTO product_barcodes (id, product_id, barcode, symbology, is_primary, is_active, created_at, updated_at)
@@ -56,11 +70,10 @@ SELECT lower(hex(randomblob(16))), id, trim(barcode), 'UNKNOWN', 0, 0, created_a
 FROM products
 WHERE is_active = 0 
   AND barcode IS NOT NULL 
-  AND trim(barcode) != ''
-ON CONFLICT DO NOTHING;
+  AND length(trim(barcode)) > 0;
 
--- 7. Enforce Canonical Mirror Invariant: Clear products.barcode on inactive or empty rows
+-- 7. Enforce Canonical Mirror Invariant: Clear products.barcode on inactive or blank rows
 UPDATE products 
 SET barcode = NULL 
 WHERE is_active = 0 
-   OR (barcode IS NOT NULL AND trim(barcode) = '');
+   OR (barcode IS NOT NULL AND length(trim(barcode)) = 0);

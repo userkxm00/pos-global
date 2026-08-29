@@ -43,10 +43,10 @@ fn make_test_product(conn: &rusqlite::Connection, name: &str, barcode: Option<&s
 #[test]
 fn test_gs1_modulo10_calculation_and_validation() {
     // EAN-13 examples:
-    // 613123456789 -> check digit 0
+    // 613123456789 -> check digit 3
     let check1 = calculate_gs1_check_digit("613123456789").expect("calc check digit");
-    assert_eq!(check1, 0);
-    assert!(verify_gs1_check_digit("6131234567890").is_ok());
+    assert_eq!(check1, 3);
+    assert!(verify_gs1_check_digit("6131234567893").is_ok());
 
     // 400638133393 -> check digit 1
     let check2 = calculate_gs1_check_digit("400638133393").expect("calc check digit");
@@ -70,10 +70,14 @@ fn test_gs1_modulo10_calculation_and_validation() {
     assert!(matches!(
         err,
         BarcodeError::InvalidCheckDigit {
-            expected: 0,
+            expected: 3,
             actual: 9
         }
     ));
+
+    // Multibyte and invalid character handling
+    let utf8_err = verify_gs1_check_digit("61312345678é").unwrap_err();
+    assert!(matches!(utf8_err, BarcodeError::Validation(_)));
 }
 
 #[test]
@@ -419,3 +423,76 @@ fn test_barcode_and_sku_mutations_require_products_manage() {
         "Cashier must be allowed to read barcodes and catalog"
     );
 }
+
+#[test]
+fn test_archived_barcode_reuse_and_soft_delete_lifecycle() {
+    let conn = setup_test_db();
+    let p1_id = make_test_product(&conn, "Product A", Some("REUSE-BARCODE-123"));
+
+    // Verify p1 has barcode registered as primary
+    let p1 = get_product(&conn, &p1_id).unwrap().unwrap();
+    assert_eq!(p1.barcode.as_deref(), Some("REUSE-BARCODE-123"));
+
+    let p1_barcodes = list_product_barcodes(&conn, &p1_id, false).unwrap();
+    assert_eq!(p1_barcodes.len(), 1);
+    assert_eq!(p1_barcodes[0].barcode, "REUSE-BARCODE-123");
+
+    // Soft delete Product A
+    crate::product::delete_product(&conn, &p1_id).expect("delete p1");
+
+    // Verify p1 legacy mirror is cleared and barcodes deactivated
+    let p1_deleted = get_product(&conn, &p1_id).unwrap().unwrap();
+    assert!(!p1_deleted.is_active);
+    assert_eq!(p1_deleted.barcode, None);
+
+    let p1_active_bcs = list_product_barcodes(&conn, &p1_id, false).unwrap();
+    assert!(p1_active_bcs.is_empty());
+
+    let p1_all_bcs = list_product_barcodes(&conn, &p1_id, true).unwrap();
+    assert_eq!(p1_all_bcs.len(), 1);
+    assert!(!p1_all_bcs[0].is_active);
+
+    // Product B can now reuse "REUSE-BARCODE-123" without UNIQUE constraint collision
+    let p2_id = make_test_product(&conn, "Product B", Some("REUSE-BARCODE-123"));
+    let p2 = get_product(&conn, &p2_id).unwrap().unwrap();
+    assert_eq!(p2.barcode.as_deref(), Some("REUSE-BARCODE-123"));
+
+    // get_product_by_barcode resolves directly to Product B
+    let found = get_product_by_barcode(&conn, "REUSE-BARCODE-123").unwrap().unwrap();
+    assert_eq!(found.0.id, p2_id);
+}
+
+#[test]
+fn test_validation_errors_on_empty_and_whitespace_inputs() {
+    let conn = setup_test_db();
+    let pid = make_test_product(&conn, "Validation Item", None);
+
+    assert!(list_product_barcodes(&conn, "   ", false).is_err());
+    assert!(get_barcode_by_id(&conn, "   ").is_err());
+    assert!(remove_product_barcode(&conn, "   ").is_err());
+    assert!(set_primary_barcode(&conn, &pid, "   ").is_err());
+    assert!(set_primary_barcode(&conn, "   ", "bc-1").is_err());
+    assert!(reassign_product_barcode(&conn, "   ", &pid, false).is_err());
+    assert!(reassign_product_barcode(&conn, "bc-1", "   ", false).is_err());
+    assert!(add_product_barcode(
+        &conn,
+        AddBarcodeRequest {
+            product_id: "   ".into(),
+            barcode: "12345".into(),
+            symbology: None,
+            is_primary: None,
+        }
+    )
+    .is_err());
+    assert!(add_product_barcode(
+        &conn,
+        AddBarcodeRequest {
+            product_id: pid,
+            barcode: "   ".into(),
+            symbology: None,
+            is_primary: None,
+        }
+    )
+    .is_err());
+}
+

@@ -420,12 +420,36 @@ pub fn reassign_product_barcode(
     conn.execute("BEGIN IMMEDIATE;", [])?;
 
     let res: Result<ProductBarcode, BarcodeError> = (|| {
-        // If it was primary on old product, remove primary mirror on old product
+        // If it was primary on old product, promote another active barcode or clear legacy mirror
         if barcode.is_primary && barcode.is_active {
-            conn.execute(
-                "UPDATE products SET barcode = NULL, updated_at = datetime('now') WHERE id = ?1 AND barcode = ?2",
-                params![barcode.product_id, barcode.barcode],
-            )?;
+            let next_primary_id: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM product_barcodes WHERE product_id = ?1 AND id != ?2 AND is_active = 1 ORDER BY created_at ASC LIMIT 1",
+                    params![barcode.product_id, b_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+
+            if let Some(next_id) = next_primary_id {
+                let next_barcode: String = conn.query_row(
+                    "SELECT barcode FROM product_barcodes WHERE id = ?1",
+                    params![next_id],
+                    |row| row.get(0),
+                )?;
+                conn.execute(
+                    "UPDATE product_barcodes SET is_primary = 1, updated_at = datetime('now') WHERE id = ?1",
+                    params![next_id],
+                )?;
+                conn.execute(
+                    "UPDATE products SET barcode = ?1, updated_at = datetime('now') WHERE id = ?2",
+                    params![next_barcode, barcode.product_id],
+                )?;
+            } else {
+                conn.execute(
+                    "UPDATE products SET barcode = NULL, updated_at = datetime('now') WHERE id = ?1",
+                    params![barcode.product_id],
+                )?;
+            }
         }
 
         if as_primary {
@@ -478,26 +502,34 @@ pub fn get_product_by_barcode(
         .query_row(
             "SELECT id, product_id, barcode, symbology, is_primary, is_active, created_at, updated_at
              FROM product_barcodes
-             WHERE barcode = ?1 COLLATE NOCASE AND is_active = 1
-             LIMIT 1",
+             WHERE barcode = ?1 COLLATE NOCASE AND is_active = 1",
             params![trimmed],
             map_barcode_row,
         )
         .optional()?;
 
     if let Some(bc) = barcode_row {
-        if let Some(p) = crate::product::get_product(conn, &bc.product_id)
-            .map_err(|e| BarcodeError::Database(e.to_string()))?
-        {
+        let product = crate::product::get_product(conn, &bc.product_id)?
+            .filter(|p| p.is_active);
+        if let Some(p) = product {
             return Ok(Some((p, Some(bc))));
         }
     }
 
-    // 2. Backward compatibility fallback: check legacy products.barcode
-    if let Some(p) = crate::product::get_product_by_barcode(conn, trimmed)
-        .map_err(|e| BarcodeError::Database(e.to_string()))?
-    {
-        return Ok(Some((p, None)));
+    // 2. Fallback: Check products.barcode mirror for active products
+    let legacy_product = conn
+        .query_row(
+            "SELECT id FROM products WHERE barcode = ?1 COLLATE NOCASE AND is_active = 1",
+            params![trimmed],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+
+    if let Some(pid) = legacy_product {
+        let product = crate::product::get_product(conn, &pid)?;
+        if let Some(p) = product {
+            return Ok(Some((p, None)));
+        }
     }
 
     Ok(None)
@@ -515,7 +547,6 @@ pub fn list_product_barcodes(
             "Product ID cannot be empty".into(),
         ));
     }
-
     let sql = if include_inactive {
         "SELECT id, product_id, barcode, symbology, is_primary, is_active, created_at, updated_at
          FROM product_barcodes
@@ -564,14 +595,24 @@ pub fn verify_catalog_barcode_integrity(
     for row in rows {
         let (id, name, legacy, canonical) = row?;
         if legacy != canonical {
+            let description = match (&legacy, &canonical) {
+                (Some(leg), None) => format!(
+                    "Active product has legacy barcode '{leg}' but lacks canonical active primary in product_barcodes"
+                ),
+                (None, Some(can)) => format!(
+                    "Active product has canonical active primary '{can}' but legacy products.barcode is NULL"
+                ),
+                (Some(leg), Some(can)) => format!(
+                    "Legacy products.barcode '{leg}' disagrees with canonical active primary '{can}'"
+                ),
+                (None, None) => unreachable!(),
+            };
             mismatches.push(BarcodeIntegrityMismatch {
                 product_id: id,
                 product_name: name,
                 legacy_mirror: legacy.clone(),
                 canonical_primary: canonical.clone(),
-                description: format!(
-                    "Legacy products.barcode ({legacy:?}) disagrees with canonical primary in product_barcodes ({canonical:?})"
-                ),
+                description,
             });
         }
     }
@@ -580,6 +621,7 @@ pub fn verify_catalog_barcode_integrity(
 }
 
 /// Explicit administrative repair command reconciling `products.barcode` to match canonical primary records.
+/// Never sets legacy mirror to NULL if canonical record is missing; requires canonical primary EXISTS.
 pub fn reconcile_catalog_barcode_mirrors(conn: &Connection) -> Result<usize, BarcodeError> {
     let updated = conn.execute(
         "UPDATE products
@@ -593,15 +635,20 @@ pub fn reconcile_catalog_barcode_mirrors(conn: &Connection) -> Result<usize, Bar
          ),
          updated_at = datetime('now')
          WHERE is_active = 1
-           AND (
-               barcode IS NOT (
-                   SELECT pb.barcode
-                   FROM product_barcodes pb
-                   WHERE pb.product_id = products.id
-                     AND pb.is_primary = 1
-                     AND pb.is_active = 1
-                   LIMIT 1
-               )
+           AND EXISTS (
+               SELECT 1
+               FROM product_barcodes pb
+               WHERE pb.product_id = products.id
+                 AND pb.is_primary = 1
+                 AND pb.is_active = 1
+           )
+           AND barcode IS NOT (
+               SELECT pb.barcode
+               FROM product_barcodes pb
+               WHERE pb.product_id = products.id
+                 AND pb.is_primary = 1
+                 AND pb.is_active = 1
+               LIMIT 1
            )",
         [],
     )?;

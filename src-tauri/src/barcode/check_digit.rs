@@ -45,6 +45,12 @@ pub fn verify_gs1_check_digit(full_code: &str) -> Result<(), BarcodeError> {
         ));
     }
 
+    if !trimmed.is_ascii() {
+        return Err(BarcodeError::Validation(
+            "Barcode check digit input contains non-ASCII characters".into(),
+        ));
+    }
+
     let body = &trimmed[..trimmed.len() - 1];
     let expected_check = calculate_gs1_check_digit(body)?;
 
