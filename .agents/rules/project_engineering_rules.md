@@ -28,7 +28,7 @@
 
 ### 1.4 Phase Isolation & Protection
 - Merged phases (e.g., `F1.*` foundation, `F2.01` products CRUD) are protected against regressions.
-- Future phase responsibilities (e.g. `F2.17` product-brand relations, `F2.03` variants) must NOT be implemented prematurely.
+- Future phase responsibilities (e.g. `F2.17` product-brand relations, `F2.05` variants) must NOT be implemented prematurely.
 
 ---
 

@@ -470,7 +470,7 @@ fn test_validation_errors_on_empty_and_whitespace_inputs() {
     let pid = make_test_product(&conn, "Validation Item", None);
 
     assert!(list_product_barcodes(&conn, "   ", false).is_err());
-    assert!(get_barcode_by_id(&conn, "   ").is_err());
+    assert_eq!(get_barcode_by_id(&conn, "   ").unwrap(), None);
     assert!(remove_product_barcode(&conn, "   ").is_err());
     assert!(set_primary_barcode(&conn, &pid, "   ").is_err());
     assert!(set_primary_barcode(&conn, "   ", "bc-1").is_err());
@@ -496,4 +496,123 @@ fn test_validation_errors_on_empty_and_whitespace_inputs() {
         }
     )
     .is_err());
+}
+
+#[test]
+fn test_migration_012_whitespace_mirror_synchronization() {
+    let conn = setup_test_db();
+    let prod_id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO products (id, name, barcode, is_active, base_price) VALUES (?1, 'Legacy Whitespace Item', ' 6131234567893 ', 1, 100.0)",
+        params![prod_id],
+    ).unwrap();
+
+    conn.execute(
+        "INSERT INTO product_barcodes (id, product_id, barcode, symbology, is_primary, is_active, created_at, updated_at)
+         VALUES (lower(hex(randomblob(16))), ?1, trim(' 6131234567893 '), 'UNKNOWN', 1, 1, datetime('now'), datetime('now'))",
+        params![prod_id],
+    ).unwrap();
+
+    conn.execute(
+        "UPDATE products
+         SET barcode = (
+             SELECT pb.barcode
+             FROM product_barcodes pb
+             WHERE pb.product_id = products.id AND pb.is_active = 1 AND pb.is_primary = 1
+         )
+         WHERE is_active = 1
+           AND id IN (
+               SELECT product_id FROM product_barcodes WHERE is_active = 1 AND is_primary = 1
+           )",
+        [],
+    )
+    .unwrap();
+
+    let fetched = get_product(&conn, &prod_id).unwrap().unwrap();
+    assert_eq!(fetched.barcode.as_deref(), Some("6131234567893"));
+    let bcs = list_product_barcodes(&conn, &prod_id, false).unwrap();
+    assert_eq!(bcs.len(), 1);
+    assert_eq!(bcs[0].barcode, "6131234567893");
+}
+
+#[test]
+fn test_primary_barcode_reassignment_ordering_preserves_unique_active_primary_invariant() {
+    let conn = setup_test_db();
+    let p1_id = make_test_product(&conn, "Product 1", Some("P1-PRIMARY"));
+    let _p1_sec = add_product_barcode(
+        &conn,
+        AddBarcodeRequest {
+            product_id: p1_id.clone(),
+            barcode: "P1-SECONDARY".into(),
+            symbology: None,
+            is_primary: Some(false),
+        },
+    )
+    .expect("p1 secondary added");
+
+    let p2_id = make_test_product(&conn, "Product 2", None);
+
+    let p1_primary_row = get_product_by_barcode(&conn, "P1-PRIMARY")
+        .unwrap()
+        .unwrap()
+        .1
+        .unwrap();
+
+    let reassigned = reassign_product_barcode(&conn, &p1_primary_row.id, &p2_id, true)
+        .expect("reassignment of active primary must succeed without constraint collision");
+
+    assert_eq!(reassigned.product_id, p2_id);
+    assert!(reassigned.is_primary);
+
+    let p1_fetched = get_product(&conn, &p1_id).unwrap().unwrap();
+    assert_eq!(p1_fetched.barcode.as_deref(), Some("P1-SECONDARY"));
+
+    let p2_fetched = get_product(&conn, &p2_id).unwrap().unwrap();
+    assert_eq!(p2_fetched.barcode.as_deref(), Some("P1-PRIMARY"));
+}
+
+#[test]
+fn test_canonical_barcode_lookup_resolves_active_secondary_barcode() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let user = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Barcode User",
+        Some("bc_user"),
+        None,
+        None,
+        "cashier",
+    );
+    let session = create_local_session(&conn, &user.id, &branch_id, "pin", None).expect("session");
+
+    let prod_id = make_test_product(&conn, "Multi-Barcode Item", Some("PRIMARY-999"));
+
+    let secondary = add_product_barcode(
+        &conn,
+        AddBarcodeRequest {
+            product_id: prod_id.clone(),
+            barcode: "SECONDARY-ALIAS-888".into(),
+            symbology: None,
+            is_primary: Some(false),
+        },
+    )
+    .expect("secondary barcode created");
+    assert!(!secondary.is_primary);
+    assert!(secondary.is_active);
+
+    // Verify canonical service lookup resolves secondary barcode alias
+    let (found_prod, found_bc) = get_product_by_barcode(&conn, "SECONDARY-ALIAS-888")
+        .unwrap()
+        .expect("secondary barcode resolved");
+
+    assert_eq!(found_prod.id, prod_id);
+    assert_eq!(found_prod.name, "Multi-Barcode Item");
+    let bc = found_bc.expect("associated barcode metadata returned");
+    assert_eq!(bc.barcode, "SECONDARY-ALIAS-888");
+    assert!(!bc.is_primary);
+    assert!(bc.is_active);
+
+    // Verify session authorization for barcode read
+    assert!(crate::commands::authorize_catalog_read(&conn, &session.id).is_ok());
 }

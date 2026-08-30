@@ -64,6 +64,18 @@ WHERE is_active = 1
       SELECT product_id FROM product_barcodes WHERE is_active = 1 AND is_primary = 1
   );
 
+-- Synchronize retained active products' legacy mirror with canonical trimmed barcode
+UPDATE products
+SET barcode = (
+    SELECT pb.barcode
+    FROM product_barcodes pb
+    WHERE pb.product_id = products.id AND pb.is_active = 1 AND pb.is_primary = 1
+)
+WHERE is_active = 1
+  AND id IN (
+      SELECT product_id FROM product_barcodes WHERE is_active = 1 AND is_primary = 1
+  );
+
 -- 6. Deterministic Data Backfill: Inactive (soft-deleted) products
 INSERT INTO product_barcodes (id, product_id, barcode, symbology, is_primary, is_active, created_at, updated_at)
 SELECT lower(hex(randomblob(16))), id, trim(barcode), 'UNKNOWN', 0, 0, created_at, updated_at

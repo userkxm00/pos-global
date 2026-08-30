@@ -420,12 +420,18 @@ pub fn reassign_product_barcode(
     conn.execute("BEGIN IMMEDIATE;", [])?;
 
     let res: Result<ProductBarcode, BarcodeError> = (|| {
+        // Move the reassigned barcode to target product first so it no longer counts as an active primary on old product
+        conn.execute(
+            "UPDATE product_barcodes SET product_id = ?1, is_primary = ?2, is_active = 1, updated_at = datetime('now') WHERE id = ?3",
+            params![t_pid, if as_primary { 1 } else { 0 }, b_id],
+        )?;
+
         // If it was primary on old product, promote another active barcode or clear legacy mirror
         if barcode.is_primary && barcode.is_active {
             let next_primary_id: Option<String> = conn
                 .query_row(
-                    "SELECT id FROM product_barcodes WHERE product_id = ?1 AND id != ?2 AND is_active = 1 ORDER BY created_at ASC LIMIT 1",
-                    params![barcode.product_id, b_id],
+                    "SELECT id FROM product_barcodes WHERE product_id = ?1 AND is_active = 1 ORDER BY created_at ASC LIMIT 1",
+                    params![barcode.product_id],
                     |row| row.get(0),
                 )
                 .optional()?;
@@ -454,19 +460,14 @@ pub fn reassign_product_barcode(
 
         if as_primary {
             conn.execute(
-                "UPDATE product_barcodes SET is_primary = 0, updated_at = datetime('now') WHERE product_id = ?1",
-                params![t_pid],
+                "UPDATE product_barcodes SET is_primary = 0, updated_at = datetime('now') WHERE product_id = ?1 AND id != ?2",
+                params![t_pid, b_id],
             )?;
             conn.execute(
                 "UPDATE products SET barcode = ?1, updated_at = datetime('now') WHERE id = ?2",
                 params![barcode.barcode, t_pid],
             )?;
         }
-
-        conn.execute(
-            "UPDATE product_barcodes SET product_id = ?1, is_primary = ?2, is_active = 1, updated_at = datetime('now') WHERE id = ?3",
-            params![t_pid, if as_primary { 1 } else { 0 }, b_id],
-        )?;
 
         let updated = get_barcode_by_id(conn, b_id)?
             .ok_or_else(|| BarcodeError::Database("Failed to load reassigned barcode".into()))?;
