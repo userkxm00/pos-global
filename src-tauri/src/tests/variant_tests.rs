@@ -1,4 +1,4 @@
-// Unit, migration, and domain contract tests for F2.05-T1 Product Variants & Attributes Foundation.
+// Unit, migration, and domain contract tests for F2.05 Variants / Matrix.
 
 use crate::product::{create_product, CreateProductInput};
 use crate::tests::test_helpers::{apply_migrations_up_to, setup_test_db, setup_test_db_up_to};
@@ -674,4 +674,133 @@ fn test_create_variant_atomicity_rollback_on_association_failure() {
         pre_assoc_count, post_assoc_count,
         "No variant_attribute_values row should remain after failure"
     );
+}
+
+#[test]
+fn test_create_variant_concurrent_combination_uniqueness_multi_connection() {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    // Use a unique file-backed database so multiple independent connections can access it concurrently
+    let temp_dir = std::env::temp_dir();
+    let db_path = temp_dir.join(format!("test_concurrency_{}.sqlite", uuid::Uuid::new_v4()));
+
+    // 1. Initialize schema and base data
+    {
+        let conn = rusqlite::Connection::open(&db_path).expect("open db");
+        crate::db::init_database(&conn).expect("init db");
+        conn.execute_batch("PRAGMA journal_mode = WAL;")
+            .expect("set WAL");
+    }
+
+    let conn_setup = rusqlite::Connection::open(&db_path).expect("open setup conn");
+    let product_id = create_sample_product(&conn_setup, "Concurrency Polo");
+
+    let def_size = create_attribute_definition(
+        &conn_setup,
+        CreateAttributeDefinitionInput {
+            name: "Size".to_string(),
+            sort_order: Some(1),
+        },
+    )
+    .expect("create def");
+
+    let val_m = create_attribute_value(
+        &conn_setup,
+        CreateAttributeValueInput {
+            attribute_definition_id: def_size.id.clone(),
+            value: "Medium".to_string(),
+            sort_order: Some(1),
+        },
+    )
+    .expect("create val");
+
+    drop(conn_setup);
+
+    // 2. Set up two independent threads with separate SQLite connections synchronized with a barrier
+    let barrier = Arc::new(Barrier::new(2));
+    let mut handles = Vec::new();
+
+    for thread_idx in 0..2 {
+        let b = Arc::clone(&barrier);
+        let p_id = product_id.clone();
+        let val_id = val_m.id.clone();
+        let path = db_path.clone();
+
+        let handle = thread::spawn(move || {
+            let conn = rusqlite::Connection::open(&path).expect("open thread conn");
+            conn.busy_timeout(std::time::Duration::from_secs(5))
+                .expect("set busy timeout");
+
+            // Wait for both threads to reach the execution point
+            b.wait();
+
+            create_variant(
+                &conn,
+                CreateVariantInput {
+                    product_id: p_id,
+                    sku: Some(format!("CONC-M-{}", thread_idx)),
+                    barcode: Some(format!("11112222333{}", thread_idx)),
+                    price_override_minor: Some(5000),
+                    cost_price_minor: Some(2500),
+                    attribute_value_ids: vec![val_id],
+                },
+            )
+        });
+        handles.push(handle);
+    }
+
+    // 3. Collect results from both competing operations
+    let results: Vec<Result<crate::variant::VariantWithAttributes, VariantError>> =
+        handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+    // 4. Verify invariant: Exactly one create succeeds and the other fails closed
+    assert_eq!(
+        success_count, 1,
+        "Expected exactly one successful variant creation under concurrent race, got: {success_count}"
+    );
+    assert_eq!(
+        error_count, 1,
+        "Expected exactly one rejected operation under concurrent race"
+    );
+
+    for res in &results {
+        if let Err(err) = res {
+            assert!(
+                matches!(
+                    err,
+                    VariantError::DuplicateCombination(_) | VariantError::Database(_)
+                ),
+                "Losing operation returned unexpected error variant: {:?}",
+                err
+            );
+        }
+    }
+
+    // 5. Verify database integrity
+    let conn_verify = rusqlite::Connection::open(&db_path).expect("open verify conn");
+    let active_variant_count: i64 = conn_verify
+        .query_row(
+            "SELECT COUNT(*) FROM product_variants WHERE product_id = ?1 AND is_active = 1",
+            rusqlite::params![product_id],
+            |row| row.get(0),
+        )
+        .expect("count active variants");
+    assert_eq!(
+        active_variant_count, 1,
+        "Database must contain at most one active variant for the combination"
+    );
+
+    let assoc_count: i64 = conn_verify
+        .query_row("SELECT COUNT(*) FROM variant_attribute_values", [], |row| {
+            row.get(0)
+        })
+        .expect("count assoc rows");
+    assert_eq!(
+        assoc_count, 1,
+        "Database must contain exactly 1 association row (no partial or orphaned joins)"
+    );
+
+    drop(conn_verify);
+    let _ = std::fs::remove_file(&db_path);
 }

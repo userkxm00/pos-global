@@ -1,5 +1,5 @@
-// Product Variants & Matrix Domain Model, validation rules, and SQLite operations.
-// F2.05-T1 — Schema / Migration 014 + Domain Contract Foundation
+// Module for product attributes and variant matrix domain.
+// F2.05 — Variants / Matrix
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -433,11 +433,15 @@ pub fn create_variant(
         resolved_attribute_values.push(attr_val);
     }
 
-    // Verify combination uniqueness for active variants of this product
+    let variant_id = uuid::Uuid::new_v4().to_string();
+
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+
+    // Verify combination uniqueness for active variants of this product inside immediate write transaction
     if !input.attribute_value_ids.is_empty() {
-        let existing_variants = list_variants_by_product(conn, &input.product_id, Some(true))?;
+        let existing_variants = list_variants_by_product(&tx, &input.product_id, Some(true))?;
         for existing in existing_variants {
-            let existing_vals = get_variant_attribute_values(conn, &existing.id)?;
+            let existing_vals = get_variant_attribute_values(&tx, &existing.id)?;
             let existing_set: std::collections::HashSet<String> =
                 existing_vals.into_iter().map(|v| v.id).collect();
             let new_set: std::collections::HashSet<String> =
@@ -450,10 +454,6 @@ pub fn create_variant(
             }
         }
     }
-
-    let variant_id = uuid::Uuid::new_v4().to_string();
-
-    let tx = conn.unchecked_transaction()?;
 
     tx.execute(
         "INSERT INTO product_variants (
