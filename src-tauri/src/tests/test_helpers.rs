@@ -13,6 +13,46 @@ pub fn setup_test_db() -> Connection {
     conn
 }
 
+/// Sets up an isolated in-memory test database migrated up to a specific migration name (e.g. "011_categories_brands_manufacturers").
+pub fn setup_test_db_up_to(target_migration: &str) -> Connection {
+    let conn = Connection::open_in_memory().expect("in-memory test database");
+    conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS _migrations (
+            name TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );",
+    )
+    .unwrap();
+
+    let mut reached_target = false;
+    for (name, sql) in crate::db::MIGRATIONS {
+        let applied: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM _migrations WHERE name = ?1",
+                [name],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if applied == 0 {
+            let tx = conn.unchecked_transaction().unwrap();
+            tx.execute_batch(sql).unwrap();
+            tx.execute("INSERT INTO _migrations(name) VALUES (?1)", [name])
+                .unwrap();
+            tx.commit().unwrap();
+        }
+        if *name == target_migration {
+            reached_target = true;
+            break;
+        }
+    }
+    assert!(
+        reached_target,
+        "Target migration '{target_migration}' was not found in crate::db::MIGRATIONS"
+    );
+    conn
+}
+
 /// Creates a standard sample organization and branch for testing.
 pub fn create_test_org_and_branch(conn: &Connection) -> (String, String) {
     let org = create_organization(

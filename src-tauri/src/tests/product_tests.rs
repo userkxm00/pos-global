@@ -8,11 +8,10 @@ use crate::branch::{create_branch, CreateBranchInput};
 use crate::organization::{create_organization, CreateOrganizationInput};
 use crate::permission::Permission;
 use crate::product::{
-    create_product, delete_product, get_catalog_organization_id, get_product,
-    get_product_by_barcode, list_products, minor_to_real, real_to_minor, update_product,
-    validate_barcode, validate_base_price_minor, validate_cost_price_minor, validate_name,
-    validate_product_type, CreateProductInput, ProductError, ProductFilter, UpdateProductInput,
-    MAX_SAFE_MINOR_UNITS,
+    create_product, delete_product, get_catalog_organization_id, get_product, list_products,
+    minor_to_real, real_to_minor, update_product, validate_barcode, validate_base_price_minor,
+    validate_cost_price_minor, validate_name, validate_product_type, CreateProductInput,
+    ProductError, ProductFilter, UpdateProductInput, MAX_SAFE_MINOR_UNITS,
 };
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
@@ -25,6 +24,7 @@ fn make_product_fixture(name: &str, price_minor: i64, barcode: Option<&str>) -> 
         name: name.to_string(),
         description: None,
         category_id: None,
+        sku: None,
         barcode: barcode.map(ToString::to_string),
         product_type: None,
         base_price_minor: price_minor,
@@ -209,6 +209,7 @@ fn test_product_price_full_persistence_roundtrip_at_bounds() {
             name: "High Value Asset".to_string(),
             description: None,
             category_id: None,
+            sku: None,
             barcode: Some("BC-BOUND-001".to_string()),
             product_type: None,
             base_price_minor: MAX_SAFE_MINOR_UNITS,
@@ -252,6 +253,7 @@ fn test_create_and_get_product_by_id() {
         name: "Artisan Coffee Beans".to_string(),
         description: Some("Single origin Ethiopian roast".to_string()),
         category_id: None,
+        sku: None,
         barcode: Some("6131234567890".to_string()),
         product_type: Some("simple".to_string()),
         base_price_minor: 18500,       // 185.00
@@ -291,13 +293,13 @@ fn test_get_product_by_barcode() {
     let input = make_product_fixture("Green Tea Box", 450, Some("BARCODE-TEA-001"));
     let created = create_product(&conn, input).expect("product created");
 
-    let by_barcode = get_product_by_barcode(&conn, "BARCODE-TEA-001")
+    let (by_barcode, _bc) = crate::barcode::get_product_by_barcode(&conn, "BARCODE-TEA-001")
         .expect("lookup succeeds")
         .expect("found by barcode");
     assert_eq!(by_barcode.id, created.id);
 
-    let nonexistent =
-        get_product_by_barcode(&conn, "NONEXISTENT-BARCODE").expect("lookup succeeds");
+    let nonexistent = crate::barcode::get_product_by_barcode(&conn, "NONEXISTENT-BARCODE")
+        .expect("lookup succeeds");
     assert!(nonexistent.is_none());
 }
 
@@ -313,16 +315,17 @@ fn test_duplicate_barcode_rejected() {
 }
 
 #[test]
-fn test_archived_barcode_reuse_rejected_preserving_table_uniqueness() {
+fn test_archived_barcode_reuse_succeeds_in_f203() {
     let conn = setup_test_db();
     let input1 = make_product_fixture("Archived Product", 1000, Some("BC-ARCHIVE-DUP"));
     let created = create_product(&conn, input1).expect("product created");
 
     delete_product(&conn, &created.id).expect("soft delete succeeds");
 
+    // In F2.03, soft-deleting frees the barcode mirror and archives it, so reusing it on an active product succeeds
     let input2 = make_product_fixture("New Attempt Same BC", 2000, Some("BC-ARCHIVE-DUP"));
-    let err = create_product(&conn, input2).unwrap_err();
-    assert!(matches!(err, ProductError::DuplicateBarcode(_)));
+    let created2 = create_product(&conn, input2).expect("product 2 created with reused barcode");
+    assert_eq!(created2.barcode.as_deref(), Some("BC-ARCHIVE-DUP"));
 }
 
 #[test]
@@ -354,6 +357,7 @@ fn test_update_product_success() {
             name: "Updated Name".to_string(),
             description: Some("New description".to_string()),
             category_id: None,
+            sku: None,
             barcode: Some("BC-UPDATED".to_string()),
             product_type: "simple".to_string(),
             base_price_minor: 6500,
@@ -389,6 +393,7 @@ fn test_update_product_nonexistent_returns_not_found() {
             name: "Does Not Exist".to_string(),
             description: None,
             category_id: None,
+            sku: None,
             barcode: None,
             product_type: "simple".to_string(),
             base_price_minor: 100,

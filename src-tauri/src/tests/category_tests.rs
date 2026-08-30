@@ -434,6 +434,7 @@ fn test_product_category_reference_preserved_on_archive() {
         name: "Yirgacheffe 250g".to_string(),
         description: None,
         category_id: Some(cat.id.clone()),
+        sku: None,
         barcode: Some("BEANS-001".to_string()),
         product_type: None,
         base_price_minor: 1500,

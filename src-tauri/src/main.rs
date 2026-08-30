@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod auth;
+mod barcode;
 mod branch;
 mod brand;
 mod category;
@@ -54,10 +55,20 @@ fn main() {
             commands::inventory::upsert_product,
             commands::product::create_product,
             commands::product::get_product,
-            commands::product::get_product_by_barcode,
             commands::product::update_product,
             commands::product::delete_product,
             commands::product::list_catalog_products,
+            commands::barcode::get_product_by_barcode,
+            commands::barcode::add_product_barcode,
+            commands::barcode::remove_product_barcode,
+            commands::barcode::set_primary_barcode,
+            commands::barcode::reassign_product_barcode,
+            commands::barcode::list_product_barcodes,
+            commands::barcode::validate_barcode_string,
+            commands::barcode::generate_internal_barcode,
+            commands::barcode::generate_product_sku,
+            commands::barcode::verify_catalog_barcode_integrity,
+            commands::barcode::reconcile_catalog_barcode_mirrors,
             commands::category::create_category,
             commands::category::get_category,
             commands::category::update_category,

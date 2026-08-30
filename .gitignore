@@ -11,3 +11,4 @@ src-tauri/target/
 *.p12
 *.pfx
 .DS_Store
+scratch/
