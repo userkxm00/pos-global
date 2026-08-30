@@ -25,6 +25,7 @@ pub fn setup_test_db_up_to(target_migration: &str) -> Connection {
     )
     .unwrap();
 
+    let mut reached_target = false;
     for (name, sql) in crate::db::MIGRATIONS {
         let applied: i64 = conn
             .query_row(
@@ -41,9 +42,14 @@ pub fn setup_test_db_up_to(target_migration: &str) -> Connection {
             tx.commit().unwrap();
         }
         if *name == target_migration {
+            reached_target = true;
             break;
         }
     }
+    assert!(
+        reached_target,
+        "Target migration '{target_migration}' was not found in crate::db::MIGRATIONS"
+    );
     conn
 }
 
