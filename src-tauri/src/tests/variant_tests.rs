@@ -20,7 +20,7 @@ fn create_sample_product(conn: &rusqlite::Connection, name: &str) -> String {
             category_id: None,
             sku: None,
             barcode: None,
-            product_type: Some("standard".to_string()),
+            product_type: Some("variable".to_string()),
             base_price_minor: 5000,
             cost_price_minor: Some(2500),
             unit_type: None,
