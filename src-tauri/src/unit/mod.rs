@@ -147,7 +147,7 @@ pub struct ConvertQuantityInput {
 }
 
 /// Domain errors for Units & Conversions.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum UnitError {
     Validation(String),
     NotFound(String),
@@ -209,9 +209,10 @@ pub fn validate_unit_code(code: &str) -> Result<String, UnitError> {
             trimmed.len()
         )));
     }
-    let is_valid_char =
-        |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '%');
-    if !trimmed.chars().all(is_valid_char) {
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '%'))
+    {
         return Err(UnitError::Validation(
             "Unit code contains invalid characters. Allowed: alphanumeric, hyphens (-), underscores (_), dots (.), slashes (/), percent (%)".into(),
         ));
@@ -701,7 +702,7 @@ fn expand_bfs_neighbors(
 ) {
     for (next_id, edge_multiplier) in neighbors {
         if visited.insert(next_id.clone()) {
-            let next_mult = curr_multiplier * edge_multiplier;
+            let next_mult = curr_multiplier * *edge_multiplier;
             if next_mult.is_finite() && next_mult > 0.0 {
                 queue.push_back((next_id.clone(), next_mult, hops + 1));
             }
