@@ -11,7 +11,7 @@ use crate::barcode::{
 use crate::permission::Permission;
 use crate::product::{create_product, get_product, CreateProductInput};
 use crate::tests::test_helpers::{
-    create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
+    create_test_org_and_branch, create_test_user_with_creds, setup_test_db, setup_test_db_up_to,
 };
 use crate::user::session::create_local_session;
 use rusqlite::params;
@@ -499,40 +499,220 @@ fn test_validation_errors_on_empty_and_whitespace_inputs() {
 }
 
 #[test]
-fn test_migration_012_whitespace_mirror_synchronization() {
-    let conn = setup_test_db();
-    let prod_id = uuid::Uuid::new_v4().to_string();
-    conn.execute(
-        "INSERT INTO products (id, name, barcode, is_active, base_price) VALUES (?1, 'Legacy Whitespace Item', ' 6131234567893 ', 1, 100.0)",
-        params![prod_id],
-    ).unwrap();
+fn test_real_011_to_012_migration_transition() {
+    // 1. Initialize test database exactly at migration 011 (prior to Migration 012)
+    let conn = setup_test_db_up_to("011_categories_brands_manufacturers");
 
-    conn.execute(
-        "INSERT INTO product_barcodes (id, product_id, barcode, symbology, is_primary, is_active, created_at, updated_at)
-         VALUES (lower(hex(randomblob(16))), ?1, trim(' 6131234567893 '), 'UNKNOWN', 1, 1, datetime('now'), datetime('now'))",
-        params![prod_id],
-    ).unwrap();
+    let pre_migrations_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
+        .expect("query migrations ledger");
+    assert_eq!(pre_migrations_count, 11);
 
+    let pre_barcodes_table_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'product_barcodes'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("table check");
+    assert_eq!(pre_barcodes_table_exists, 0);
+
+    let pre_sku_seq_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sku_sequences'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("table check");
+    assert_eq!(pre_sku_seq_exists, 0);
+
+    // 2. Seed realistic legacy `products` data BEFORE Migration 012
+    let prod_a = uuid::Uuid::new_v4().to_string();
+    let prod_b = uuid::Uuid::new_v4().to_string();
+    let prod_c = uuid::Uuid::new_v4().to_string();
+    let prod_d1 = uuid::Uuid::new_v4().to_string();
+    let prod_d2 = uuid::Uuid::new_v4().to_string();
+    let prod_e = uuid::Uuid::new_v4().to_string();
+
+    // A. Active product with normal valid barcode
     conn.execute(
-        "UPDATE products
-         SET barcode = (
-             SELECT pb.barcode
-             FROM product_barcodes pb
-             WHERE pb.product_id = products.id AND pb.is_active = 1 AND pb.is_primary = 1
-         )
-         WHERE is_active = 1
-           AND id IN (
-               SELECT product_id FROM product_barcodes WHERE is_active = 1 AND is_primary = 1
-           )",
-        [],
+        "INSERT INTO products (id, name, barcode, is_active, base_price, created_at, updated_at)
+         VALUES (?1, 'Active Normal Product', '4006381333931', 1, 1000, '2026-01-01 10:00:00', '2026-01-01 10:00:00')",
+        params![prod_a],
     )
-    .unwrap();
+    .expect("seed prod_a");
 
-    let fetched = get_product(&conn, &prod_id).unwrap().unwrap();
-    assert_eq!(fetched.barcode.as_deref(), Some("6131234567893"));
-    let bcs = list_product_barcodes(&conn, &prod_id, false).unwrap();
-    assert_eq!(bcs.len(), 1);
-    assert_eq!(bcs[0].barcode, "6131234567893");
+    // B. Active product with surrounding whitespace in legacy barcode
+    conn.execute(
+        "INSERT INTO products (id, name, barcode, is_active, base_price, created_at, updated_at)
+         VALUES (?1, 'Active Whitespace Product', '   6131234567893   ', 1, 1500, '2026-01-02 10:00:00', '2026-01-02 10:00:00')",
+        params![prod_b],
+    )
+    .expect("seed prod_b");
+
+    // C. Inactive (soft-deleted) product with legacy barcode
+    conn.execute(
+        "INSERT INTO products (id, name, barcode, is_active, base_price, created_at, updated_at)
+         VALUES (?1, 'Inactive Legacy Product', '96385074', 0, 2000, '2026-01-03 10:00:00', '2026-01-03 10:00:00')",
+        params![prod_c],
+    )
+    .expect("seed prod_c");
+
+    // D. Normalized collision: earlier created active product vs later created active product
+    conn.execute(
+        "INSERT INTO products (id, name, barcode, is_active, base_price, created_at, updated_at)
+         VALUES (?1, 'Collision Winner (Earlier)', 'COLLIDE-123', 1, 500, '2026-01-04 09:00:00', '2026-01-04 09:00:00')",
+        params![prod_d1],
+    )
+    .expect("seed prod_d1");
+
+    conn.execute(
+        "INSERT INTO products (id, name, barcode, is_active, base_price, created_at, updated_at)
+         VALUES (?1, 'Collision Loser (Later)', 'collide-123', 1, 600, '2026-01-04 10:00:00', '2026-01-04 10:00:00')",
+        params![prod_d2],
+    )
+    .expect("seed prod_d2");
+
+    // E. Active product with NULL barcode
+    conn.execute(
+        "INSERT INTO products (id, name, barcode, is_active, base_price, created_at, updated_at)
+         VALUES (?1, 'Active Null Barcode Product', NULL, 1, 800, '2026-01-05 10:00:00', '2026-01-05 10:00:00')",
+        params![prod_e],
+    )
+    .expect("seed prod_e");
+
+    // 3. Apply Migration 012 using the REAL production migration runner
+    crate::db::init_database(&conn).expect("migration runner applies Migration 012 cleanly");
+
+    // Verify migration ledger state
+    let post_migrations_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
+        .expect("query migrations ledger");
+    assert_eq!(post_migrations_count, 12);
+
+    // Verify migration repeatability (re-running init_database is a clean no-op)
+    crate::db::init_database(&conn).expect("repeatable migration init must succeed");
+    let repeat_migrations_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
+        .expect("query migrations ledger");
+    assert_eq!(repeat_migrations_count, 12);
+
+    // 4. Verify new schema elements created by Migration 012
+    for table in ["sku_sequences", "product_barcodes"] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .expect("table existence check");
+        assert_eq!(exists, 1, "expected table {table} to exist");
+    }
+
+    for index in [
+        "idx_products_sku_active",
+        "idx_product_barcodes_product",
+        "idx_product_barcodes_lookup",
+        "idx_product_barcodes_unique_active",
+        "idx_product_barcodes_one_active_primary",
+    ] {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                [index],
+                |row| row.get(0),
+            )
+            .expect("index existence check");
+        assert_eq!(exists, 1, "expected index {index} to exist");
+    }
+
+    // Verify products.sku column exists
+    let sku_col_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('products') WHERE name = 'sku'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("sku column check");
+    assert_eq!(sku_col_exists, 1);
+
+    // 5. Verify actual post-migration data states
+
+    // A. Active Normal Product: backfilled to canonical registry and mirror preserved
+    let prod_a_db = get_product(&conn, &prod_a).unwrap().unwrap();
+    assert_eq!(prod_a_db.barcode.as_deref(), Some("4006381333931"));
+    let prod_a_bcs = list_product_barcodes(&conn, &prod_a, false).unwrap();
+    assert_eq!(prod_a_bcs.len(), 1);
+    assert_eq!(prod_a_bcs[0].barcode, "4006381333931");
+    assert!(prod_a_bcs[0].is_primary);
+    assert!(prod_a_bcs[0].is_active);
+    assert_eq!(prod_a_bcs[0].symbology, BarcodeSymbology::Unknown);
+
+    // B. Active Whitespace Product: surrounding whitespace trimmed in both registry and mirror
+    let prod_b_db = get_product(&conn, &prod_b).unwrap().unwrap();
+    assert_eq!(prod_b_db.barcode.as_deref(), Some("6131234567893"));
+    let prod_b_bcs = list_product_barcodes(&conn, &prod_b, false).unwrap();
+    assert_eq!(prod_b_bcs.len(), 1);
+    assert_eq!(prod_b_bcs[0].barcode, "6131234567893");
+    assert!(prod_b_bcs[0].is_primary);
+    assert!(prod_b_bcs[0].is_active);
+
+    // C. Inactive Product: legacy mirror cleared from products; archived as inactive/non-primary in registry
+    let prod_c_db = get_product(&conn, &prod_c).unwrap().unwrap();
+    assert_eq!(prod_c_db.barcode, None);
+    let prod_c_active_bcs = list_product_barcodes(&conn, &prod_c, false).unwrap();
+    assert_eq!(prod_c_active_bcs.len(), 0);
+    let prod_c_all_bcs = list_product_barcodes(&conn, &prod_c, true).unwrap();
+    assert_eq!(prod_c_all_bcs.len(), 1);
+    assert_eq!(prod_c_all_bcs[0].barcode, "96385074");
+    assert!(!prod_c_all_bcs[0].is_primary);
+    assert!(!prod_c_all_bcs[0].is_active);
+
+    // D. Normalized Collision: earlier record retains canonical registry & mirror; later colliding record cleared
+    let prod_d1_db = get_product(&conn, &prod_d1).unwrap().unwrap();
+    assert_eq!(prod_d1_db.barcode.as_deref(), Some("COLLIDE-123"));
+    let prod_d1_bcs = list_product_barcodes(&conn, &prod_d1, false).unwrap();
+    assert_eq!(prod_d1_bcs.len(), 1);
+    assert_eq!(prod_d1_bcs[0].barcode, "COLLIDE-123");
+    assert!(prod_d1_bcs[0].is_primary);
+    assert!(prod_d1_bcs[0].is_active);
+
+    let prod_d2_db = get_product(&conn, &prod_d2).unwrap().unwrap();
+    assert_eq!(
+        prod_d2_db.barcode, None,
+        "colliding later product mirror must be cleared"
+    );
+    let prod_d2_bcs = list_product_barcodes(&conn, &prod_d2, true).unwrap();
+    assert_eq!(
+        prod_d2_bcs.len(),
+        0,
+        "colliding later record has no duplicate active registry entry"
+    );
+
+    // E. Active Null Barcode Product: remains NULL with no registry entries
+    let prod_e_db = get_product(&conn, &prod_e).unwrap().unwrap();
+    assert_eq!(prod_e_db.barcode, None);
+    let prod_e_bcs = list_product_barcodes(&conn, &prod_e, true).unwrap();
+    assert_eq!(prod_e_bcs.len(), 0);
+
+    // 6. Verify repository lookup operations against migrated database
+    let (found_a, bc_a) = get_product_by_barcode(&conn, "4006381333931")
+        .unwrap()
+        .expect("lookup prod_a");
+    assert_eq!(found_a.id, prod_a);
+    assert_eq!(bc_a.unwrap().barcode, "4006381333931");
+
+    let (found_b, bc_b) = get_product_by_barcode(&conn, "6131234567893")
+        .unwrap()
+        .expect("lookup prod_b");
+    assert_eq!(found_b.id, prod_b);
+    assert_eq!(bc_b.unwrap().barcode, "6131234567893");
+
+    let (found_d1, bc_d1) = get_product_by_barcode(&conn, "collide-123")
+        .unwrap()
+        .expect("case-insensitive lookup prod_d1");
+    assert_eq!(found_d1.id, prod_d1);
+    assert_eq!(bc_d1.unwrap().barcode, "COLLIDE-123");
 }
 
 #[test]
