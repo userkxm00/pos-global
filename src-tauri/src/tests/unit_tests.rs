@@ -950,7 +950,7 @@ fn test_unit_authorization_read_and_mutation() {
 
     // Manager can mutate units
     let created = cmd_create_unit(
-        state.clone(),
+        state,
         session_mgr.id.clone(),
         CreateUnitInput {
             code: "meter_sq".to_string(),
@@ -964,28 +964,24 @@ fn test_unit_authorization_read_and_mutation() {
     assert_eq!(created.code, "meter_sq");
 
     // Manager can read units
-    let fetched = cmd_get_unit(state.clone(), session_mgr.id.clone(), created.id.clone())
+    let fetched = cmd_get_unit(state, session_mgr.id.clone(), created.id.clone())
         .expect("read unit")
         .expect("found");
     assert_eq!(fetched.code, "meter_sq");
 
     // Read by code
-    let fetched_code = cmd_get_unit_by_code(
-        state.clone(),
-        session_mgr.id.clone(),
-        "METER_SQ".to_string(),
-    )
-    .expect("read by code")
-    .expect("found");
+    let fetched_code = cmd_get_unit_by_code(state, session_mgr.id.clone(), "METER_SQ".to_string())
+        .expect("read by code")
+        .expect("found");
     assert_eq!(fetched_code.id, created.id);
 
     // List units
-    let all = cmd_list_units(state.clone(), session_mgr.id.clone(), None).expect("list units");
+    let all = cmd_list_units(state, session_mgr.id.clone(), None).expect("list units");
     assert!(!all.is_empty());
 
     // Update unit
     let updated = cmd_update_unit(
-        state.clone(),
+        state,
         session_mgr.id.clone(),
         UpdateUnitInput {
             id: created.id.clone(),
@@ -1000,12 +996,12 @@ fn test_unit_authorization_read_and_mutation() {
     assert_eq!(updated.code, "sq_meter");
 
     // Create and delete unit conversion
-    let m2 = cmd_get_unit_by_code(state.clone(), session_mgr.id.clone(), "m2".to_string())
+    let m2 = cmd_get_unit_by_code(state, session_mgr.id.clone(), "m2".to_string())
         .expect("get m2")
         .expect("found m2");
 
     let conv = cmd_create_unit_conversion(
-        state.clone(),
+        state,
         session_mgr.id.clone(),
         CreateUnitConversionInput {
             from_unit_id: created.id.clone(),
@@ -1016,16 +1012,12 @@ fn test_unit_authorization_read_and_mutation() {
     .expect("created conversion");
     assert_approx(conv.multiplier, 1.0);
 
-    let convs = cmd_list_unit_conversions(
-        state.clone(),
-        session_mgr.id.clone(),
-        Some(created.id.clone()),
-    )
-    .expect("list convs");
+    let convs = cmd_list_unit_conversions(state, session_mgr.id.clone(), Some(created.id.clone()))
+        .expect("list convs");
     assert_eq!(convs.len(), 1);
 
     let converted = cmd_convert_quantity(
-        state.clone(),
+        state,
         session_mgr.id.clone(),
         ConvertQuantityInput {
             from_unit_id: created.id.clone(),
@@ -1037,7 +1029,7 @@ fn test_unit_authorization_read_and_mutation() {
     assert_approx(converted.converted_quantity, 50.0);
 
     cmd_delete_unit_conversion(
-        state.clone(),
+        state,
         session_mgr.id.clone(),
         created.id.clone(),
         m2.id.clone(),
@@ -1045,8 +1037,7 @@ fn test_unit_authorization_read_and_mutation() {
     .expect("deleted conversion");
 
     // Delete unit
-    cmd_delete_unit(state.clone(), session_mgr.id.clone(), created.id.clone())
-        .expect("deleted unit");
+    cmd_delete_unit(state, session_mgr.id.clone(), created.id.clone()).expect("deleted unit");
 }
 
 #[test]
@@ -1072,7 +1063,7 @@ fn test_unit_unauthorized_mutation_rejected() {
 
     // Cashier cannot mutate units (lacks ProductsManage)
     let err = cmd_create_unit(
-        state.clone(),
+        state,
         session_cashier.id.clone(),
         CreateUnitInput {
             code: "cashier_unit".to_string(),
@@ -1093,7 +1084,7 @@ fn test_unit_unauthorized_mutation_rejected() {
 
     // Unauthenticated request fails
     let err_unauth = cmd_create_unit(
-        state.clone(),
+        state,
         "invalid_session_token_12345".to_string(),
         CreateUnitInput {
             code: "unauth_unit".to_string(),
