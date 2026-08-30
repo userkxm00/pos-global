@@ -43,24 +43,6 @@ pub fn get_product(
 }
 
 #[tauri::command]
-pub fn get_product_by_barcode(
-    state: tauri::State<DbState>,
-    session_id: String,
-    barcode: String,
-) -> Result<Product, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("database lock failed: {e}"))?;
-
-    authorize_product_read(&conn, &session_id)?;
-    match crate::product::get_product_by_barcode(&conn, &barcode).map_err(|e| e.to_string())? {
-        Some(p) => Ok(p),
-        None => Err(format!("Product with barcode '{barcode}' not found")),
-    }
-}
-
-#[tauri::command]
 pub fn update_product(
     state: tauri::State<DbState>,
     session_id: String,

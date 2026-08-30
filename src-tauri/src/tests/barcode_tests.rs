@@ -1,12 +1,13 @@
 // Comprehensive unit, repository, invariant, and migration tests for F2.03 Barcode Management.
 
 use crate::auth::middleware::{require_permission, require_session, AuthMiddlewareError};
+use crate::barcode::check_digit::{calculate_gs1_check_digit, verify_gs1_check_digit};
 use crate::barcode::{
-    add_product_barcode, calculate_gs1_check_digit, detect_symbology, generate_internal_ean13,
-    get_barcode_by_id, get_product_by_barcode, list_product_barcodes, reassign_product_barcode,
+    add_product_barcode, detect_symbology, generate_internal_ean13, get_barcode_by_id,
+    get_product_by_barcode, list_product_barcodes, reassign_product_barcode,
     reconcile_catalog_barcode_mirrors, remove_product_barcode, set_primary_barcode,
-    validate_barcode_symbology, verify_catalog_barcode_integrity, verify_gs1_check_digit,
-    AddBarcodeRequest, BarcodeError, BarcodeSymbology,
+    validate_barcode_symbology, verify_catalog_barcode_integrity, AddBarcodeRequest, BarcodeError,
+    BarcodeSymbology,
 };
 use crate::permission::Permission;
 use crate::product::{create_product, get_product, CreateProductInput};

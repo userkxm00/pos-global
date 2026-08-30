@@ -5,7 +5,6 @@ pub mod check_digit;
 pub mod generator;
 pub mod symbology;
 
-pub use check_digit::{calculate_gs1_check_digit, verify_gs1_check_digit};
 pub use generator::{generate_internal_ean13, generate_next_sku, validate_sku};
 pub use symbology::{detect_symbology, validate_barcode_symbology, BarcodeSymbology};
 
@@ -101,6 +100,20 @@ impl From<rusqlite::Error> for BarcodeError {
             }
         }
         BarcodeError::Database(e.to_string())
+    }
+}
+
+impl From<crate::product::ProductError> for BarcodeError {
+    fn from(e: crate::product::ProductError) -> Self {
+        match e {
+            crate::product::ProductError::NotFound(msg) => BarcodeError::NotFound(msg),
+            crate::product::ProductError::Validation(msg) => BarcodeError::Validation(msg),
+            crate::product::ProductError::DuplicateBarcode(msg) => {
+                BarcodeError::DuplicateBarcode(msg)
+            }
+            crate::product::ProductError::DuplicateSku(msg) => BarcodeError::DuplicateSku(msg),
+            crate::product::ProductError::Database(msg) => BarcodeError::Database(msg),
+        }
     }
 }
 
