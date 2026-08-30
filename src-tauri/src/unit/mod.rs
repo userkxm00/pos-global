@@ -692,6 +692,23 @@ fn build_conversion_adjacency_graph(
     Ok(adj)
 }
 
+fn expand_bfs_neighbors(
+    neighbors: &[(String, f64)],
+    curr_multiplier: f64,
+    hops: usize,
+    visited: &mut HashSet<String>,
+    queue: &mut VecDeque<(String, f64, usize)>,
+) {
+    for (next_id, edge_multiplier) in neighbors {
+        if visited.insert(next_id.clone()) {
+            let next_mult = curr_multiplier * edge_multiplier;
+            if next_mult.is_finite() && next_mult > 0.0 {
+                queue.push_back((next_id.clone(), next_mult, hops + 1));
+            }
+        }
+    }
+}
+
 fn bfs_search_conversion(
     adj: &HashMap<String, Vec<(String, f64)>>,
     start_id: &str,
@@ -709,19 +726,9 @@ fn bfs_search_conversion(
             return Some(curr_multiplier);
         }
 
-        if hops >= MAX_HOPS {
-            continue;
-        }
-
-        if let Some(neighbors) = adj.get(&curr_id) {
-            for (next_id, edge_multiplier) in neighbors {
-                if !visited.contains(next_id) {
-                    visited.insert(next_id.clone());
-                    let next_mult = curr_multiplier * edge_multiplier;
-                    if next_mult.is_finite() && next_mult > 0.0 {
-                        queue.push_back((next_id.clone(), next_mult, hops + 1));
-                    }
-                }
+        if hops < MAX_HOPS {
+            if let Some(neighbors) = adj.get(&curr_id) {
+                expand_bfs_neighbors(neighbors, curr_multiplier, hops, &mut visited, &mut queue);
             }
         }
     }
