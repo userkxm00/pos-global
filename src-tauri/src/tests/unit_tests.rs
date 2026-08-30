@@ -1,0 +1,955 @@
+// Unit of Measure (UOM) and Unit Conversion test suite.
+// F2.04 — Units & Conversions
+
+use crate::auth::create_local_session;
+use crate::commands::unit::{
+    convert_quantity as cmd_convert_quantity, create_unit as cmd_create_unit,
+    create_unit_conversion as cmd_create_unit_conversion, delete_unit as cmd_delete_unit,
+    delete_unit_conversion as cmd_delete_unit_conversion, get_unit as cmd_get_unit,
+    get_unit_by_code as cmd_get_unit_by_code, list_unit_conversions as cmd_list_unit_conversions,
+    list_units as cmd_list_units, update_unit as cmd_update_unit,
+};
+use crate::db::DbState;
+use crate::tests::test_helpers::{
+    create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
+};
+use crate::unit::{
+    convert_quantity, create_unit, create_unit_conversion, delete_unit, delete_unit_conversion,
+    find_conversion_factor, get_unit, get_unit_by_code, list_unit_conversions, list_units,
+    update_unit, validate_multiplier, validate_unit_code, validate_unit_name,
+    validate_unit_precision, ConvertQuantityInput, CreateUnitConversionInput, CreateUnitInput,
+    UnitDimension, UnitError, UnitFilter, UpdateUnitInput,
+};
+
+// =========================================================================
+// 1. VALIDATION & DIMENSION PARSING TESTS
+// =========================================================================
+
+#[test]
+fn test_unit_code_validation_valid() {
+    assert_eq!(validate_unit_code("kg").unwrap(), "kg");
+    assert_eq!(validate_unit_code("  piece  ").unwrap(), "piece");
+    assert_eq!(validate_unit_code("box-12").unwrap(), "box-12");
+    assert_eq!(validate_unit_code("pack_6").unwrap(), "pack_6");
+    assert_eq!(validate_unit_code("fl_oz").unwrap(), "fl_oz");
+    assert_eq!(validate_unit_code("m2").unwrap(), "m2");
+    assert_eq!(validate_unit_code("m/s").unwrap(), "m/s");
+    assert_eq!(validate_unit_code("100%").unwrap(), "100%");
+}
+
+#[test]
+fn test_unit_code_validation_invalid() {
+    assert!(validate_unit_code("").is_err());
+    assert!(validate_unit_code("   ").is_err());
+    assert!(validate_unit_code("a".repeat(33).as_str()).is_err());
+    assert!(validate_unit_code("kg with space").is_err());
+    assert!(validate_unit_code("kg@item").is_err());
+    assert!(validate_unit_code("kg#1").is_err());
+}
+
+#[test]
+fn test_unit_name_validation() {
+    assert_eq!(validate_unit_name("Kilogram").unwrap(), "Kilogram");
+    assert_eq!(validate_unit_name("  Box of 12  ").unwrap(), "Box of 12");
+    assert!(validate_unit_name("").is_err());
+    assert!(validate_unit_name("   ").is_err());
+    assert!(validate_unit_name("a".repeat(129).as_str()).is_err());
+}
+
+#[test]
+fn test_unit_precision_validation() {
+    assert_eq!(validate_unit_precision(0).unwrap(), 0);
+    assert_eq!(validate_unit_precision(3).unwrap(), 3);
+    assert_eq!(validate_unit_precision(6).unwrap(), 6);
+    assert!(validate_unit_precision(7).is_err());
+    assert!(validate_unit_precision(100).is_err());
+}
+
+#[test]
+fn test_multiplier_validation() {
+    assert_eq!(validate_multiplier(1.0).unwrap(), 1.0);
+    assert_eq!(validate_multiplier(1000.0).unwrap(), 1000.0);
+    assert_eq!(validate_multiplier(0.001).unwrap(), 0.001);
+    assert!(validate_multiplier(0.0).is_err());
+    assert!(validate_multiplier(-5.0).is_err());
+    assert!(validate_multiplier(f64::NAN).is_err());
+    assert!(validate_multiplier(f64::INFINITY).is_err());
+    assert!(validate_multiplier(f64::NEG_INFINITY).is_err());
+}
+
+#[test]
+fn test_unit_dimension_parsing() {
+    assert_eq!(UnitDimension::parse("count").unwrap(), UnitDimension::Count);
+    assert_eq!(UnitDimension::parse("MASS").unwrap(), UnitDimension::Mass);
+    assert_eq!(
+        UnitDimension::parse("Volume").unwrap(),
+        UnitDimension::Volume
+    );
+    assert_eq!(
+        UnitDimension::parse("length").unwrap(),
+        UnitDimension::Length
+    );
+    assert_eq!(UnitDimension::parse("area").unwrap(), UnitDimension::Area);
+    assert_eq!(
+        UnitDimension::parse("custom").unwrap(),
+        UnitDimension::Custom
+    );
+    assert!(UnitDimension::parse("invalid_dimension").is_err());
+}
+
+// =========================================================================
+// 2. REPOSITORY CRUD TESTS — UNITS
+// =========================================================================
+
+#[test]
+fn test_create_and_get_unit() {
+    let conn = setup_test_db();
+
+    let input = CreateUnitInput {
+        code: "tray".to_string(),
+        name: "Tray of Eggs".to_string(),
+        dimension: "count".to_string(),
+        precision: Some(0),
+        is_base: Some(false),
+    };
+
+    let unit = create_unit(&conn, input).expect("unit created");
+    assert_eq!(unit.code, "tray");
+    assert_eq!(unit.name, "Tray of Eggs");
+    assert_eq!(unit.dimension, UnitDimension::Count);
+    assert_eq!(unit.precision, 0);
+    assert!(!unit.is_base);
+
+    let fetched = get_unit(&conn, &unit.id)
+        .unwrap()
+        .expect("unit fetched by id");
+    assert_eq!(fetched.id, unit.id);
+    assert_eq!(fetched.code, "tray");
+
+    let fetched_by_code = get_unit_by_code(&conn, "TRAY")
+        .unwrap()
+        .expect("unit fetched case-insensitively");
+    assert_eq!(fetched_by_code.id, unit.id);
+}
+
+#[test]
+fn test_duplicate_unit_code_rejected() {
+    let conn = setup_test_db();
+
+    let input1 = CreateUnitInput {
+        code: "barrel".to_string(),
+        name: "Standard Oil Barrel".to_string(),
+        dimension: "volume".to_string(),
+        precision: Some(2),
+        is_base: Some(false),
+    };
+    create_unit(&conn, input1).expect("unit created");
+
+    let input2 = CreateUnitInput {
+        code: "BARREL".to_string(),
+        name: "Duplicate Barrel".to_string(),
+        dimension: "volume".to_string(),
+        precision: Some(2),
+        is_base: Some(false),
+    };
+    let err = create_unit(&conn, input2).unwrap_err();
+    assert!(matches!(err, UnitError::DuplicateCode(_)));
+}
+
+#[test]
+fn test_list_units_with_filters() {
+    let conn = setup_test_db();
+
+    // Baseline seeded units include piece, box, pack, set, kg, g, L, ml, m, cm, m2
+    let all_units = list_units(&conn, UnitFilter::default()).expect("all units");
+    assert!(all_units.len() >= 11);
+
+    // Filter by dimension
+    let mass_units = list_units(
+        &conn,
+        UnitFilter {
+            dimension: Some("mass".to_string()),
+            is_base: None,
+            query: None,
+        },
+    )
+    .expect("mass units");
+    assert_eq!(mass_units.len(), 2); // kg, g
+
+    // Filter by search query
+    let searched = list_units(
+        &conn,
+        UnitFilter {
+            dimension: None,
+            is_base: None,
+            query: Some("Liter".to_string()),
+        },
+    )
+    .expect("searched units");
+    assert_eq!(searched.len(), 2); // Liter, Milliliter
+}
+
+#[test]
+fn test_update_unit() {
+    let conn = setup_test_db();
+
+    let input = CreateUnitInput {
+        code: "doz".to_string(),
+        name: "Dozen Items".to_string(),
+        dimension: "count".to_string(),
+        precision: Some(0),
+        is_base: Some(false),
+    };
+    let unit = create_unit(&conn, input).expect("created");
+
+    let update = UpdateUnitInput {
+        id: unit.id.clone(),
+        code: "dozen".to_string(),
+        name: "Baker's Dozen".to_string(),
+        dimension: "count".to_string(),
+        precision: 0,
+        is_base: false,
+    };
+    let updated = update_unit(&conn, update).expect("updated");
+    assert_eq!(updated.code, "dozen");
+    assert_eq!(updated.name, "Baker's Dozen");
+
+    let fetched = get_unit(&conn, &unit.id).unwrap().expect("fetched");
+    assert_eq!(fetched.code, "dozen");
+}
+
+#[test]
+fn test_is_base_demotes_other_units_in_dimension() {
+    let conn = setup_test_db();
+
+    let u1 = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "mass_ref1".to_string(),
+            name: "Mass Reference 1".to_string(),
+            dimension: "mass".to_string(),
+            precision: Some(3),
+            is_base: Some(true),
+        },
+    )
+    .expect("u1 created as base");
+    assert!(u1.is_base);
+
+    let u2 = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "mass_ref2".to_string(),
+            name: "Mass Reference 2".to_string(),
+            dimension: "mass".to_string(),
+            precision: Some(3),
+            is_base: Some(true),
+        },
+    )
+    .expect("u2 created as new base");
+    assert!(u2.is_base);
+
+    // Verify u1 was demoted to non-base
+    let u1_reloaded = get_unit(&conn, &u1.id).unwrap().expect("u1 reloaded");
+    assert!(!u1_reloaded.is_base);
+}
+
+#[test]
+fn test_delete_unit_and_associated_conversions() {
+    let conn = setup_test_db();
+
+    let u1 = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "crate".to_string(),
+            name: "Wooden Crate".to_string(),
+            dimension: "count".to_string(),
+            precision: Some(0),
+            is_base: Some(false),
+        },
+    )
+    .expect("crate");
+
+    let piece = get_unit_by_code(&conn, "piece").unwrap().expect("piece");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: u1.id.clone(),
+            to_unit_id: piece.id.clone(),
+            multiplier: 24.0,
+        },
+    )
+    .expect("conversion created");
+
+    let convs_before = list_unit_conversions(&conn, Some(&u1.id)).expect("convs");
+    assert_eq!(convs_before.len(), 1);
+
+    delete_unit(&conn, &u1.id).expect("unit deleted");
+    assert!(get_unit(&conn, &u1.id).unwrap().is_none());
+
+    let convs_after = list_unit_conversions(&conn, Some(&u1.id)).expect("convs");
+    assert_eq!(convs_after.len(), 0);
+}
+
+// =========================================================================
+// 3. REPOSITORY CRUD TESTS — UNIT CONVERSIONS
+// =========================================================================
+
+#[test]
+fn test_create_and_list_conversion_rules() {
+    let conn = setup_test_db();
+
+    let box_unit = get_unit_by_code(&conn, "box").unwrap().expect("box");
+    let piece_unit = get_unit_by_code(&conn, "piece").unwrap().expect("piece");
+
+    let conv = create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: box_unit.id.clone(),
+            to_unit_id: piece_unit.id.clone(),
+            multiplier: 12.0,
+        },
+    )
+    .expect("conversion created");
+
+    assert_eq!(conv.from_unit_id, box_unit.id);
+    assert_eq!(conv.to_unit_id, piece_unit.id);
+    assert_eq!(conv.multiplier, 12.0);
+
+    let list = list_unit_conversions(&conn, None).expect("list");
+    assert!(!list.is_empty());
+    let found = list
+        .iter()
+        .find(|c| c.from_unit_id == box_unit.id && c.to_unit_id == piece_unit.id);
+    assert!(found.is_some());
+    assert_eq!(found.unwrap().multiplier, 12.0);
+}
+
+#[test]
+fn test_self_conversion_rule_rejected() {
+    let conn = setup_test_db();
+    let kg = get_unit_by_code(&conn, "kg").unwrap().expect("kg");
+
+    let err = create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: kg.id.clone(),
+            to_unit_id: kg.id.clone(),
+            multiplier: 1.0,
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, UnitError::Validation(_)));
+}
+
+#[test]
+fn test_delete_conversion_rule() {
+    let conn = setup_test_db();
+    let pack = get_unit_by_code(&conn, "pack").unwrap().expect("pack");
+    let piece = get_unit_by_code(&conn, "piece").unwrap().expect("piece");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: pack.id.clone(),
+            to_unit_id: piece.id.clone(),
+            multiplier: 6.0,
+        },
+    )
+    .expect("created");
+
+    delete_unit_conversion(&conn, &pack.id, &piece.id).expect("deleted");
+
+    let list = list_unit_conversions(&conn, Some(&pack.id)).expect("list");
+    assert!(list.is_empty());
+}
+
+// =========================================================================
+// 4. CONVERSION EVALUATION ENGINE TESTS
+// =========================================================================
+
+#[test]
+fn test_identity_conversion() {
+    let conn = setup_test_db();
+    let kg = get_unit_by_code(&conn, "kg").unwrap().expect("kg");
+
+    let factor = find_conversion_factor(&conn, &kg, &kg).expect("identity factor");
+    assert_eq!(factor, 1.0);
+
+    let result = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: kg.id.clone(),
+            to_unit_id: kg.id.clone(),
+            quantity: 42.5,
+        },
+    )
+    .expect("converted");
+
+    assert_eq!(result.converted_quantity, 42.5);
+    assert_eq!(result.effective_multiplier, 1.0);
+}
+
+#[test]
+fn test_direct_conversion() {
+    let conn = setup_test_db();
+    let box_u = get_unit_by_code(&conn, "box").unwrap().expect("box");
+    let piece_u = get_unit_by_code(&conn, "piece").unwrap().expect("piece");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: box_u.id.clone(),
+            to_unit_id: piece_u.id.clone(),
+            multiplier: 12.0,
+        },
+    )
+    .expect("conversion created");
+
+    let factor = find_conversion_factor(&conn, &box_u, &piece_u).expect("direct factor");
+    assert_eq!(factor, 12.0);
+
+    let result = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: box_u.id.clone(),
+            to_unit_id: piece_u.id.clone(),
+            quantity: 3.0,
+        },
+    )
+    .expect("converted");
+
+    assert_eq!(result.converted_quantity, 36.0);
+    assert_eq!(result.effective_multiplier, 12.0);
+}
+
+#[test]
+fn test_inverse_conversion() {
+    let conn = setup_test_db();
+    let kg = get_unit_by_code(&conn, "kg").unwrap().expect("kg");
+    let g = get_unit_by_code(&conn, "g").unwrap().expect("g");
+
+    // Explicit direct: 1 kg = 1000 g
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: kg.id.clone(),
+            to_unit_id: g.id.clone(),
+            multiplier: 1000.0,
+        },
+    )
+    .expect("conversion created");
+
+    // Inverse conversion: 2500 g -> kg should be 2.5 kg (multiplier 0.001)
+    let factor = find_conversion_factor(&conn, &g, &kg).expect("inverse factor");
+    assert_eq!(factor, 0.001);
+
+    let result = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: g.id.clone(),
+            to_unit_id: kg.id.clone(),
+            quantity: 2500.0,
+        },
+    )
+    .expect("converted");
+
+    assert_eq!(result.converted_quantity, 2.5);
+}
+
+#[test]
+fn test_transitive_conversion_chain() {
+    let conn = setup_test_db();
+
+    // Pallet -> Box -> Pack -> Piece
+    let pallet = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "pallet".to_string(),
+            name: "Standard Pallet".to_string(),
+            dimension: "count".to_string(),
+            precision: Some(0),
+            is_base: Some(false),
+        },
+    )
+    .expect("pallet");
+
+    let box_u = get_unit_by_code(&conn, "box").unwrap().expect("box");
+    let pack_u = get_unit_by_code(&conn, "pack").unwrap().expect("pack");
+    let piece_u = get_unit_by_code(&conn, "piece").unwrap().expect("piece");
+
+    // 1 Pallet = 10 Boxes
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: pallet.id.clone(),
+            to_unit_id: box_u.id.clone(),
+            multiplier: 10.0,
+        },
+    )
+    .expect("pallet -> box");
+
+    // 1 Box = 5 Packs
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: box_u.id.clone(),
+            to_unit_id: pack_u.id.clone(),
+            multiplier: 5.0,
+        },
+    )
+    .expect("box -> pack");
+
+    // 1 Pack = 6 Pieces
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: pack_u.id.clone(),
+            to_unit_id: piece_u.id.clone(),
+            multiplier: 6.0,
+        },
+    )
+    .expect("pack -> piece");
+
+    // 1 Pallet -> Pieces should be 10 * 5 * 6 = 300 pieces
+    let result = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: pallet.id.clone(),
+            to_unit_id: piece_u.id.clone(),
+            quantity: 2.0,
+        },
+    )
+    .expect("pallet to piece conversion");
+
+    assert_eq!(result.effective_multiplier, 300.0);
+    assert_eq!(result.converted_quantity, 600.0);
+
+    // Inverse Transitive: 300 Pieces -> Pallet should be 1 Pallet
+    let inv_result = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: piece_u.id.clone(),
+            to_unit_id: pallet.id.clone(),
+            quantity: 600.0,
+        },
+    )
+    .expect("piece to pallet conversion");
+
+    assert_eq!(inv_result.converted_quantity, 2.0);
+}
+
+#[test]
+fn test_conversion_cycle_handling() {
+    let conn = setup_test_db();
+
+    // Create a cycle: U1 -> U2 -> U3 -> U1
+    let u1 = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "cycle_u1".to_string(),
+            name: "Cycle 1".to_string(),
+            dimension: "custom".to_string(),
+            precision: Some(2),
+            is_base: Some(false),
+        },
+    )
+    .expect("u1");
+
+    let u2 = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "cycle_u2".to_string(),
+            name: "Cycle 2".to_string(),
+            dimension: "custom".to_string(),
+            precision: Some(2),
+            is_base: Some(false),
+        },
+    )
+    .expect("u2");
+
+    let u3 = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "cycle_u3".to_string(),
+            name: "Cycle 3".to_string(),
+            dimension: "custom".to_string(),
+            precision: Some(2),
+            is_base: Some(false),
+        },
+    )
+    .expect("u3");
+
+    let target_unreachable = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "isolated_u4".to_string(),
+            name: "Isolated 4".to_string(),
+            dimension: "custom".to_string(),
+            precision: Some(2),
+            is_base: Some(false),
+        },
+    )
+    .expect("u4");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: u1.id.clone(),
+            to_unit_id: u2.id.clone(),
+            multiplier: 2.0,
+        },
+    )
+    .expect("u1->u2");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: u2.id.clone(),
+            to_unit_id: u3.id.clone(),
+            multiplier: 3.0,
+        },
+    )
+    .expect("u2->u3");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: u3.id.clone(),
+            to_unit_id: u1.id.clone(),
+            multiplier: 0.1666667,
+        },
+    )
+    .expect("u3->u1");
+
+    // Traversal terminates deterministically without infinite loop when target is unreachable
+    let err = find_conversion_factor(&conn, &u1, &target_unreachable).unwrap_err();
+    assert!(matches!(err, UnitError::ConversionPathNotFound { .. }));
+}
+
+#[test]
+fn test_cross_dimension_mismatch_rejected() {
+    let conn = setup_test_db();
+    let kg = get_unit_by_code(&conn, "kg").unwrap().expect("kg");
+    let liter = get_unit_by_code(&conn, "L").unwrap().expect("L");
+
+    let err = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: kg.id.clone(),
+            to_unit_id: liter.id.clone(),
+            quantity: 5.0,
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, UnitError::IncompatibleDimensions { .. }));
+}
+
+#[test]
+fn test_cross_dimension_with_explicit_bridge_rule() {
+    let conn = setup_test_db();
+    let kg = get_unit_by_code(&conn, "kg").unwrap().expect("kg");
+    let liter = get_unit_by_code(&conn, "L").unwrap().expect("L");
+
+    // Explicit density bridge: 1 L of Olive Oil = 0.92 kg (multiplier from L to kg is 0.92)
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: liter.id.clone(),
+            to_unit_id: kg.id.clone(),
+            multiplier: 0.92,
+        },
+    )
+    .expect("bridge created");
+
+    let result = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: liter.id.clone(),
+            to_unit_id: kg.id.clone(),
+            quantity: 10.0,
+        },
+    )
+    .expect("converted");
+
+    assert_eq!(result.converted_quantity, 9.2);
+    assert_eq!(result.effective_multiplier, 0.92);
+}
+
+// =========================================================================
+// 5. NUMERIC SAFETY & PRECISION TESTS
+// =========================================================================
+
+#[test]
+fn test_precision_rounding_to_target_unit() {
+    let conn = setup_test_db();
+
+    // Piece has precision 0
+    let piece = get_unit_by_code(&conn, "piece").unwrap().expect("piece");
+    let box_u = get_unit_by_code(&conn, "box").unwrap().expect("box");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: box_u.id.clone(),
+            to_unit_id: piece.id.clone(),
+            multiplier: 7.0,
+        },
+    )
+    .expect("conv");
+
+    // 1 piece -> box (multiplier 1/7 = 0.142857...)
+    // box has precision 0
+    let res = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: piece.id.clone(),
+            to_unit_id: box_u.id.clone(),
+            quantity: 1.0,
+        },
+    )
+    .expect("converted");
+
+    assert_eq!(res.converted_quantity, 0.0); // 0.1428 rounded to 0 decimals is 0.0
+
+    // kg has precision 3
+    let kg = get_unit_by_code(&conn, "kg").unwrap().expect("kg");
+    let g = get_unit_by_code(&conn, "g").unwrap().expect("g");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: kg.id.clone(),
+            to_unit_id: g.id.clone(),
+            multiplier: 1000.0,
+        },
+    )
+    .expect("kg->g");
+
+    // 1234.5678 grams to kg
+    let res_kg = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: g.id.clone(),
+            to_unit_id: kg.id.clone(),
+            quantity: 1234.5678,
+        },
+    )
+    .expect("g to kg");
+
+    assert_eq!(res_kg.converted_quantity, 1.235); // rounded to 3 decimal places
+}
+
+#[test]
+fn test_zero_quantity_conversion() {
+    let conn = setup_test_db();
+    let kg = get_unit_by_code(&conn, "kg").unwrap().expect("kg");
+    let g = get_unit_by_code(&conn, "g").unwrap().expect("g");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: kg.id.clone(),
+            to_unit_id: g.id.clone(),
+            multiplier: 1000.0,
+        },
+    )
+    .expect("conv");
+
+    let res = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: kg.id.clone(),
+            to_unit_id: g.id.clone(),
+            quantity: 0.0,
+        },
+    )
+    .expect("zero quantity");
+
+    assert_eq!(res.converted_quantity, 0.0);
+}
+
+// =========================================================================
+// 6. AUTHORIZATION & TAURI COMMAND TESTS
+// =========================================================================
+
+#[test]
+fn test_unit_authorization_read_and_mutation() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+
+    let user_manager = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Unit Manager",
+        Some("unit_mgr"),
+        None,
+        None,
+        "manager",
+    )
+    .expect("manager");
+    let session_mgr = create_local_session(&conn, &user_manager.id, &branch_id, "pin", None)
+        .expect("mgr session");
+
+    let state = tauri::State::from(DbState(conn.into()));
+
+    // Manager can mutate units
+    let created = cmd_create_unit(
+        state.clone(),
+        session_mgr.id.clone(),
+        CreateUnitInput {
+            code: "meter_sq".to_string(),
+            name: "Square Meters".to_string(),
+            dimension: "area".to_string(),
+            precision: Some(2),
+            is_base: Some(false),
+        },
+    )
+    .expect("manager created unit");
+    assert_eq!(created.code, "meter_sq");
+
+    // Manager can read units
+    let fetched = cmd_get_unit(state.clone(), session_mgr.id.clone(), created.id.clone())
+        .expect("read unit")
+        .expect("found");
+    assert_eq!(fetched.code, "meter_sq");
+
+    // Read by code
+    let fetched_code = cmd_get_unit_by_code(
+        state.clone(),
+        session_mgr.id.clone(),
+        "METER_SQ".to_string(),
+    )
+    .expect("read by code")
+    .expect("found");
+    assert_eq!(fetched_code.id, created.id);
+
+    // List units
+    let all = cmd_list_units(state.clone(), session_mgr.id.clone(), None).expect("list units");
+    assert!(!all.is_empty());
+
+    // Update unit
+    let updated = cmd_update_unit(
+        state.clone(),
+        session_mgr.id.clone(),
+        UpdateUnitInput {
+            id: created.id.clone(),
+            code: "sq_meter".to_string(),
+            name: "Square Meter (Updated)".to_string(),
+            dimension: "area".to_string(),
+            precision: 3,
+            is_base: false,
+        },
+    )
+    .expect("updated unit");
+    assert_eq!(updated.code, "sq_meter");
+
+    // Create and delete unit conversion
+    let m2 = cmd_get_unit_by_code(state.clone(), session_mgr.id.clone(), "m2".to_string())
+        .expect("get m2")
+        .expect("found m2");
+
+    let conv = cmd_create_unit_conversion(
+        state.clone(),
+        session_mgr.id.clone(),
+        CreateUnitConversionInput {
+            from_unit_id: created.id.clone(),
+            to_unit_id: m2.id.clone(),
+            multiplier: 1.0,
+        },
+    )
+    .expect("created conversion");
+    assert_eq!(conv.multiplier, 1.0);
+
+    let convs = cmd_list_unit_conversions(
+        state.clone(),
+        session_mgr.id.clone(),
+        Some(created.id.clone()),
+    )
+    .expect("list convs");
+    assert_eq!(convs.len(), 1);
+
+    let converted = cmd_convert_quantity(
+        state.clone(),
+        session_mgr.id.clone(),
+        ConvertQuantityInput {
+            from_unit_id: created.id.clone(),
+            to_unit_id: m2.id.clone(),
+            quantity: 50.0,
+        },
+    )
+    .expect("converted qty");
+    assert_eq!(converted.converted_quantity, 50.0);
+
+    cmd_delete_unit_conversion(
+        state.clone(),
+        session_mgr.id.clone(),
+        created.id.clone(),
+        m2.id.clone(),
+    )
+    .expect("deleted conversion");
+
+    // Delete unit
+    cmd_delete_unit(state.clone(), session_mgr.id.clone(), created.id.clone())
+        .expect("deleted unit");
+}
+
+#[test]
+fn test_unit_unauthorized_mutation_rejected() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+
+    let user_cashier = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Unit Cashier",
+        Some("unit_cashier"),
+        None,
+        None,
+        "cashier",
+    )
+    .expect("cashier");
+    let session_cashier = create_local_session(&conn, &user_cashier.id, &branch_id, "pin", None)
+        .expect("cashier session");
+
+    let state = tauri::State::from(DbState(conn.into()));
+
+    // Cashier cannot mutate units (lacks ProductsManage)
+    let err = cmd_create_unit(
+        state.clone(),
+        session_cashier.id.clone(),
+        CreateUnitInput {
+            code: "cashier_unit".to_string(),
+            name: "Unauthorized Unit".to_string(),
+            dimension: "count".to_string(),
+            precision: Some(0),
+            is_base: Some(false),
+        },
+    )
+    .unwrap_err();
+
+    assert!(
+        err.contains("permission")
+            || err.contains("denied")
+            || err.contains("unauthorized")
+            || err.contains("missing permission")
+    );
+
+    // Unauthenticated request fails
+    let err_unauth = cmd_create_unit(
+        state.clone(),
+        "invalid_session_token_12345".to_string(),
+        CreateUnitInput {
+            code: "unauth_unit".to_string(),
+            name: "Unauth Unit".to_string(),
+            dimension: "count".to_string(),
+            precision: Some(0),
+            is_base: Some(false),
+        },
+    )
+    .unwrap_err();
+
+    assert!(!err_unauth.is_empty());
+}
