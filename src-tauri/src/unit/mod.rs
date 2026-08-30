@@ -447,8 +447,8 @@ pub fn update_unit(conn: &Connection, input: UpdateUnitInput) -> Result<Unit, Un
     conn.execute("BEGIN IMMEDIATE;", [])?;
 
     let res: Result<Unit, UnitError> = (|| {
-        if input.is_base && !existing.is_base {
-            // Demote other units in the same dimension
+        if input.is_base {
+            // Demote other units in the target dimension
             conn.execute(
                 "UPDATE units SET is_base = 0 WHERE dimension = ?1 AND id != ?2",
                 params![dimension.as_str(), unit_id],
@@ -553,24 +553,21 @@ pub fn create_unit_conversion(
          ON CONFLICT(from_unit_id, to_unit_id) DO UPDATE SET
              multiplier = excluded.multiplier,
              created_at = datetime('now')",
-        params![from_unit.id, to_unit_unit_id_param(&to_unit), multiplier],
+        params![from_unit.id, to_unit.id, multiplier],
+    )?;
+
+    let created_at: String = conn.query_row(
+        "SELECT created_at FROM unit_conversions WHERE from_unit_id = ?1 AND to_unit_id = ?2",
+        params![from_unit.id, to_unit.id],
+        |row| row.get(0),
     )?;
 
     Ok(UnitConversion {
         from_unit_id: from_unit.id,
         to_unit_id: to_unit.id,
         multiplier,
-        created_at: chrono_now_iso(),
+        created_at,
     })
-}
-
-fn to_unit_unit_id_param(u: &Unit) -> &str {
-    &u.id
-}
-
-fn chrono_now_iso() -> String {
-    // SQLite datetime('now') equivalent timestamp placeholder
-    "now".to_string()
 }
 
 /// Deletes a unit conversion rule.
@@ -699,14 +696,24 @@ pub fn find_conversion_factor(
         Ok((f, t, m))
     })?;
 
-    let mut adj: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+    // Collect all explicit conversion rules first
+    let mut explicit_edges: HashMap<(String, String), f64> = HashMap::new();
     for row in rows {
         let (f, t, m) = row?;
         if m > 0.0 && m.is_finite() {
-            // Direct edge
-            adj.entry(f.clone()).or_default().push((t.clone(), m));
-            // Inverse edge (if reverse not already explicitly present, add inverse)
-            adj.entry(t).or_default().push((f, 1.0 / m));
+            explicit_edges.insert((f, t), m);
+        }
+    }
+
+    let mut adj: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+    for ((f, t), m) in &explicit_edges {
+        // Direct edge
+        adj.entry(f.clone()).or_default().push((t.clone(), *m));
+        // Add inferred inverse edge ONLY if no explicit reverse rule exists
+        if !explicit_edges.contains_key(&(t.clone(), f.clone())) {
+            adj.entry(t.clone())
+                .or_default()
+                .push((f.clone(), 1.0 / *m));
         }
     }
 

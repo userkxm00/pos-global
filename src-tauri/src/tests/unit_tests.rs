@@ -254,6 +254,70 @@ fn test_is_base_demotes_other_units_in_dimension() {
 }
 
 #[test]
+fn test_is_base_demotes_when_dimension_changes() {
+    let conn = setup_test_db();
+
+    // Create base unit in volume
+    let v_base = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "vol_base".to_string(),
+            name: "Volume Base".to_string(),
+            dimension: "volume".to_string(),
+            precision: Some(3),
+            is_base: Some(true),
+        },
+    )
+    .expect("vol_base");
+
+    // Create base unit in custom
+    let c_base = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "custom_base".to_string(),
+            name: "Custom Base".to_string(),
+            dimension: "custom".to_string(),
+            precision: Some(2),
+            is_base: Some(true),
+        },
+    )
+    .expect("custom_base");
+
+    // Move vol_base to custom dimension with is_base = true
+    let updated = update_unit(
+        &conn,
+        UpdateUnitInput {
+            id: v_base.id.clone(),
+            code: "vol_base".to_string(),
+            name: "Volume Base Moved".to_string(),
+            dimension: "custom".to_string(),
+            precision: 3,
+            is_base: true,
+        },
+    )
+    .expect("moved");
+    assert!(updated.is_base);
+    assert_eq!(updated.dimension, UnitDimension::Custom);
+
+    // Verify c_base was demoted in custom dimension
+    let c_base_reloaded = get_unit(&conn, &c_base.id).unwrap().expect("c_base");
+    assert!(!c_base_reloaded.is_base);
+
+    // Verify exactly one base unit exists in custom dimension
+    let custom_units = list_units(
+        &conn,
+        UnitFilter {
+            dimension: Some("custom".to_string()),
+            is_base: Some(true),
+            query: None,
+        },
+    )
+    .expect("custom base units");
+    assert_eq!(custom_units.len(), 1);
+    assert_eq!(custom_units[0].id, v_base.id);
+}
+
+#[test]
 fn test_delete_unit_and_associated_conversions() {
     let conn = setup_test_db();
 
@@ -315,6 +379,8 @@ fn test_create_and_list_conversion_rules() {
     assert_eq!(conv.from_unit_id, box_unit.id);
     assert_eq!(conv.to_unit_id, piece_unit.id);
     assert_eq!(conv.multiplier, 12.0);
+    assert!(!conv.created_at.is_empty());
+    assert_ne!(conv.created_at, "now");
 
     let list = list_unit_conversions(&conn, None).expect("list");
     assert!(!list.is_empty());
@@ -678,6 +744,85 @@ fn test_cross_dimension_with_explicit_bridge_rule() {
     assert_eq!(result.effective_multiplier, 0.92);
 }
 
+#[test]
+fn test_explicit_reverse_rule_takes_precedence_over_inferred_inverse() {
+    let conn = setup_test_db();
+
+    let u1 = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "asym_u1".to_string(),
+            name: "Asymmetric 1".to_string(),
+            dimension: "custom".to_string(),
+            precision: Some(4),
+            is_base: Some(false),
+        },
+    )
+    .expect("u1");
+
+    let u2 = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "asym_u2".to_string(),
+            name: "Asymmetric 2".to_string(),
+            dimension: "custom".to_string(),
+            precision: Some(4),
+            is_base: Some(false),
+        },
+    )
+    .expect("u2");
+
+    // Explicit forward: 1 U1 = 2.0 U2
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: u1.id.clone(),
+            to_unit_id: u2.id.clone(),
+            multiplier: 2.0,
+        },
+    )
+    .expect("u1 -> u2");
+
+    // Explicit reverse with non-symmetric multiplier: 1 U2 = 0.6 U1 (not 0.5)
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: u2.id.clone(),
+            to_unit_id: u1.id.clone(),
+            multiplier: 0.6,
+        },
+    )
+    .expect("u2 -> u1");
+
+    let fwd_factor = find_conversion_factor(&conn, &u1, &u2).expect("fwd factor");
+    assert_eq!(fwd_factor, 2.0);
+
+    let rev_factor = find_conversion_factor(&conn, &u2, &u1).expect("rev factor");
+    assert_eq!(rev_factor, 0.6);
+
+    let fwd_conv = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: u1.id.clone(),
+            to_unit_id: u2.id.clone(),
+            quantity: 10.0,
+        },
+    )
+    .expect("fwd conv");
+    assert_eq!(fwd_conv.converted_quantity, 20.0);
+
+    let rev_conv = convert_quantity(
+        &conn,
+        ConvertQuantityInput {
+            from_unit_id: u2.id.clone(),
+            to_unit_id: u1.id.clone(),
+            quantity: 10.0,
+        },
+    )
+    .expect("rev conv");
+    assert_eq!(rev_conv.converted_quantity, 6.0);
+}
+
 // =========================================================================
 // 5. NUMERIC SAFETY & PRECISION TESTS
 // =========================================================================
@@ -793,7 +938,8 @@ fn test_unit_authorization_read_and_mutation() {
     let session_mgr = create_local_session(&conn, &user_manager.id, &branch_id, "pin", None)
         .expect("mgr session");
 
-    let state = tauri::State::from(DbState(conn.into()));
+    let db_state = DbState(conn.into());
+    let state = tauri::State::from(&db_state);
 
     // Manager can mutate units
     let created = cmd_create_unit(
@@ -914,7 +1060,8 @@ fn test_unit_unauthorized_mutation_rejected() {
     let session_cashier = create_local_session(&conn, &user_cashier.id, &branch_id, "pin", None)
         .expect("cashier session");
 
-    let state = tauri::State::from(DbState(conn.into()));
+    let db_state = DbState(conn.into());
+    let state = tauri::State::from(&db_state);
 
     // Cashier cannot mutate units (lacks ProductsManage)
     let err = cmd_create_unit(
