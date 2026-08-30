@@ -726,10 +726,12 @@ fn bfs_search_conversion(
             return Some(curr_multiplier);
         }
 
-        if hops < MAX_HOPS {
-            if let Some(neighbors) = adj.get(&curr_id) {
-                expand_bfs_neighbors(neighbors, curr_multiplier, hops, &mut visited, &mut queue);
-            }
+        if hops >= MAX_HOPS {
+            continue;
+        }
+
+        if let Some(neighbors) = adj.get(&curr_id) {
+            expand_bfs_neighbors(neighbors, curr_multiplier, hops, &mut visited, &mut queue);
         }
     }
 
