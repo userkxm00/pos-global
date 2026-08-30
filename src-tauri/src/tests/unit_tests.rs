@@ -153,6 +153,110 @@ fn test_duplicate_unit_code_rejected() {
 }
 
 #[test]
+fn test_case_insensitive_unit_code_database_level_uniqueness() {
+    let conn = setup_test_db();
+
+    // 1. Direct API creation
+    let input1 = CreateUnitInput {
+        code: "oz".to_string(),
+        name: "Ounce".to_string(),
+        dimension: "mass".to_string(),
+        precision: Some(2),
+        is_base: Some(false),
+    };
+    create_unit(&conn, input1).expect("oz created");
+
+    // 2. Reject case variants via create_unit
+    let err_upper = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "OZ".to_string(),
+            name: "Ounce Upper".to_string(),
+            dimension: "mass".to_string(),
+            precision: Some(2),
+            is_base: Some(false),
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err_upper, UnitError::DuplicateCode(_)));
+
+    let err_mixed = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "Oz".to_string(),
+            name: "Ounce Mixed".to_string(),
+            dimension: "mass".to_string(),
+            precision: Some(2),
+            is_base: Some(false),
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err_mixed, UnitError::DuplicateCode(_)));
+
+    // 3. Reject case collision via direct raw SQL INSERT (verifying SQLite unique index invariant)
+    let raw_insert_err = conn.execute(
+        "INSERT INTO units (id, code, name, dimension, precision, is_base, created_at)
+         VALUES ('raw_oz_id', 'OZ', 'Raw Ounce', 'mass', 2, 0, datetime('now'))",
+        [],
+    );
+    assert!(raw_insert_err.is_err());
+
+    // 4. Reject case collision via update_unit
+    let other_unit = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "lb".to_string(),
+            name: "Pound".to_string(),
+            dimension: "mass".to_string(),
+            precision: Some(2),
+            is_base: Some(false),
+        },
+    )
+    .expect("lb created");
+
+    let err_update = update_unit(
+        &conn,
+        UpdateUnitInput {
+            id: other_unit.id,
+            code: "OZ".to_string(),
+            name: "Pound Renamed to OZ".to_string(),
+            dimension: "mass".to_string(),
+            precision: 2,
+            is_base: false,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err_update, UnitError::DuplicateCode(_)));
+}
+
+#[test]
+fn test_corrupt_db_unit_fails_gracefully() {
+    let conn = setup_test_db();
+
+    // Insert unit with corrupt dimension string
+    conn.execute(
+        "INSERT INTO units (id, code, name, dimension, precision, is_base, created_at)
+         VALUES ('corrupt_dim_id', 'corrupt_dim', 'Corrupt Dim', 'invalid_dim_str', 3, 0, datetime('now'))",
+        [],
+    )
+    .unwrap();
+
+    let err = get_unit(&conn, "corrupt_dim_id").unwrap_err();
+    assert!(matches!(err, UnitError::Database(_)));
+
+    // Insert unit with negative precision
+    conn.execute(
+        "INSERT INTO units (id, code, name, dimension, precision, is_base, created_at)
+         VALUES ('corrupt_prec_id', 'corrupt_prec', 'Corrupt Precision', 'count', -5, 0, datetime('now'))",
+        [],
+    )
+    .unwrap();
+
+    let err_prec = get_unit(&conn, "corrupt_prec_id").unwrap_err();
+    assert!(matches!(err_prec, UnitError::Database(_)));
+}
+
+#[test]
 fn test_list_units_with_filters() {
     let conn = setup_test_db();
 
@@ -738,6 +842,92 @@ fn test_cross_dimension_with_explicit_bridge_rule() {
 
     assert_approx(result.converted_quantity, 9.2);
     assert_approx(result.effective_multiplier, 0.92);
+}
+
+#[test]
+fn test_cross_dimension_transitive_multihop_rejected() {
+    let conn = setup_test_db();
+
+    // Setup:
+    // mass_A -> mass_B = 2.0 (same dimension: mass)
+    // mass_B -> volume_C = 3.0 (cross-dimension bridge rule: mass to volume)
+    let mass_a = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "mass_A".to_string(),
+            name: "Mass Unit A".to_string(),
+            dimension: "mass".to_string(),
+            precision: Some(3),
+            is_base: Some(false),
+        },
+    )
+    .expect("mass_a");
+
+    let mass_b = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "mass_B".to_string(),
+            name: "Mass Unit B".to_string(),
+            dimension: "mass".to_string(),
+            precision: Some(3),
+            is_base: Some(false),
+        },
+    )
+    .expect("mass_b");
+
+    let vol_c = create_unit(
+        &conn,
+        CreateUnitInput {
+            code: "vol_C".to_string(),
+            name: "Volume Unit C".to_string(),
+            dimension: "volume".to_string(),
+            precision: Some(3),
+            is_base: Some(false),
+        },
+    )
+    .expect("vol_c");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: mass_a.id.clone(),
+            to_unit_id: mass_b.id.clone(),
+            multiplier: 2.0,
+        },
+    )
+    .expect("mass_a -> mass_b");
+
+    create_unit_conversion(
+        &conn,
+        CreateUnitConversionInput {
+            from_unit_id: mass_b.id.clone(),
+            to_unit_id: vol_c.id.clone(),
+            multiplier: 3.0,
+        },
+    )
+    .expect("mass_b -> vol_c");
+
+    // 1. Direct cross-dimension between mass_B and vol_C is allowed because explicit rule exists
+    let bc_factor = find_conversion_factor(&conn, &mass_b, &vol_c).expect("direct bridge exists");
+    assert_approx(bc_factor, 3.0);
+
+    // 2. Inverse cross-dimension between vol_C and mass_B is allowed
+    let cb_factor = find_conversion_factor(&conn, &vol_c, &mass_b).expect("inverse bridge exists");
+    assert_approx(cb_factor, 1.0 / 3.0);
+
+    // 3. Multi-hop transitive cross-dimension between mass_A and vol_C MUST BE REJECTED
+    let ac_err = find_conversion_factor(&conn, &mass_a, &vol_c).unwrap_err();
+    assert!(
+        matches!(ac_err, UnitError::IncompatibleDimensions { .. }),
+        "Multi-hop cross-dimension conversion must be rejected with IncompatibleDimensions"
+    );
+
+    // 4. Reverse multi-hop transitive cross-dimension between vol_C and mass_A MUST ALSO BE REJECTED
+    let ca_err = find_conversion_factor(&conn, &vol_c, &mass_a).unwrap_err();
+    assert!(
+        matches!(ca_err, UnitError::IncompatibleDimensions { .. }),
+        "Reverse multi-hop cross-dimension conversion must be rejected with IncompatibleDimensions"
+    );
 }
 
 #[test]

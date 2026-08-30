@@ -258,18 +258,60 @@ pub fn validate_multiplier(multiplier: f64) -> Result<f64, UnitError> {
     Ok(multiplier)
 }
 
+fn is_unique_constraint_violation(err: &rusqlite::Error) -> bool {
+    if let rusqlite::Error::SqliteFailure(sqlite_err, _) = err {
+        if sqlite_err.extended_code == 2067
+            || sqlite_err.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+        {
+            return true;
+        }
+    }
+    let msg = err.to_string().to_lowercase();
+    msg.contains("unique") || msg.contains("constraint failed")
+}
+
 fn map_unit_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Unit> {
     let dim_str: String = row.get("dimension")?;
     let is_base_int: i64 = row.get("is_base")?;
     let precision_int: i64 = row.get("precision")?;
-    let dimension = UnitDimension::parse(&dim_str).unwrap_or(UnitDimension::Custom);
+    let dimension = UnitDimension::parse(&dim_str).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            3,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e.to_string(),
+            )),
+        )
+    })?;
+
+    let precision_u32 = u32::try_from(precision_int).map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
+            4,
+            rusqlite::types::Type::Integer,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Precision must be a non-negative integer".to_string(),
+            )),
+        )
+    })?;
+    let precision = validate_unit_precision(precision_u32).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            4,
+            rusqlite::types::Type::Integer,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e.to_string(),
+            )),
+        )
+    })?;
 
     Ok(Unit {
         id: row.get("id")?,
         code: row.get("code")?,
         name: row.get("name")?,
         dimension,
-        precision: precision_int.clamp(0, 6) as u32,
+        precision,
         is_base: is_base_int != 0,
         created_at: row.get("created_at")?,
     })
@@ -315,7 +357,7 @@ pub fn create_unit(conn: &Connection, input: CreateUnitInput) -> Result<Unit, Un
             )?;
         }
 
-        conn.execute(
+        let insert_res = conn.execute(
             "INSERT INTO units (id, code, name, dimension, precision, is_base, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))",
             params![
@@ -326,7 +368,16 @@ pub fn create_unit(conn: &Connection, input: CreateUnitInput) -> Result<Unit, Un
                 precision,
                 if is_base { 1 } else { 0 }
             ],
-        )?;
+        );
+
+        if let Err(e) = insert_res {
+            if is_unique_constraint_violation(&e) {
+                return Err(UnitError::DuplicateCode(format!(
+                    "A unit with code '{clean_code}' already exists"
+                )));
+            }
+            return Err(UnitError::Database(e.to_string()));
+        }
 
         let created = get_unit(conn, &unit_id)?
             .ok_or_else(|| UnitError::Database("Failed to load newly created unit".into()))?;
@@ -455,7 +506,7 @@ pub fn update_unit(conn: &Connection, input: UpdateUnitInput) -> Result<Unit, Un
             )?;
         }
 
-        conn.execute(
+        let update_res = conn.execute(
             "UPDATE units SET code = ?1, name = ?2, dimension = ?3, precision = ?4, is_base = ?5 WHERE id = ?6",
             params![
                 clean_code,
@@ -465,7 +516,16 @@ pub fn update_unit(conn: &Connection, input: UpdateUnitInput) -> Result<Unit, Un
                 if input.is_base { 1 } else { 0 },
                 unit_id
             ],
-        )?;
+        );
+
+        if let Err(e) = update_res {
+            if is_unique_constraint_violation(&e) {
+                return Err(UnitError::DuplicateCode(format!(
+                    "A unit with code '{clean_code}' already exists"
+                )));
+            }
+            return Err(UnitError::Database(e.to_string()));
+        }
 
         let updated = get_unit(conn, unit_id)?
             .ok_or_else(|| UnitError::Database("Failed to load updated unit".into()))?;
@@ -663,10 +723,18 @@ fn lookup_direct_rule(
 
 fn build_conversion_adjacency_graph(
     conn: &Connection,
+    dimension: UnitDimension,
 ) -> Result<HashMap<String, Vec<(String, f64)>>, UnitError> {
-    let mut stmt =
-        conn.prepare("SELECT from_unit_id, to_unit_id, multiplier FROM unit_conversions")?;
-    let rows = stmt.query_map([], |row| {
+    let mut stmt = conn.prepare(
+        "SELECT uc.from_unit_id, uc.to_unit_id, uc.multiplier
+         FROM unit_conversions uc
+         INNER JOIN units u1 ON uc.from_unit_id = u1.id
+         INNER JOIN units u2 ON uc.to_unit_id = u2.id
+         WHERE u1.dimension = ?1 AND u2.dimension = ?1",
+    )?;
+
+    let dim_str = dimension.as_str();
+    let rows = stmt.query_map(params![dim_str], |row| {
         let f: String = row.get(0)?;
         let t: String = row.get(1)?;
         let m: f64 = row.get(2)?;
@@ -765,18 +833,20 @@ pub fn find_conversion_factor(
         return Ok(1.0 / valid_inv);
     }
 
-    // 4. Transitive BFS Graph Search
-    let adj = build_conversion_adjacency_graph(conn)?;
-    if let Some(factor) = bfs_search_conversion(&adj, &from_unit.id, &to_unit.id) {
-        return validate_multiplier(factor);
-    }
-
-    // 5. Dimension compatibility and error reporting
+    // 4. Cross-dimension validation:
+    // If dimensions differ, conversion is strictly forbidden unless an explicit direct bridge rule was found above.
+    // Transitive multi-hop conversion is NOT allowed across different dimensions.
     if from_unit.dimension != to_unit.dimension {
         return Err(UnitError::IncompatibleDimensions {
             from_dimension: from_unit.dimension.to_string(),
             to_dimension: to_unit.dimension.to_string(),
         });
+    }
+
+    // 5. Transitive BFS Graph Search (strictly scoped to the same dimension)
+    let adj = build_conversion_adjacency_graph(conn, from_unit.dimension)?;
+    if let Some(factor) = bfs_search_conversion(&adj, &from_unit.id, &to_unit.id) {
+        return validate_multiplier(factor);
     }
 
     Err(UnitError::ConversionPathNotFound {
