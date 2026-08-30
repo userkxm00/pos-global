@@ -160,7 +160,6 @@ pub enum UnitError {
         from_unit: String,
         to_unit: String,
     },
-    ConversionCycleDetected(String),
     Database(String),
 }
 
@@ -184,9 +183,6 @@ impl std::fmt::Display for UnitError {
                 f,
                 "No conversion path found from unit '{from_unit}' to unit '{to_unit}'"
             ),
-            UnitError::ConversionCycleDetected(msg) => {
-                write!(f, "Conversion cycle detected: {msg}")
-            }
             UnitError::Database(msg) => write!(f, "Database error: {msg}"),
         }
     }
