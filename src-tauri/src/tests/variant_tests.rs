@@ -3,11 +3,15 @@
 use crate::product::{create_product, CreateProductInput};
 use crate::tests::test_helpers::{apply_migrations_up_to, setup_test_db, setup_test_db_up_to};
 use crate::variant::{
-    create_attribute_definition, create_attribute_value, create_variant, get_attribute_definition,
-    get_variant, list_attribute_definitions, list_attribute_values_by_definition,
-    list_variants_by_product, soft_delete_variant, update_variant, validate_attribute_name,
-    validate_attribute_value, validate_price_minor, CreateAttributeDefinitionInput,
-    CreateAttributeValueInput, CreateVariantInput, UpdateVariantInput, VariantError,
+    bulk_update_variant_prices, bulk_update_variant_status, create_attribute_definition,
+    create_attribute_value, create_variant, generate_variant_matrix, get_attribute_definition,
+    get_attribute_value, get_variant, get_variant_by_barcode, get_variant_by_sku,
+    list_attribute_definitions, list_attribute_values_by_definition, list_variants_by_product,
+    preview_variant_matrix, search_variants, soft_delete_variant, update_variant,
+    validate_attribute_name, validate_attribute_value, validate_price_minor,
+    BulkUpdateVariantPricesInput, BulkUpdateVariantStatusInput, CreateAttributeDefinitionInput,
+    CreateAttributeValueInput, CreateVariantInput, GenerateMatrixInput, MatrixDimensionInput,
+    PreviewMatrixInput, UpdateVariantInput, VariantError, MAX_CARTESIAN_COMBINATIONS,
 };
 use rusqlite::params;
 
@@ -805,4 +809,810 @@ fn test_create_variant_concurrent_combination_uniqueness_multi_connection() {
 
     drop(conn_verify);
     let _ = std::fs::remove_file(&db_path);
+}
+
+// ---------------------------------------------------------------------------
+// F2.05 Cartesian Matrix Generation & Preview Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_cartesian_product_1d_generation() {
+    let conn = setup_test_db();
+    let product_id = create_sample_product(&conn, "1D Matrix T-Shirt");
+
+    let size_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Size 1D".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+
+    let s = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "Small".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+
+    let m = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "Medium".into(),
+            sort_order: Some(2),
+        },
+    )
+    .unwrap();
+
+    let l = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "Large".into(),
+            sort_order: Some(3),
+        },
+    )
+    .unwrap();
+
+    let result = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id.clone(),
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: size_def.id,
+                attribute_value_ids: vec![s.id, m.id, l.id],
+            }],
+            default_price_override_minor: Some(4500),
+            default_cost_price_minor: Some(2000),
+            sku_prefix: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.total_combinations, 3);
+    assert_eq!(result.created_count, 3);
+    assert_eq!(result.existing_count, 0);
+    assert_eq!(result.created_variants.len(), 3);
+
+    for var in &result.created_variants {
+        assert_eq!(var.variant.product_id, product_id);
+        assert_eq!(var.variant.price_override_minor, Some(4500));
+        assert_eq!(var.variant.cost_price_minor, Some(2000));
+        assert_eq!(var.attribute_values.len(), 1);
+    }
+}
+
+#[test]
+fn test_cartesian_product_2d_and_3d_generation() {
+    let conn = setup_test_db();
+    let product_id = create_sample_product(&conn, "Multi-D Matrix Shirt");
+
+    let size_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Size Multi".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let s = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "S".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let m = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "M".into(),
+            sort_order: Some(2),
+        },
+    )
+    .unwrap();
+
+    let color_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Color Multi".into(),
+            sort_order: Some(2),
+        },
+    )
+    .unwrap();
+    let red = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: color_def.id.clone(),
+            value: "Red".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let blue = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: color_def.id.clone(),
+            value: "Blue".into(),
+            sort_order: Some(2),
+        },
+    )
+    .unwrap();
+
+    // 2D Matrix Generation (2 sizes x 2 colors = 4 combinations)
+    let res_2d = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id.clone(),
+            dimensions: vec![
+                MatrixDimensionInput {
+                    attribute_definition_id: size_def.id.clone(),
+                    attribute_value_ids: vec![s.id.clone(), m.id.clone()],
+                },
+                MatrixDimensionInput {
+                    attribute_definition_id: color_def.id.clone(),
+                    attribute_value_ids: vec![red.id.clone(), blue.id.clone()],
+                },
+            ],
+            default_price_override_minor: None,
+            default_cost_price_minor: None,
+            sku_prefix: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(res_2d.total_combinations, 4);
+    assert_eq!(res_2d.created_count, 4);
+    assert_eq!(res_2d.existing_count, 0);
+
+    // 3D Matrix on separate product (2 x 2 x 2 = 8 combinations)
+    let product_id_3d = create_sample_product(&conn, "3D Matrix Shirt");
+    let fit_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Fit Multi".into(),
+            sort_order: Some(3),
+        },
+    )
+    .unwrap();
+    let slim = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: fit_def.id.clone(),
+            value: "Slim".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let regular = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: fit_def.id.clone(),
+            value: "Regular".into(),
+            sort_order: Some(2),
+        },
+    )
+    .unwrap();
+
+    let res_3d = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id_3d,
+            dimensions: vec![
+                MatrixDimensionInput {
+                    attribute_definition_id: size_def.id,
+                    attribute_value_ids: vec![s.id, m.id],
+                },
+                MatrixDimensionInput {
+                    attribute_definition_id: color_def.id,
+                    attribute_value_ids: vec![red.id, blue.id],
+                },
+                MatrixDimensionInput {
+                    attribute_definition_id: fit_def.id,
+                    attribute_value_ids: vec![slim.id, regular.id],
+                },
+            ],
+            default_price_override_minor: None,
+            default_cost_price_minor: None,
+            sku_prefix: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(res_3d.total_combinations, 8);
+    assert_eq!(res_3d.created_count, 8);
+}
+
+#[test]
+fn test_preview_matrix_side_effect_freedom_adr0007() {
+    let conn = setup_test_db();
+    let product_id = create_sample_product(&conn, "Preview Side-Effect Test");
+
+    let size_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Preview Size".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let s = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "Small".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let m = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "Medium".into(),
+            sort_order: Some(2),
+        },
+    )
+    .unwrap();
+
+    // Run preview
+    let preview = preview_variant_matrix(
+        &conn,
+        PreviewMatrixInput {
+            product_id: product_id.clone(),
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: size_def.id,
+                attribute_value_ids: vec![s.id, m.id],
+            }],
+        },
+    )
+    .unwrap();
+
+    assert_eq!(preview.total_combinations, 2);
+    assert_eq!(preview.new_combinations_count, 2);
+    assert_eq!(preview.existing_combinations_count, 0);
+
+    // Verify zero database rows were written
+    let variant_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM product_variants WHERE product_id = ?1",
+            params![product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(variant_count, 0, "Preview must not write any variant rows");
+
+    let join_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM variant_attribute_values", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(join_count, 0, "Preview must not write join rows");
+}
+
+#[test]
+fn test_matrix_generation_preserves_existing_variants_and_is_idempotent() {
+    let conn = setup_test_db();
+    let product_id = create_sample_product(&conn, "Idempotent Matrix Test");
+
+    let size_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Idem Size".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let s = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "S".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let m = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "M".into(),
+            sort_order: Some(2),
+        },
+    )
+    .unwrap();
+
+    // 1. Pre-create variant for "S" manually with a custom price
+    let existing_var = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("EXISTING-S".into()),
+            barcode: None,
+            price_override_minor: Some(9999),
+            cost_price_minor: Some(4000),
+            attribute_value_ids: vec![s.id.clone()],
+        },
+    )
+    .unwrap();
+
+    // 2. Run matrix generator for {S, M}
+    let gen_result = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id.clone(),
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: size_def.id.clone(),
+                attribute_value_ids: vec![s.id.clone(), m.id.clone()],
+            }],
+            default_price_override_minor: Some(5000),
+            default_cost_price_minor: Some(2500),
+            sku_prefix: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(gen_result.total_combinations, 2);
+    assert_eq!(gen_result.created_count, 1);
+    assert_eq!(gen_result.existing_count, 1);
+
+    // Verify existing variant identity and custom price are completely preserved
+    assert_eq!(
+        gen_result.existing_variants[0].variant.id,
+        existing_var.variant.id
+    );
+    assert_eq!(
+        gen_result.existing_variants[0].variant.sku.as_deref(),
+        Some("EXISTING-S")
+    );
+    assert_eq!(
+        gen_result.existing_variants[0].variant.price_override_minor,
+        Some(9999)
+    );
+
+    // 3. Run matrix generator second time (idempotency check)
+    let re_gen = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id.clone(),
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: size_def.id,
+                attribute_value_ids: vec![s.id, m.id],
+            }],
+            default_price_override_minor: Some(5000),
+            default_cost_price_minor: Some(2500),
+            sku_prefix: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(re_gen.total_combinations, 2);
+    assert_eq!(
+        re_gen.created_count, 0,
+        "Idempotent re-run must create 0 new variants"
+    );
+    assert_eq!(re_gen.existing_count, 2);
+}
+
+#[test]
+fn test_matrix_sku_allocation_behavior_adr0007() {
+    let conn = setup_test_db();
+    let product_id = create_sample_product(&conn, "SKU Allocation Matrix");
+
+    let size_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "SKU Size".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let s = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "S".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let m = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "M".into(),
+            sort_order: Some(2),
+        },
+    )
+    .unwrap();
+
+    // Generation with sku_prefix allocates sequential SKUs via canonical F2.03 generator
+    let gen_with_sku = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id.clone(),
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: size_def.id.clone(),
+                attribute_value_ids: vec![s.id, m.id],
+            }],
+            default_price_override_minor: None,
+            default_cost_price_minor: None,
+            sku_prefix: Some("TSHIRT".into()),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(gen_with_sku.created_variants.len(), 2);
+    assert_eq!(
+        gen_with_sku.created_variants[0].variant.sku.as_deref(),
+        Some("TSHIRT-000001")
+    );
+    assert_eq!(
+        gen_with_sku.created_variants[1].variant.sku.as_deref(),
+        Some("TSHIRT-000002")
+    );
+
+    // Generation without sku_prefix sets sku = NULL
+    let product_id_no_sku = create_sample_product(&conn, "No SKU Matrix");
+    let l = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "L".into(),
+            sort_order: Some(3),
+        },
+    )
+    .unwrap();
+
+    let gen_without_sku = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id_no_sku,
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: size_def.id,
+                attribute_value_ids: vec![l.id],
+            }],
+            default_price_override_minor: None,
+            default_cost_price_minor: None,
+            sku_prefix: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(gen_without_sku.created_variants[0].variant.sku, None);
+}
+
+#[test]
+fn test_matrix_soft_deleted_combination_handling_adr0007() {
+    let conn = setup_test_db();
+    let product_id = create_sample_product(&conn, "Soft Deleted Matrix Test");
+
+    let size_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Arch Size".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let s = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "S".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+
+    // 1. Create a variant and soft-delete it
+    let var1 = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("OLD-ARCHIVED-S".into()),
+            barcode: None,
+            price_override_minor: Some(3000),
+            cost_price_minor: None,
+            attribute_value_ids: vec![s.id.clone()],
+        },
+    )
+    .unwrap();
+
+    soft_delete_variant(&conn, &var1.variant.id).unwrap();
+
+    let archived = get_variant(&conn, &var1.variant.id).unwrap().unwrap();
+    assert!(!archived.is_active);
+    assert!(archived.deleted_at.is_some());
+
+    // 2. Generate matrix for the same combination {S}
+    let gen_result = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id.clone(),
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: size_def.id,
+                attribute_value_ids: vec![s.id],
+            }],
+            default_price_override_minor: Some(6000),
+            default_cost_price_minor: None,
+            sku_prefix: None,
+        },
+    )
+    .unwrap();
+
+    // ADR-0007 Decision 2: Creates a fresh active variant with new UUID; historical row untouched
+    assert_eq!(gen_result.created_count, 1);
+    let new_var = &gen_result.created_variants[0].variant;
+    assert_ne!(
+        new_var.id, var1.variant.id,
+        "New variant must receive fresh UUIDv4"
+    );
+    assert!(new_var.is_active);
+    assert_eq!(new_var.price_override_minor, Some(6000));
+
+    // Verify historical archived row remains inactive and untouched
+    let re_archived = get_variant(&conn, &var1.variant.id).unwrap().unwrap();
+    assert!(!re_archived.is_active);
+    assert_eq!(re_archived.sku.as_deref(), Some("OLD-ARCHIVED-S"));
+}
+
+#[test]
+fn test_matrix_safety_limit_and_validation_adr0007() {
+    let conn = setup_test_db();
+    let product_id = create_sample_product(&conn, "Safety Limit Test");
+
+    let size_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Safety Size".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+
+    // 1. Empty dimensions rejection
+    let err_empty_dim = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id.clone(),
+            dimensions: vec![],
+            default_price_override_minor: None,
+            default_cost_price_minor: None,
+            sku_prefix: None,
+        },
+    );
+    assert!(matches!(err_empty_dim, Err(VariantError::Validation(_))));
+
+    // 2. Empty values in dimension rejection
+    let err_empty_vals = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id.clone(),
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: size_def.id.clone(),
+                attribute_value_ids: vec![],
+            }],
+            default_price_override_minor: None,
+            default_cost_price_minor: None,
+            sku_prefix: None,
+        },
+    );
+    assert!(matches!(err_empty_vals, Err(VariantError::Validation(_))));
+
+    // 3. Non-variable product rejection
+    let simple_prod = create_product(
+        &conn,
+        CreateProductInput {
+            name: "Simple Product".into(),
+            description: None,
+            category_id: None,
+            sku: None,
+            barcode: None,
+            product_type: Some("simple".into()),
+            base_price_minor: 1000,
+            cost_price_minor: None,
+            unit_type: None,
+            requires_expiry: None,
+            requires_serial: None,
+            warranty_months: None,
+            custom_attributes: None,
+        },
+    )
+    .unwrap();
+
+    let val = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "S".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+
+    let err_simple = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: simple_prod.id,
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: size_def.id,
+                attribute_value_ids: vec![val.id],
+            }],
+            default_price_override_minor: None,
+            default_cost_price_minor: None,
+            sku_prefix: None,
+        },
+    );
+    assert!(matches!(err_simple, Err(VariantError::Validation(_))));
+}
+
+#[test]
+fn test_bulk_update_variant_status_and_prices() {
+    let conn = setup_test_db();
+    let product_id = create_sample_product(&conn, "Bulk Test Shirt");
+
+    let size_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Bulk Size".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let s = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "S".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let m = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id.clone(),
+            value: "M".into(),
+            sort_order: Some(2),
+        },
+    )
+    .unwrap();
+
+    let gen = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id: product_id.clone(),
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: size_def.id,
+                attribute_value_ids: vec![s.id, m.id],
+            }],
+            default_price_override_minor: Some(5000),
+            default_cost_price_minor: Some(2500),
+            sku_prefix: None,
+        },
+    )
+    .unwrap();
+
+    let v1_id = gen.created_variants[0].variant.id.clone();
+    let v2_id = gen.created_variants[1].variant.id.clone();
+
+    // 1. Bulk Price Update
+    let price_res = bulk_update_variant_prices(
+        &conn,
+        BulkUpdateVariantPricesInput {
+            variant_ids: vec![v1_id.clone(), v2_id.clone()],
+            price_override_minor: Some(7500),
+            cost_price_minor: Some(3500),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(price_res.updated_count, 2);
+
+    let v1_updated = get_variant(&conn, &v1_id).unwrap().unwrap();
+    let v2_updated = get_variant(&conn, &v2_id).unwrap().unwrap();
+    assert_eq!(v1_updated.price_override_minor, Some(7500));
+    assert_eq!(v1_updated.cost_price_minor, Some(3500));
+    assert_eq!(v2_updated.price_override_minor, Some(7500));
+    assert_eq!(v2_updated.cost_price_minor, Some(3500));
+
+    // 2. Bulk Status Deactivation
+    let status_res = bulk_update_variant_status(
+        &conn,
+        BulkUpdateVariantStatusInput {
+            variant_ids: vec![v1_id.clone(), v2_id.clone()],
+            is_active: false,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(status_res.updated_count, 2);
+
+    let v1_inactive = get_variant(&conn, &v1_id).unwrap().unwrap();
+    let v2_inactive = get_variant(&conn, &v2_id).unwrap().unwrap();
+    assert!(!v1_inactive.is_active);
+    assert!(v1_inactive.deleted_at.is_some());
+    assert!(!v2_inactive.is_active);
+    assert!(v2_inactive.deleted_at.is_some());
+
+    // 3. Bulk Status Reactivation
+    bulk_update_variant_status(
+        &conn,
+        BulkUpdateVariantStatusInput {
+            variant_ids: vec![v1_id.clone()],
+            is_active: true,
+        },
+    )
+    .unwrap();
+
+    let v1_reactivated = get_variant(&conn, &v1_id).unwrap().unwrap();
+    assert!(v1_reactivated.is_active);
+    assert!(v1_reactivated.deleted_at.is_none());
+}
+
+#[test]
+fn test_variant_resolution_by_barcode_sku_and_search() {
+    let conn = setup_test_db();
+    let product_id = create_sample_product(&conn, "Resolution Test Product");
+
+    let size_def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Res Size".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+    let xl = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: size_def.id,
+            value: "XL".into(),
+            sort_order: Some(1),
+        },
+    )
+    .unwrap();
+
+    let var = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("SEARCH-SKU-001".into()),
+            barcode: Some("6281000000012".into()),
+            price_override_minor: Some(8000),
+            cost_price_minor: Some(4000),
+            attribute_value_ids: vec![xl.id],
+        },
+    )
+    .unwrap();
+
+    // By Barcode
+    let by_barcode = get_variant_by_barcode(&conn, "6281000000012")
+        .unwrap()
+        .unwrap();
+    assert_eq!(by_barcode.variant.id, var.variant.id);
+    assert_eq!(by_barcode.attribute_values[0].value, "XL");
+
+    // By SKU
+    let by_sku = get_variant_by_sku(&conn, "search-sku-001")
+        .unwrap()
+        .unwrap();
+    assert_eq!(by_sku.variant.id, var.variant.id);
+
+    // Search query
+    let search_res = search_variants(&conn, Some(&product_id), "SEARCH-SKU").unwrap();
+    assert_eq!(search_res.len(), 1);
+    assert_eq!(search_res[0].variant.id, var.variant.id);
+
+    let search_by_val = search_variants(&conn, None, "XL").unwrap();
+    assert_eq!(search_by_val.len(), 1);
+    assert_eq!(search_by_val[0].variant.id, var.variant.id);
 }
