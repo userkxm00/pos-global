@@ -334,6 +334,8 @@ fn test_verify_and_reconcile_catalog_barcode_mirrors() {
         },
     )
     .expect("barcode added");
+    assert!(bc.is_primary);
+    assert_eq!(bc.barcode, "4006381333931");
 
     // Manually desync legacy products.barcode to simulate an anomaly
     conn.execute(
@@ -764,7 +766,8 @@ fn test_canonical_barcode_lookup_resolves_active_secondary_barcode() {
         None,
         None,
         "cashier",
-    );
+    )
+    .expect("user created");
     let session = create_local_session(&conn, &user.id, &branch_id, "pin", None).expect("session");
 
     let prod_id = make_test_product(&conn, "Multi-Barcode Item", Some("PRIMARY-999"));

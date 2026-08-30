@@ -495,34 +495,6 @@ pub fn get_product(conn: &Connection, id: &str) -> Result<Option<Product>, Produ
     Ok(result)
 }
 
-/// Retrieves a product by exact barcode match across canonical registry and legacy mirror.
-pub fn get_product_by_barcode(
-    conn: &Connection,
-    barcode: &str,
-) -> Result<Option<Product>, ProductError> {
-    let trimmed = barcode.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    let sql = format!(
-        "SELECT {PRODUCT_COLUMNS} FROM products p
-         WHERE p.is_active = 1 AND (
-             EXISTS (
-                 SELECT 1 FROM product_barcodes pb
-                 WHERE pb.product_id = p.id
-                   AND pb.barcode = ?1 COLLATE NOCASE
-                   AND pb.is_active = 1
-             )
-             OR p.barcode = ?1 COLLATE NOCASE
-         )
-         LIMIT 1"
-    );
-    let result = conn
-        .query_row(&sql, [trimmed], map_product_row)
-        .optional()?;
-    Ok(result)
-}
-
 /// Updates an existing product.
 pub fn update_product(
     conn: &Connection,

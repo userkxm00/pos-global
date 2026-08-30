@@ -53,7 +53,7 @@ fn allocate_next_sequence(conn: &Connection, clean_prefix: &str) -> Result<i64, 
     let seq: i64 = conn.query_row(
         "INSERT INTO sku_sequences (prefix, last_sequence, updated_at)
          VALUES (?1, 1, datetime('now'))
-         ON CONFLICT(prefix) DO UPDATE SET 
+         ON CONFLICT(prefix) DO UPDATE SET
              last_sequence = last_sequence + 1,
              updated_at = datetime('now')
          RETURNING last_sequence",

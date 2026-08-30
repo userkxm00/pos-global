@@ -8,11 +8,10 @@ use crate::branch::{create_branch, CreateBranchInput};
 use crate::organization::{create_organization, CreateOrganizationInput};
 use crate::permission::Permission;
 use crate::product::{
-    create_product, delete_product, get_catalog_organization_id, get_product,
-    get_product_by_barcode, list_products, minor_to_real, real_to_minor, update_product,
-    validate_barcode, validate_base_price_minor, validate_cost_price_minor, validate_name,
-    validate_product_type, CreateProductInput, ProductError, ProductFilter, UpdateProductInput,
-    MAX_SAFE_MINOR_UNITS,
+    create_product, delete_product, get_catalog_organization_id, get_product, list_products,
+    minor_to_real, real_to_minor, update_product, validate_barcode, validate_base_price_minor,
+    validate_cost_price_minor, validate_name, validate_product_type, CreateProductInput,
+    ProductError, ProductFilter, UpdateProductInput, MAX_SAFE_MINOR_UNITS,
 };
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
@@ -210,6 +209,7 @@ fn test_product_price_full_persistence_roundtrip_at_bounds() {
             name: "High Value Asset".to_string(),
             description: None,
             category_id: None,
+            sku: None,
             barcode: Some("BC-BOUND-001".to_string()),
             product_type: None,
             base_price_minor: MAX_SAFE_MINOR_UNITS,
@@ -293,13 +293,13 @@ fn test_get_product_by_barcode() {
     let input = make_product_fixture("Green Tea Box", 450, Some("BARCODE-TEA-001"));
     let created = create_product(&conn, input).expect("product created");
 
-    let by_barcode = get_product_by_barcode(&conn, "BARCODE-TEA-001")
+    let (by_barcode, _bc) = crate::barcode::get_product_by_barcode(&conn, "BARCODE-TEA-001")
         .expect("lookup succeeds")
         .expect("found by barcode");
     assert_eq!(by_barcode.id, created.id);
 
-    let nonexistent =
-        get_product_by_barcode(&conn, "NONEXISTENT-BARCODE").expect("lookup succeeds");
+    let nonexistent = crate::barcode::get_product_by_barcode(&conn, "NONEXISTENT-BARCODE")
+        .expect("lookup succeeds");
     assert!(nonexistent.is_none());
 }
 
