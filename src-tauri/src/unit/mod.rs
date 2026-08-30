@@ -251,9 +251,9 @@ pub fn validate_unit_precision(precision: u32) -> Result<u32, UnitError> {
 }
 
 /// Validates conversion multiplier.
-/// Requirements: strictly positive, finite, non-NaN.
+/// Requirements: strictly positive, finite.
 pub fn validate_multiplier(multiplier: f64) -> Result<f64, UnitError> {
-    if !multiplier.is_finite() || multiplier.is_nan() || multiplier <= 0.0 {
+    if !multiplier.is_finite() || multiplier <= 0.0 {
         return Err(UnitError::Validation(format!(
             "Conversion multiplier must be a positive finite number greater than 0, got {multiplier}"
         )));
@@ -740,7 +740,7 @@ pub fn find_conversion_factor(
                 if !visited.contains(next_id) {
                     visited.insert(next_id.clone());
                     let next_mult = curr_multiplier * edge_multiplier;
-                    if next_mult.is_finite() && !next_mult.is_nan() && next_mult > 0.0 {
+                    if next_mult.is_finite() && next_mult > 0.0 {
                         queue.push_back((next_id.clone(), next_mult, hops + 1));
                     }
                 }
@@ -767,7 +767,7 @@ pub fn convert_quantity(
     conn: &Connection,
     input: ConvertQuantityInput,
 ) -> Result<ConversionResult, UnitError> {
-    if !input.quantity.is_finite() || input.quantity.is_nan() {
+    if !input.quantity.is_finite() {
         return Err(UnitError::Validation(format!(
             "Quantity must be a finite number, got {}",
             input.quantity
@@ -785,7 +785,7 @@ pub fn convert_quantity(
     let effective_multiplier = find_conversion_factor(conn, &from_unit, &to_unit)?;
     let raw_converted = input.quantity * effective_multiplier;
 
-    if !raw_converted.is_finite() || raw_converted.is_nan() {
+    if !raw_converted.is_finite() {
         return Err(UnitError::Validation(
             "Calculated converted quantity resulted in overflow or non-finite number".into(),
         ));

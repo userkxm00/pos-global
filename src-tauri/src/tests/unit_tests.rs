@@ -65,11 +65,18 @@ fn test_unit_precision_validation() {
     assert!(validate_unit_precision(100).is_err());
 }
 
+fn assert_approx(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() < 1e-6,
+        "Expected {expected}, got {actual}"
+    );
+}
+
 #[test]
 fn test_multiplier_validation() {
-    assert_eq!(validate_multiplier(1.0).unwrap(), 1.0);
-    assert_eq!(validate_multiplier(1000.0).unwrap(), 1000.0);
-    assert_eq!(validate_multiplier(0.001).unwrap(), 0.001);
+    assert_approx(validate_multiplier(1.0).unwrap(), 1.0);
+    assert_approx(validate_multiplier(1000.0).unwrap(), 1000.0);
+    assert_approx(validate_multiplier(0.001).unwrap(), 0.001);
     assert!(validate_multiplier(0.0).is_err());
     assert!(validate_multiplier(-5.0).is_err());
     assert!(validate_multiplier(f64::NAN).is_err());
@@ -378,7 +385,7 @@ fn test_create_and_list_conversion_rules() {
 
     assert_eq!(conv.from_unit_id, box_unit.id);
     assert_eq!(conv.to_unit_id, piece_unit.id);
-    assert_eq!(conv.multiplier, 12.0);
+    assert_approx(conv.multiplier, 12.0);
     assert!(!conv.created_at.is_empty());
     assert_ne!(conv.created_at, "now");
 
@@ -388,7 +395,7 @@ fn test_create_and_list_conversion_rules() {
         .iter()
         .find(|c| c.from_unit_id == box_unit.id && c.to_unit_id == piece_unit.id);
     assert!(found.is_some());
-    assert_eq!(found.unwrap().multiplier, 12.0);
+    assert_approx(found.unwrap().multiplier, 12.0);
 }
 
 #[test]
@@ -441,7 +448,7 @@ fn test_identity_conversion() {
     let kg = get_unit_by_code(&conn, "kg").unwrap().expect("kg");
 
     let factor = find_conversion_factor(&conn, &kg, &kg).expect("identity factor");
-    assert_eq!(factor, 1.0);
+    assert_approx(factor, 1.0);
 
     let result = convert_quantity(
         &conn,
@@ -453,8 +460,8 @@ fn test_identity_conversion() {
     )
     .expect("converted");
 
-    assert_eq!(result.converted_quantity, 42.5);
-    assert_eq!(result.effective_multiplier, 1.0);
+    assert_approx(result.converted_quantity, 42.5);
+    assert_approx(result.effective_multiplier, 1.0);
 }
 
 #[test]
@@ -474,7 +481,7 @@ fn test_direct_conversion() {
     .expect("conversion created");
 
     let factor = find_conversion_factor(&conn, &box_u, &piece_u).expect("direct factor");
-    assert_eq!(factor, 12.0);
+    assert_approx(factor, 12.0);
 
     let result = convert_quantity(
         &conn,
@@ -486,8 +493,8 @@ fn test_direct_conversion() {
     )
     .expect("converted");
 
-    assert_eq!(result.converted_quantity, 36.0);
-    assert_eq!(result.effective_multiplier, 12.0);
+    assert_approx(result.converted_quantity, 36.0);
+    assert_approx(result.effective_multiplier, 12.0);
 }
 
 #[test]
@@ -509,7 +516,7 @@ fn test_inverse_conversion() {
 
     // Inverse conversion: 2500 g -> kg should be 2.5 kg (multiplier 0.001)
     let factor = find_conversion_factor(&conn, &g, &kg).expect("inverse factor");
-    assert_eq!(factor, 0.001);
+    assert_approx(factor, 0.001);
 
     let result = convert_quantity(
         &conn,
@@ -521,7 +528,7 @@ fn test_inverse_conversion() {
     )
     .expect("converted");
 
-    assert_eq!(result.converted_quantity, 2.5);
+    assert_approx(result.converted_quantity, 2.5);
 }
 
 #[test]
@@ -589,8 +596,8 @@ fn test_transitive_conversion_chain() {
     )
     .expect("pallet to piece conversion");
 
-    assert_eq!(result.effective_multiplier, 300.0);
-    assert_eq!(result.converted_quantity, 600.0);
+    assert_approx(result.effective_multiplier, 300.0);
+    assert_approx(result.converted_quantity, 600.0);
 
     // Inverse Transitive: 300 Pieces -> Pallet should be 1 Pallet
     let inv_result = convert_quantity(
@@ -603,7 +610,7 @@ fn test_transitive_conversion_chain() {
     )
     .expect("piece to pallet conversion");
 
-    assert_eq!(inv_result.converted_quantity, 2.0);
+    assert_approx(inv_result.converted_quantity, 2.0);
 }
 
 #[test]
@@ -740,8 +747,8 @@ fn test_cross_dimension_with_explicit_bridge_rule() {
     )
     .expect("converted");
 
-    assert_eq!(result.converted_quantity, 9.2);
-    assert_eq!(result.effective_multiplier, 0.92);
+    assert_approx(result.converted_quantity, 9.2);
+    assert_approx(result.effective_multiplier, 0.92);
 }
 
 #[test]
@@ -795,10 +802,10 @@ fn test_explicit_reverse_rule_takes_precedence_over_inferred_inverse() {
     .expect("u2 -> u1");
 
     let fwd_factor = find_conversion_factor(&conn, &u1, &u2).expect("fwd factor");
-    assert_eq!(fwd_factor, 2.0);
+    assert_approx(fwd_factor, 2.0);
 
     let rev_factor = find_conversion_factor(&conn, &u2, &u1).expect("rev factor");
-    assert_eq!(rev_factor, 0.6);
+    assert_approx(rev_factor, 0.6);
 
     let fwd_conv = convert_quantity(
         &conn,
@@ -809,7 +816,7 @@ fn test_explicit_reverse_rule_takes_precedence_over_inferred_inverse() {
         },
     )
     .expect("fwd conv");
-    assert_eq!(fwd_conv.converted_quantity, 20.0);
+    assert_approx(fwd_conv.converted_quantity, 20.0);
 
     let rev_conv = convert_quantity(
         &conn,
@@ -820,7 +827,7 @@ fn test_explicit_reverse_rule_takes_precedence_over_inferred_inverse() {
         },
     )
     .expect("rev conv");
-    assert_eq!(rev_conv.converted_quantity, 6.0);
+    assert_approx(rev_conv.converted_quantity, 6.0);
 }
 
 // =========================================================================
@@ -857,7 +864,7 @@ fn test_precision_rounding_to_target_unit() {
     )
     .expect("converted");
 
-    assert_eq!(res.converted_quantity, 0.0); // 0.1428 rounded to 0 decimals is 0.0
+    assert_approx(res.converted_quantity, 0.0); // 0.1428 rounded to 0 decimals is 0.0
 
     // kg has precision 3
     let kg = get_unit_by_code(&conn, "kg").unwrap().expect("kg");
@@ -884,7 +891,7 @@ fn test_precision_rounding_to_target_unit() {
     )
     .expect("g to kg");
 
-    assert_eq!(res_kg.converted_quantity, 1.235); // rounded to 3 decimal places
+    assert_approx(res_kg.converted_quantity, 1.235); // rounded to 3 decimal places
 }
 
 #[test]
@@ -913,7 +920,7 @@ fn test_zero_quantity_conversion() {
     )
     .expect("zero quantity");
 
-    assert_eq!(res.converted_quantity, 0.0);
+    assert_approx(res.converted_quantity, 0.0);
 }
 
 // =========================================================================
@@ -1007,7 +1014,7 @@ fn test_unit_authorization_read_and_mutation() {
         },
     )
     .expect("created conversion");
-    assert_eq!(conv.multiplier, 1.0);
+    assert_approx(conv.multiplier, 1.0);
 
     let convs = cmd_list_unit_conversions(
         state.clone(),
@@ -1027,7 +1034,7 @@ fn test_unit_authorization_read_and_mutation() {
         },
     )
     .expect("converted qty");
-    assert_eq!(converted.converted_quantity, 50.0);
+    assert_approx(converted.converted_quantity, 50.0);
 
     cmd_delete_unit_conversion(
         state.clone(),
