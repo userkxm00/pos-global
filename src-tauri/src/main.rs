@@ -18,6 +18,7 @@ mod product;
 mod register;
 #[cfg(test)]
 mod tests;
+mod unit;
 mod user;
 
 use tauri::Manager;
@@ -97,6 +98,16 @@ fn main() {
             commands::register::get_register,
             commands::register::update_register,
             commands::register::list_registers,
+            commands::unit::create_unit,
+            commands::unit::get_unit,
+            commands::unit::get_unit_by_code,
+            commands::unit::list_units,
+            commands::unit::update_unit,
+            commands::unit::delete_unit,
+            commands::unit::create_unit_conversion,
+            commands::unit::delete_unit_conversion,
+            commands::unit::list_unit_conversions,
+            commands::unit::convert_quantity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

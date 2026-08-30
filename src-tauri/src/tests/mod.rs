@@ -37,5 +37,7 @@ mod sku_tests;
 mod tenant_isolation_tests;
 #[path = "test_helpers.rs"]
 mod test_helpers;
+#[path = "unit_tests.rs"]
+mod unit_tests;
 #[path = "user_tests.rs"]
 mod user_tests;
