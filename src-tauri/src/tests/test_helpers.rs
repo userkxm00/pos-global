@@ -13,9 +13,8 @@ pub fn setup_test_db() -> Connection {
     conn
 }
 
-/// Sets up an isolated in-memory test database migrated up to a specific migration name (e.g. "011_categories_brands_manufacturers").
-pub fn setup_test_db_up_to(target_migration: &str) -> Connection {
-    let conn = Connection::open_in_memory().expect("in-memory test database");
+/// Applies unapplied migrations in `crate::db::MIGRATIONS` up to and including `target_migration`.
+pub fn apply_migrations_up_to(conn: &Connection, target_migration: &str) {
     conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (
@@ -50,6 +49,12 @@ pub fn setup_test_db_up_to(target_migration: &str) -> Connection {
         reached_target,
         "Target migration '{target_migration}' was not found in crate::db::MIGRATIONS"
     );
+}
+
+/// Sets up an isolated in-memory test database migrated up to a specific migration name (e.g. "011_categories_brands_manufacturers").
+pub fn setup_test_db_up_to(target_migration: &str) -> Connection {
+    let conn = Connection::open_in_memory().expect("in-memory test database");
+    apply_migrations_up_to(&conn, target_migration);
     conn
 }
 

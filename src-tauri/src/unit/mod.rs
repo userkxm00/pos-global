@@ -259,11 +259,11 @@ pub fn validate_multiplier(multiplier: f64) -> Result<f64, UnitError> {
 }
 
 fn is_unique_constraint_violation(err: &rusqlite::Error) -> bool {
-    if let rusqlite::Error::SqliteFailure(sqlite_err, _) = err {
-        if sqlite_err.extended_code == 2067
-            || sqlite_err.code == rusqlite::ffi::ErrorCode::ConstraintViolation
-        {
-            return true;
+    if let rusqlite::Error::SqliteFailure(ref f, Some(ref msg)) = err {
+        if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation {
+            return msg.contains("units.code")
+                || msg.contains("idx_units_code")
+                || (msg.contains("UNIQUE constraint failed") && msg.contains("code"));
         }
     }
     let msg = err.to_string().to_lowercase();

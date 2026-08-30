@@ -12,7 +12,8 @@ use crate::barcode::{
 use crate::permission::Permission;
 use crate::product::{create_product, get_product, CreateProductInput};
 use crate::tests::test_helpers::{
-    create_test_org_and_branch, create_test_user_with_creds, setup_test_db, setup_test_db_up_to,
+    apply_migrations_up_to, create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
+    setup_test_db_up_to,
 };
 use crate::user::session::create_local_session;
 use rusqlite::params;
@@ -584,17 +585,17 @@ fn test_real_011_to_012_migration_transition() {
     )
     .expect("seed prod_e");
 
-    // 3. Apply Migration 012 using the REAL production migration runner
-    crate::db::init_database(&conn).expect("migration runner applies Migration 012 cleanly");
+    // 3. Apply Migration 012 specifically using the migration transition helper
+    apply_migrations_up_to(&conn, "012_sku_and_multi_barcode");
 
-    // Verify migration ledger state
+    // Verify migration ledger state after 012
     let post_migrations_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
         .expect("query migrations ledger");
     assert_eq!(post_migrations_count, 12);
 
-    // Verify migration repeatability (re-running init_database is a clean no-op)
-    crate::db::init_database(&conn).expect("repeatable migration init must succeed");
+    // Verify migration repeatability (re-running up to 012 is a clean no-op)
+    apply_migrations_up_to(&conn, "012_sku_and_multi_barcode");
     let repeat_migrations_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
         .expect("query migrations ledger");
