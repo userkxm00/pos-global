@@ -20,6 +20,7 @@ mod register;
 mod tests;
 mod unit;
 mod user;
+mod variant;
 
 use tauri::Manager;
 

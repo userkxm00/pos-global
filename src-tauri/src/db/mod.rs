@@ -54,6 +54,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "013_units_conversions_hardening",
         include_str!("migrations/013_units_conversions_hardening.sql"),
     ),
+    (
+        "014_product_variants_hardening",
+        include_str!("migrations/014_product_variants_hardening.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {
@@ -184,7 +188,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 13);
+        assert_eq!(applied, 14);
 
         for table in [
             "business_settings",
@@ -227,7 +231,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 13);
+        assert_eq!(applied, 14);
 
         let capability_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM capabilities", [], |row| row.get(0))
