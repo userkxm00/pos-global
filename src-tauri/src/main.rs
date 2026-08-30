@@ -20,6 +20,7 @@ mod register;
 mod tests;
 mod unit;
 mod user;
+mod variant;
 
 use tauri::Manager;
 
@@ -108,6 +109,23 @@ fn main() {
             commands::unit::delete_unit_conversion,
             commands::unit::list_unit_conversions,
             commands::unit::convert_quantity,
+            commands::variant::create_attribute_definition,
+            commands::variant::get_attribute_definition,
+            commands::variant::list_attribute_definitions,
+            commands::variant::create_attribute_value,
+            commands::variant::list_attribute_values_by_definition,
+            commands::variant::create_variant,
+            commands::variant::get_variant,
+            commands::variant::update_variant,
+            commands::variant::delete_variant,
+            commands::variant::list_variants_by_product,
+            commands::variant::preview_variant_matrix,
+            commands::variant::generate_variant_matrix,
+            commands::variant::bulk_update_variant_status,
+            commands::variant::bulk_update_variant_prices,
+            commands::variant::get_variant_by_barcode,
+            commands::variant::get_variant_by_sku,
+            commands::variant::search_variants,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
