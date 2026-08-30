@@ -184,7 +184,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 12);
+        assert_eq!(applied, 13);
 
         for table in [
             "business_settings",
@@ -227,7 +227,7 @@ mod tests {
         let applied: i64 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .expect("migration ledger should exist");
-        assert_eq!(applied, 12);
+        assert_eq!(applied, 13);
 
         let capability_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM capabilities", [], |row| row.get(0))
