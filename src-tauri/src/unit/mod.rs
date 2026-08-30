@@ -401,7 +401,7 @@ pub fn list_units(conn: &Connection, filter: UnitFilter) -> Result<Vec<Unit>, Un
 
     sql.push_str(" ORDER BY dimension ASC, is_base DESC, code ASC");
 
-    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_slice.as_slice(), map_unit_row)?;
 
@@ -615,7 +615,7 @@ pub fn list_unit_conversions(
 
     sql.push_str(" ORDER BY u1.code ASC, u2.code ASC");
 
-    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_slice.as_slice(), |row| {
         Ok(UnitConversionView {
@@ -642,47 +642,24 @@ pub fn list_unit_conversions(
 // CONVERSION EVALUATION ENGINE
 // =========================================================================
 
-/// Evaluates conversion factor between two units using identity, direct, inverse, and transitive resolution.
-/// Max traversal depth: 5 hops. Cycle-protected with visited-node tracking.
-pub fn find_conversion_factor(
+fn lookup_direct_rule(
     conn: &Connection,
-    from_unit: &Unit,
-    to_unit: &Unit,
-) -> Result<f64, UnitError> {
-    // 1. Identity: Same unit always returns 1.0
-    if from_unit.id == to_unit.id || from_unit.code.eq_ignore_ascii_case(&to_unit.code) {
-        return Ok(1.0);
-    }
-
-    // 2. Direct lookup: A -> B
+    from_unit_id: &str,
+    to_unit_id: &str,
+) -> Result<Option<f64>, UnitError> {
     let direct: Option<f64> = conn
         .query_row(
             "SELECT multiplier FROM unit_conversions WHERE from_unit_id = ?1 AND to_unit_id = ?2",
-            params![from_unit.id, to_unit.id],
+            params![from_unit_id, to_unit_id],
             |row| row.get(0),
         )
         .optional()?;
+    Ok(direct)
+}
 
-    if let Some(m) = direct {
-        return validate_multiplier(m);
-    }
-
-    // 3. Inverse lookup: B -> A (if A -> B not defined, inverse is 1 / M_inv)
-    let inverse: Option<f64> = conn
-        .query_row(
-            "SELECT multiplier FROM unit_conversions WHERE from_unit_id = ?1 AND to_unit_id = ?2",
-            params![to_unit.id, from_unit.id],
-            |row| row.get(0),
-        )
-        .optional()?;
-
-    if let Some(m_inv) = inverse {
-        let valid_inv = validate_multiplier(m_inv)?;
-        return Ok(1.0 / valid_inv);
-    }
-
-    // 4. Transitive BFS Graph Search
-    // Build adjacency graph of all conversion rules
+fn build_conversion_adjacency_graph(
+    conn: &Connection,
+) -> Result<HashMap<String, Vec<(String, f64)>>, UnitError> {
     let mut stmt =
         conn.prepare("SELECT from_unit_id, to_unit_id, multiplier FROM unit_conversions")?;
     let rows = stmt.query_map([], |row| {
@@ -692,7 +669,6 @@ pub fn find_conversion_factor(
         Ok((f, t, m))
     })?;
 
-    // Collect all explicit conversion rules first
     let mut explicit_edges: HashMap<(String, String), f64> = HashMap::new();
     for row in rows {
         let (f, t, m) = row?;
@@ -713,18 +689,24 @@ pub fn find_conversion_factor(
         }
     }
 
-    // BFS queue: (current_unit_id, accumulated_multiplier, hop_count)
+    Ok(adj)
+}
+
+fn bfs_search_conversion(
+    adj: &HashMap<String, Vec<(String, f64)>>,
+    start_id: &str,
+    target_id: &str,
+) -> Option<f64> {
+    const MAX_HOPS: usize = 5;
     let mut queue = VecDeque::new();
     let mut visited = HashSet::new();
 
-    queue.push_back((from_unit.id.clone(), 1.0, 0));
-    visited.insert(from_unit.id.clone());
-
-    const MAX_HOPS: usize = 5;
+    queue.push_back((start_id.to_string(), 1.0, 0));
+    visited.insert(start_id.to_string());
 
     while let Some((curr_id, curr_multiplier, hops)) = queue.pop_front() {
-        if curr_id == to_unit.id {
-            return validate_multiplier(curr_multiplier);
+        if curr_id == target_id {
+            return Some(curr_multiplier);
         }
 
         if hops >= MAX_HOPS {
@@ -744,7 +726,39 @@ pub fn find_conversion_factor(
         }
     }
 
-    // If dimensions differ and no explicit bridge was found
+    None
+}
+
+/// Evaluates conversion factor between two units using identity, direct, inverse, and transitive resolution.
+/// Max traversal depth: 5 hops. Cycle-protected with visited-node tracking.
+pub fn find_conversion_factor(
+    conn: &Connection,
+    from_unit: &Unit,
+    to_unit: &Unit,
+) -> Result<f64, UnitError> {
+    // 1. Identity: Same unit always returns 1.0
+    if from_unit.id == to_unit.id || from_unit.code.eq_ignore_ascii_case(&to_unit.code) {
+        return Ok(1.0);
+    }
+
+    // 2. Direct lookup: A -> B
+    if let Some(m) = lookup_direct_rule(conn, &from_unit.id, &to_unit.id)? {
+        return validate_multiplier(m);
+    }
+
+    // 3. Inverse lookup: B -> A (if A -> B not defined, inverse is 1 / M_inv)
+    if let Some(m_inv) = lookup_direct_rule(conn, &to_unit.id, &from_unit.id)? {
+        let valid_inv = validate_multiplier(m_inv)?;
+        return Ok(1.0 / valid_inv);
+    }
+
+    // 4. Transitive BFS Graph Search
+    let adj = build_conversion_adjacency_graph(conn)?;
+    if let Some(factor) = bfs_search_conversion(&adj, &from_unit.id, &to_unit.id) {
+        return validate_multiplier(factor);
+    }
+
+    // 5. Dimension compatibility and error reporting
     if from_unit.dimension != to_unit.dimension {
         return Err(UnitError::IncompatibleDimensions {
             from_dimension: from_unit.dimension.to_string(),
