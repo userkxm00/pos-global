@@ -41,13 +41,6 @@ pub struct ProductVariant {
     pub deleted_at: Option<String>,
 }
 
-/// Association between a variant and an attribute value.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct VariantAttributeValue {
-    pub variant_id: String,
-    pub attribute_value_id: String,
-}
-
 /// Variant with its associated attribute values.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VariantWithAttributes {
@@ -124,36 +117,39 @@ impl std::fmt::Display for VariantError {
 
 impl std::error::Error for VariantError {}
 
+fn map_sqlite_constraint_error(msg: &str) -> Option<VariantError> {
+    if msg.contains("attribute_definitions.name") || msg.contains("idx_attribute_definitions_name")
+    {
+        return Some(VariantError::DuplicateName(
+            "An attribute definition with this name already exists".into(),
+        ));
+    }
+    if msg.contains("attribute_values") || msg.contains("idx_attribute_values_def_val") {
+        return Some(VariantError::DuplicateValue(
+            "This attribute value already exists for this definition".into(),
+        ));
+    }
+    if msg.contains("product_variants.sku") || msg.contains("idx_product_variants_sku_active") {
+        return Some(VariantError::DuplicateSku(
+            "SKU is already assigned to another active variant".into(),
+        ));
+    }
+    if msg.contains("product_variants.barcode")
+        || msg.contains("idx_product_variants_barcode_active")
+    {
+        return Some(VariantError::DuplicateBarcode(
+            "Barcode is already assigned to another active variant or product".into(),
+        ));
+    }
+    None
+}
+
 impl From<rusqlite::Error> for VariantError {
     fn from(e: rusqlite::Error) -> Self {
         if let rusqlite::Error::SqliteFailure(ref f, Some(ref msg)) = e {
             if f.code == rusqlite::ffi::ErrorCode::ConstraintViolation {
-                if msg.contains("attribute_definitions.name")
-                    || msg.contains("idx_attribute_definitions_name")
-                {
-                    return VariantError::DuplicateName(
-                        "An attribute definition with this name already exists".into(),
-                    );
-                }
-                if msg.contains("attribute_values") || msg.contains("idx_attribute_values_def_val")
-                {
-                    return VariantError::DuplicateValue(
-                        "This attribute value already exists for this definition".into(),
-                    );
-                }
-                if msg.contains("product_variants.sku")
-                    || msg.contains("idx_product_variants_sku_active")
-                {
-                    return VariantError::DuplicateSku(
-                        "SKU is already assigned to another active variant".into(),
-                    );
-                }
-                if msg.contains("product_barcodes.barcode")
-                    || msg.contains("idx_product_variants_barcode_active")
-                {
-                    return VariantError::DuplicateBarcode(
-                        "Barcode is already assigned to another active variant or product".into(),
-                    );
+                if let Some(err) = map_sqlite_constraint_error(msg) {
+                    return err;
                 }
             }
         }
@@ -457,7 +453,9 @@ pub fn create_variant(
 
     let variant_id = uuid::Uuid::new_v4().to_string();
 
-    conn.execute(
+    let tx = conn.unchecked_transaction()?;
+
+    tx.execute(
         "INSERT INTO product_variants (
             id, product_id, sku, barcode, price_override_minor, cost_price_minor, is_active, created_at, updated_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, datetime('now'), datetime('now'))",
@@ -472,12 +470,14 @@ pub fn create_variant(
     )?;
 
     for val_id in &input.attribute_value_ids {
-        conn.execute(
+        tx.execute(
             "INSERT INTO variant_attribute_values (variant_id, attribute_value_id)
              VALUES (?1, ?2)",
             params![variant_id, val_id],
         )?;
     }
+
+    tx.commit()?;
 
     let created_variant = get_variant(conn, &variant_id)?
         .ok_or_else(|| VariantError::Database("Failed to load newly created variant".into()))?;

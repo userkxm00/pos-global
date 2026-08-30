@@ -551,3 +551,127 @@ fn test_product_variant_multiple_values_for_same_definition_rejected() {
 
     assert!(matches!(err, VariantError::Validation(_)));
 }
+
+#[test]
+fn test_duplicate_variant_barcode_maps_to_typed_error() {
+    let conn = setup_test_db();
+    let prod1_id = create_sample_product(&conn, "Product 1");
+    let prod2_id = create_sample_product(&conn, "Product 2");
+
+    let def_size = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Size".to_string(),
+            sort_order: Some(1),
+        },
+    )
+    .expect("def");
+
+    let val_s = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: def_size.id.clone(),
+            value: "Small".to_string(),
+            sort_order: Some(1),
+        },
+    )
+    .expect("val_s");
+
+    let val_m = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: def_size.id.clone(),
+            value: "Medium".to_string(),
+            sort_order: Some(2),
+        },
+    )
+    .expect("val_m");
+
+    // 1. Create first variant with barcode
+    create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: prod1_id,
+            sku: Some("P1-S".to_string()),
+            barcode: Some("987654321098".to_string()),
+            price_override_minor: None,
+            cost_price_minor: None,
+            attribute_value_ids: vec![val_s.id],
+        },
+    )
+    .expect("variant 1");
+
+    // 2. Attempt to create second variant with identical barcode
+    let err = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: prod2_id,
+            sku: Some("P2-M".to_string()),
+            barcode: Some("987654321098".to_string()),
+            price_override_minor: None,
+            cost_price_minor: None,
+            attribute_value_ids: vec![val_m.id],
+        },
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, VariantError::DuplicateBarcode(_)),
+        "Expected VariantError::DuplicateBarcode, got: {:?}",
+        err
+    );
+}
+
+#[test]
+fn test_create_variant_atomicity_rollback_on_association_failure() {
+    let conn = setup_test_db();
+    let product_id = create_sample_product(&conn, "Atomicity Product");
+
+    let pre_variant_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM product_variants", [], |row| {
+            row.get(0)
+        })
+        .expect("count");
+    let pre_assoc_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM variant_attribute_values", [], |row| {
+            row.get(0)
+        })
+        .expect("count");
+
+    // Attempt to create variant with a non-existent attribute value id
+    let err = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id,
+            sku: Some("ATOM-1".to_string()),
+            barcode: Some("555555555555".to_string()),
+            price_override_minor: Some(1000),
+            cost_price_minor: None,
+            attribute_value_ids: vec!["non-existent-attr-val-id".to_string()],
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, VariantError::NotFound(_)));
+
+    // Verify transaction rollback: zero orphaned variant rows or association rows
+    let post_variant_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM product_variants", [], |row| {
+            row.get(0)
+        })
+        .expect("count");
+    let post_assoc_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM variant_attribute_values", [], |row| {
+            row.get(0)
+        })
+        .expect("count");
+
+    assert_eq!(
+        pre_variant_count, post_variant_count,
+        "No product_variants row should remain after failure"
+    );
+    assert_eq!(
+        pre_assoc_count, post_assoc_count,
+        "No variant_attribute_values row should remain after failure"
+    );
+}
