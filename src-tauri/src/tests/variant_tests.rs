@@ -4,11 +4,10 @@ use crate::product::{create_product, CreateProductInput};
 use crate::tests::test_helpers::{apply_migrations_up_to, setup_test_db, setup_test_db_up_to};
 use crate::variant::{
     create_attribute_definition, create_attribute_value, create_variant, get_attribute_definition,
-    get_attribute_value, get_variant, list_attribute_definitions,
-    list_attribute_values_by_definition, list_variants_by_product, soft_delete_variant,
-    update_variant, validate_attribute_name, validate_attribute_value, validate_price_minor,
-    CreateAttributeDefinitionInput, CreateAttributeValueInput, CreateVariantInput,
-    UpdateVariantInput, VariantError,
+    get_variant, list_attribute_definitions, list_attribute_values_by_definition,
+    list_variants_by_product, soft_delete_variant, update_variant, validate_attribute_name,
+    validate_attribute_value, validate_price_minor, CreateAttributeDefinitionInput,
+    CreateAttributeValueInput, CreateVariantInput, UpdateVariantInput, VariantError,
 };
 use rusqlite::params;
 
@@ -753,6 +752,9 @@ fn test_create_variant_concurrent_combination_uniqueness_multi_connection() {
     // 3. Collect results from both competing operations
     let results: Vec<Result<crate::variant::VariantWithAttributes, VariantError>> =
         handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+    let success_count = results.iter().filter(|r| r.is_ok()).count();
+    let error_count = results.iter().filter(|r| r.is_err()).count();
 
     // 4. Verify invariant: Exactly one create succeeds and the other fails closed
     assert_eq!(

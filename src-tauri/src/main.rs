@@ -20,6 +20,7 @@ mod register;
 mod tests;
 mod unit;
 mod user;
+#[cfg(test)]
 mod variant;
 
 use tauri::Manager;
