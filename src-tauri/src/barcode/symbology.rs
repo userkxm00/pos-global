@@ -179,9 +179,7 @@ pub fn validate_barcode_symbology(
         BarcodeSymbology::UpcE => validate_upc_e(trimmed)?,
         BarcodeSymbology::Code128 => validate_code128(trimmed)?,
         BarcodeSymbology::Code39 => validate_code39(trimmed)?,
-        BarcodeSymbology::Custom => validate_custom_barcode(trimmed)?,
-        BarcodeSymbology::Unknown => {
-            // For unknown symbology, enforce standard general safe length and ASCII bounds
+        BarcodeSymbology::Custom | BarcodeSymbology::Unknown => {
             validate_custom_barcode(trimmed)?;
         }
     }

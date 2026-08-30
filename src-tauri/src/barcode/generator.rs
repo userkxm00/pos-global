@@ -19,7 +19,7 @@ pub fn validate_sku(sku: &str) -> Result<String, BarcodeError> {
         )));
     }
 
-    let is_valid_sku_char = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.';
+    let is_valid_sku_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.');
 
     if !trimmed.chars().all(is_valid_sku_char) {
         return Err(BarcodeError::Validation(
@@ -36,7 +36,7 @@ pub fn sanitize_sku_prefix(prefix: Option<&str>) -> String {
         .unwrap_or("SKU")
         .trim()
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(*c, '_' | '-'))
         .take(8)
         .collect();
 

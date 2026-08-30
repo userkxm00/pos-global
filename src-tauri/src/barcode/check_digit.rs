@@ -53,8 +53,10 @@ pub fn verify_gs1_check_digit(full_code: &str) -> Result<(), BarcodeError> {
 
     let body = &trimmed[..trimmed.len() - 1];
     let expected_check = calculate_gs1_check_digit(body)?;
-
-    let actual_char = trimmed.chars().last().unwrap();
+    let actual_char = trimmed
+        .chars()
+        .last()
+        .ok_or_else(|| BarcodeError::Validation("Check digit character missing".into()))?;
     let actual_check = actual_char.to_digit(10).ok_or_else(|| {
         BarcodeError::Validation(format!(
             "Check digit character '{actual_char}' is not numeric"
