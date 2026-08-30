@@ -423,8 +423,11 @@ pub fn update_unit(conn: &Connection, input: UpdateUnitInput) -> Result<Unit, Un
     let precision = validate_unit_precision(input.precision)?;
 
     // Verify existence
-    let existing = get_unit(conn, unit_id)?
-        .ok_or_else(|| UnitError::NotFound(format!("Unit with ID '{unit_id}' not found")))?;
+    if get_unit(conn, unit_id)?.is_none() {
+        return Err(UnitError::NotFound(format!(
+            "Unit with ID '{unit_id}' not found"
+        )));
+    }
 
     // Check code uniqueness if code changed
     let conflict: Option<String> = conn

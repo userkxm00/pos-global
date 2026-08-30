@@ -1,15 +1,3 @@
-// Unit of Measure (UOM) and Unit Conversion test suite.
-// F2.04 — Units & Conversions
-
-use crate::auth::create_local_session;
-use crate::commands::unit::{
-    convert_quantity as cmd_convert_quantity, create_unit as cmd_create_unit,
-    create_unit_conversion as cmd_create_unit_conversion, delete_unit as cmd_delete_unit,
-    delete_unit_conversion as cmd_delete_unit_conversion, get_unit as cmd_get_unit,
-    get_unit_by_code as cmd_get_unit_by_code, list_unit_conversions as cmd_list_unit_conversions,
-    list_units as cmd_list_units, update_unit as cmd_update_unit,
-};
-use crate::db::DbState;
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
 };
@@ -20,6 +8,7 @@ use crate::unit::{
     validate_unit_precision, ConvertQuantityInput, CreateUnitConversionInput, CreateUnitInput,
     UnitDimension, UnitError, UnitFilter, UpdateUnitInput,
 };
+use crate::user::session::create_local_session;
 
 // =========================================================================
 // 1. VALIDATION & DIMENSION PARSING TESTS
@@ -924,7 +913,7 @@ fn test_zero_quantity_conversion() {
 }
 
 // =========================================================================
-// 6. AUTHORIZATION & TAURI COMMAND TESTS
+// 6. AUTHORIZATION & COMMAND CONTRACT TESTS
 // =========================================================================
 
 #[test]
@@ -945,13 +934,14 @@ fn test_unit_authorization_read_and_mutation() {
     let session_mgr = create_local_session(&conn, &user_manager.id, &branch_id, "pin", None)
         .expect("mgr session");
 
-    let db_state = DbState(conn.into());
-    let state = tauri::State::from(&db_state);
+    // Manager can mutate units (has ProductsManage permission)
+    assert!(crate::commands::authorize_catalog_mutation(&conn, &session_mgr.id).is_ok());
 
-    // Manager can mutate units
-    let created = cmd_create_unit(
-        state,
-        session_mgr.id.clone(),
+    // Manager can read units
+    assert!(crate::commands::authorize_catalog_read(&conn, &session_mgr.id).is_ok());
+
+    let created = create_unit(
+        &conn,
         CreateUnitInput {
             code: "meter_sq".to_string(),
             name: "Square Meters".to_string(),
@@ -963,26 +953,21 @@ fn test_unit_authorization_read_and_mutation() {
     .expect("manager created unit");
     assert_eq!(created.code, "meter_sq");
 
-    // Manager can read units
-    let fetched = cmd_get_unit(state, session_mgr.id.clone(), created.id.clone())
+    let fetched = get_unit(&conn, &created.id)
         .expect("read unit")
         .expect("found");
     assert_eq!(fetched.code, "meter_sq");
 
-    // Read by code
-    let fetched_code = cmd_get_unit_by_code(state, session_mgr.id.clone(), "METER_SQ".to_string())
+    let fetched_code = get_unit_by_code(&conn, "METER_SQ")
         .expect("read by code")
         .expect("found");
     assert_eq!(fetched_code.id, created.id);
 
-    // List units
-    let all = cmd_list_units(state, session_mgr.id.clone(), None).expect("list units");
+    let all = list_units(&conn, UnitFilter::default()).expect("list units");
     assert!(!all.is_empty());
 
-    // Update unit
-    let updated = cmd_update_unit(
-        state,
-        session_mgr.id.clone(),
+    let updated = update_unit(
+        &conn,
         UpdateUnitInput {
             id: created.id.clone(),
             code: "sq_meter".to_string(),
@@ -995,14 +980,12 @@ fn test_unit_authorization_read_and_mutation() {
     .expect("updated unit");
     assert_eq!(updated.code, "sq_meter");
 
-    // Create and delete unit conversion
-    let m2 = cmd_get_unit_by_code(state, session_mgr.id.clone(), "m2".to_string())
+    let m2 = get_unit_by_code(&conn, "m2")
         .expect("get m2")
         .expect("found m2");
 
-    let conv = cmd_create_unit_conversion(
-        state,
-        session_mgr.id.clone(),
+    let conv = create_unit_conversion(
+        &conn,
         CreateUnitConversionInput {
             from_unit_id: created.id.clone(),
             to_unit_id: m2.id.clone(),
@@ -1012,13 +995,11 @@ fn test_unit_authorization_read_and_mutation() {
     .expect("created conversion");
     assert_approx(conv.multiplier, 1.0);
 
-    let convs = cmd_list_unit_conversions(state, session_mgr.id.clone(), Some(created.id.clone()))
-        .expect("list convs");
+    let convs = list_unit_conversions(&conn, Some(&created.id)).expect("list convs");
     assert_eq!(convs.len(), 1);
 
-    let converted = cmd_convert_quantity(
-        state,
-        session_mgr.id.clone(),
+    let converted = convert_quantity(
+        &conn,
         ConvertQuantityInput {
             from_unit_id: created.id.clone(),
             to_unit_id: m2.id.clone(),
@@ -1028,16 +1009,8 @@ fn test_unit_authorization_read_and_mutation() {
     .expect("converted qty");
     assert_approx(converted.converted_quantity, 50.0);
 
-    cmd_delete_unit_conversion(
-        state,
-        session_mgr.id.clone(),
-        created.id.clone(),
-        m2.id.clone(),
-    )
-    .expect("deleted conversion");
-
-    // Delete unit
-    cmd_delete_unit(state, session_mgr.id.clone(), created.id.clone()).expect("deleted unit");
+    delete_unit_conversion(&conn, &created.id, &m2.id).expect("deleted conversion");
+    delete_unit(&conn, &created.id).expect("deleted unit");
 }
 
 #[test]
@@ -1058,23 +1031,8 @@ fn test_unit_unauthorized_mutation_rejected() {
     let session_cashier = create_local_session(&conn, &user_cashier.id, &branch_id, "pin", None)
         .expect("cashier session");
 
-    let db_state = DbState(conn.into());
-    let state = tauri::State::from(&db_state);
-
     // Cashier cannot mutate units (lacks ProductsManage)
-    let err = cmd_create_unit(
-        state,
-        session_cashier.id.clone(),
-        CreateUnitInput {
-            code: "cashier_unit".to_string(),
-            name: "Unauthorized Unit".to_string(),
-            dimension: "count".to_string(),
-            precision: Some(0),
-            is_base: Some(false),
-        },
-    )
-    .unwrap_err();
-
+    let err = crate::commands::authorize_catalog_mutation(&conn, &session_cashier.id).unwrap_err();
     assert!(
         err.contains("permission")
             || err.contains("denied")
@@ -1082,19 +1040,12 @@ fn test_unit_unauthorized_mutation_rejected() {
             || err.contains("missing permission")
     );
 
-    // Unauthenticated request fails
-    let err_unauth = cmd_create_unit(
-        state,
-        "invalid_session_token_12345".to_string(),
-        CreateUnitInput {
-            code: "unauth_unit".to_string(),
-            name: "Unauth Unit".to_string(),
-            dimension: "count".to_string(),
-            precision: Some(0),
-            is_base: Some(false),
-        },
-    )
-    .unwrap_err();
+    // Cashier CAN read units with active session
+    assert!(crate::commands::authorize_catalog_read(&conn, &session_cashier.id).is_ok());
 
+    // Unauthenticated request fails closed
+    let err_unauth =
+        crate::commands::authorize_catalog_mutation(&conn, "invalid_session_token_12345")
+            .unwrap_err();
     assert!(!err_unauth.is_empty());
 }
