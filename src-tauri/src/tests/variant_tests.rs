@@ -1357,14 +1357,16 @@ fn test_variant_barcode_and_sku_lookup_and_search() {
     .expect("variant");
 
     // Lookup by barcode
-    let by_bc = get_variant_by_barcode(&conn, "9780201379624").expect("lookup barcode");
-    assert!(by_bc.is_some());
-    assert_eq!(by_bc.expect("v").variant.id, v.variant.id);
+    let by_bc = get_variant_by_barcode(&conn, "9780201379624")
+        .expect("lookup barcode")
+        .expect("barcode found");
+    assert_eq!(by_bc.variant.id, v.variant.id);
 
     // Lookup by SKU
-    let by_sku = get_variant_by_sku(&conn, "CRIMSON-01").expect("lookup sku");
-    assert!(by_sku.is_some());
-    assert_eq!(by_sku.expect("v").variant.id, v.variant.id);
+    let by_sku = get_variant_by_sku(&conn, "CRIMSON-01")
+        .expect("lookup sku")
+        .expect("sku found");
+    assert_eq!(by_sku.variant.id, v.variant.id);
 
     // Search by attribute value "Crimson"
     let search_res = search_variants(&conn, Some(&product_id), "Crimson").expect("search");
