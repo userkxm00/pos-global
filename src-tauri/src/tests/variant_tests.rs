@@ -111,7 +111,7 @@ fn test_migration_014_upgrades_from_013_with_representative_data() {
         .expect("query backfilled variant");
 
     assert_eq!(price_minor, Some(1999));
-    assert_eq!(cost_minor, None);
+    assert!(cost_minor.is_none());
     assert!(!created_at.is_empty());
     assert_eq!(created_at.len(), 19);
 
@@ -301,7 +301,7 @@ fn test_product_variant_lifecycle_and_exact_money() {
     assert_eq!(created.variant.price_override_minor, Some(4500));
     assert_eq!(created.variant.cost_price_minor, Some(2000));
     assert!(created.variant.is_active);
-    assert_eq!(created.variant.deleted_at, None);
+    assert!(created.variant.deleted_at.is_none());
 
     // 2. Active list returns the variant
     let active_list =
@@ -402,7 +402,7 @@ fn test_update_variant_partial_update_semantics() {
         },
     )
     .expect("update with cleared barcode");
-    assert_eq!(updated3.barcode, None);
+    assert!(updated3.barcode.is_none());
     assert_eq!(updated3.sku.as_deref(), Some("PARTIAL-001"));
 
     // 4. Supplied new barcode validates and updates
@@ -433,7 +433,7 @@ fn test_update_variant_partial_update_semantics() {
         },
     )
     .expect("update with cleared sku");
-    assert_eq!(updated5.sku, None);
+    assert!(updated5.sku.is_none());
 }
 
 #[test]
@@ -685,7 +685,7 @@ fn test_variant_reactivation_duplicate_combination_rejected() {
     )
     .expect("v1 successfully reactivated");
     assert!(reactivated.is_active);
-    assert_eq!(reactivated.deleted_at, None);
+    assert!(reactivated.deleted_at.is_none());
 }
 
 // =========================================================================
@@ -1519,27 +1519,10 @@ fn test_cross_tenant_variant_mutation_denied() {
         create_local_session(&conn, &user_a.id, &branch_a_id, "password", None).expect("session a");
 
     // 2. Create Organization B and Branch B
-    let org_b = crate::organization::create_organization(
-        &conn,
-        crate::organization::CreateOrganizationInput {
-            name: "Organization B".into(),
-            default_currency: Some("USD".into()),
-            default_language: Some("en".into()),
-        },
-    )
-    .expect("org b");
-    let branch_b = crate::branch::create_branch(
-        &conn,
-        crate::branch::CreateBranchInput {
-            organization_id: org_b.id.clone(),
-            name: "Branch B".into(),
-            code: "BR-B".into(),
-        },
-    )
-    .expect("branch b");
+    let (org_b_id, branch_b_id) = create_test_org_and_branch(&conn);
     let user_b = create_test_user_with_creds(
         &conn,
-        &branch_b.id,
+        &branch_b_id,
         "Admin Org B",
         Some("admin_b"),
         Some("pass_b_123"),
@@ -1548,7 +1531,7 @@ fn test_cross_tenant_variant_mutation_denied() {
     )
     .expect("user b created");
     let session_b =
-        create_local_session(&conn, &user_b.id, &branch_b.id, "password", None).expect("session b");
+        create_local_session(&conn, &user_b.id, &branch_b_id, "password", None).expect("session b");
 
     // 3. Configure Org A as the catalog organization in business_settings
     conn.execute(
