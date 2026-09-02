@@ -69,6 +69,16 @@ pub fn create_attribute_value(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
+    // Verify parent attribute definition exists before mutation
+    crate::variant::get_attribute_definition(&conn, &request.attribute_definition_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| {
+            format!(
+                "Attribute definition with ID '{}' not found",
+                request.attribute_definition_id
+            )
+        })?;
+
     authorize_catalog_mutation(&conn, &session_id)?;
     crate::variant::create_attribute_value(&conn, request).map_err(|e| e.to_string())
 }
@@ -118,6 +128,11 @@ pub fn create_variant(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
+    // Verify target parent product exists before performing mutation
+    crate::product::get_product(&conn, &request.product_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Parent product with ID '{}' not found", request.product_id))?;
+
     authorize_catalog_mutation(&conn, &session_id)?;
     crate::variant::create_variant(&conn, request).map_err(|e| e.to_string())
 }
@@ -159,6 +174,11 @@ pub fn list_variants_by_product(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
+    // Verify target parent product exists before reading variants
+    crate::product::get_product(&conn, &product_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Product with ID '{product_id}' not found"))?;
+
     authorize_catalog_read(&conn, &session_id)?;
     let variants = crate::variant::list_variants_by_product(&conn, &product_id, active_only)
         .map_err(|e| e.to_string())?;
@@ -187,6 +207,11 @@ pub fn update_variant(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
+    // Resolve target variant exists before performing mutation
+    crate::variant::get_variant(&conn, &request.id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Variant with ID '{}' not found", request.id))?;
+
     authorize_catalog_mutation(&conn, &session_id)?;
     crate::variant::update_variant(&conn, request).map_err(|e| e.to_string())
 }
@@ -201,6 +226,11 @@ pub fn delete_variant(
         .0
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
+
+    // Resolve target variant exists before performing mutation
+    crate::variant::get_variant(&conn, &id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Variant with ID '{id}' not found"))?;
 
     authorize_catalog_mutation(&conn, &session_id)?;
     crate::variant::soft_delete_variant(&conn, &id).map_err(|e| e.to_string())
@@ -217,6 +247,11 @@ pub fn preview_variant_matrix(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
+    // Resolve target parent product exists before preview
+    crate::product::get_product(&conn, &request.product_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Product with ID '{}' not found", request.product_id))?;
+
     authorize_catalog_read(&conn, &session_id)?;
     crate::variant::preview_variant_matrix(&conn, request).map_err(|e| e.to_string())
 }
@@ -231,6 +266,11 @@ pub fn generate_variant_matrix(
         .0
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
+
+    // Resolve target parent product exists before matrix generation
+    crate::product::get_product(&conn, &request.product_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Product with ID '{}' not found", request.product_id))?;
 
     authorize_catalog_mutation(&conn, &session_id)?;
     crate::variant::generate_variant_matrix(&conn, request).map_err(|e| e.to_string())
@@ -247,6 +287,13 @@ pub fn bulk_update_variant_status(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
+    // Resolve all target variants exist before bulk status update
+    for id in &request.variant_ids {
+        crate::variant::get_variant(&conn, id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Variant with ID '{id}' not found"))?;
+    }
+
     authorize_catalog_mutation(&conn, &session_id)?;
     crate::variant::bulk_update_variant_status(&conn, request).map_err(|e| e.to_string())
 }
@@ -261,6 +308,13 @@ pub fn bulk_update_variant_prices(
         .0
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
+
+    // Resolve all target variants exist before bulk price update
+    for id in &request.variant_ids {
+        crate::variant::get_variant(&conn, id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Variant with ID '{id}' not found"))?;
+    }
 
     authorize_catalog_mutation(&conn, &session_id)?;
     crate::variant::bulk_update_variant_prices(&conn, request).map_err(|e| e.to_string())
@@ -307,6 +361,12 @@ pub fn search_variants(
         .0
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
+
+    if let Some(ref pid) = product_id {
+        crate::product::get_product(&conn, pid)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Product with ID '{pid}' not found"))?;
+    }
 
     authorize_catalog_read(&conn, &session_id)?;
     crate::variant::search_variants(&conn, product_id.as_deref(), &query).map_err(|e| e.to_string())

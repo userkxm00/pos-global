@@ -1,6 +1,6 @@
 // Comprehensive unit, integration, migration, and contract tests for F2.05 Variants / Matrix.
 
-use crate::auth::middleware::{require_scoped_permission, AuthorizeRequest};
+use crate::auth::middleware::{require_scoped_permission, AuthMiddlewareError};
 use crate::commands::{authorize_catalog_mutation, authorize_catalog_read};
 use crate::permission::Permission;
 use crate::product::{create_product, CreateProductInput};
@@ -51,11 +51,11 @@ fn test_migration_014_applies_cleanly_to_fresh_database() {
         .filter_map(Result::ok)
         .collect();
 
-    assert!(columns.contains(&"price_override_minor".to_string()));
-    assert!(columns.contains(&"cost_price_minor".to_string()));
-    assert!(columns.contains(&"created_at".to_string()));
-    assert!(columns.contains(&"updated_at".to_string()));
-    assert!(columns.contains(&"deleted_at".to_string()));
+    assert!(columns.iter().any(|c| c == "price_override_minor"));
+    assert!(columns.iter().any(|c| c == "cost_price_minor"));
+    assert!(columns.iter().any(|c| c == "created_at"));
+    assert!(columns.iter().any(|c| c == "updated_at"));
+    assert!(columns.iter().any(|c| c == "deleted_at"));
 
     // Verify attribute_definitions extended columns
     let mut stmt_def = conn
@@ -66,13 +66,26 @@ fn test_migration_014_applies_cleanly_to_fresh_database() {
         .expect("query map")
         .filter_map(Result::ok)
         .collect();
-    assert!(def_cols.contains(&"sort_order".to_string()));
-    assert!(def_cols.contains(&"created_at".to_string()));
+    assert!(def_cols.iter().any(|c| c == "sort_order"));
+    assert!(def_cols.iter().any(|c| c == "created_at"));
 }
 
 #[test]
 fn test_migration_014_upgrades_from_013_with_representative_data() {
     let conn = setup_test_db_up_to("013_units_conversions_hardening");
+
+    // Populate attribute_definitions and attribute_values in 013 schema
+    conn.execute(
+        "INSERT INTO attribute_definitions (id, name) VALUES ('def-legacy-1', 'Legacy Size')",
+        [],
+    )
+    .expect("insert legacy def");
+
+    conn.execute(
+        "INSERT INTO attribute_values (id, attribute_definition_id, value) VALUES ('val-legacy-1', 'def-legacy-1', 'Legacy Large')",
+        [],
+    )
+    .expect("insert legacy val");
 
     // Seed pre-existing legacy product and variant before 014
     let prod_id = create_sample_variable_product(&conn, "Legacy Product");
@@ -85,7 +98,7 @@ fn test_migration_014_upgrades_from_013_with_representative_data() {
     )
     .expect("insert legacy variant");
 
-    // Apply migration 014
+    // Apply migration 014 to the populated database
     apply_migrations_up_to(&conn, "014_product_variants_hardening");
 
     // Verify backfilled price_override_minor (19.99 * 100 = 1999 minor units)
@@ -100,7 +113,27 @@ fn test_migration_014_upgrades_from_013_with_representative_data() {
     assert_eq!(price_minor, Some(1999));
     assert_eq!(cost_minor, None);
     assert_eq!(is_active, 1);
+    assert_ne!(created_at, "1970-01-01 00:00:00");
     assert!(!created_at.is_empty());
+
+    // Verify backfilled attribute definitions and values
+    let def_created: String = conn
+        .query_row(
+            "SELECT created_at FROM attribute_definitions WHERE id = 'def-legacy-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query def created_at");
+    assert_ne!(def_created, "1970-01-01 00:00:00");
+
+    let val_created: String = conn
+        .query_row(
+            "SELECT created_at FROM attribute_values WHERE id = 'val-legacy-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query val created_at");
+    assert_ne!(val_created, "1970-01-01 00:00:00");
 }
 
 #[test]
@@ -307,6 +340,102 @@ fn test_product_variant_lifecycle_and_exact_money() {
 }
 
 #[test]
+fn test_update_variant_partial_update_semantics() {
+    let conn = setup_test_db();
+    let product_id = create_sample_variable_product(&conn, "Partial Shirt");
+
+    let created = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("PARTIAL-001".into()),
+            barcode: Some("9780201379624".into()),
+            price_override_minor: Some(1000),
+            cost_price_minor: Some(500),
+            attribute_value_ids: vec![],
+        },
+    )
+    .expect("variant created");
+
+    // 1. Omitted SKU (None) preserves current SKU
+    let updated1 = update_variant(
+        &conn,
+        UpdateVariantInput {
+            id: created.variant.id.clone(),
+            sku: None,
+            barcode: Some("9780201379624".into()),
+            price_override_minor: Some(1200),
+            cost_price_minor: Some(600),
+            is_active: true,
+        },
+    )
+    .expect("update with omitted sku");
+    assert_eq!(updated1.sku.as_deref(), Some("PARTIAL-001"));
+    assert_eq!(updated1.price_override_minor, Some(1200));
+
+    // 2. Omitted barcode (None) preserves current barcode
+    let updated2 = update_variant(
+        &conn,
+        UpdateVariantInput {
+            id: created.variant.id.clone(),
+            sku: Some("PARTIAL-001".into()),
+            barcode: None,
+            price_override_minor: Some(1300),
+            cost_price_minor: Some(650),
+            is_active: true,
+        },
+    )
+    .expect("update with omitted barcode");
+    assert_eq!(updated2.barcode.as_deref(), Some("9780201379624"));
+
+    // 3. Explicit clear of barcode (Some("")) clears barcode to NULL
+    let updated3 = update_variant(
+        &conn,
+        UpdateVariantInput {
+            id: created.variant.id.clone(),
+            sku: None,
+            barcode: Some("".into()),
+            price_override_minor: None,
+            cost_price_minor: None,
+            is_active: true,
+        },
+    )
+    .expect("update with cleared barcode");
+    assert_eq!(updated3.barcode, None);
+    assert_eq!(updated3.sku.as_deref(), Some("PARTIAL-001"));
+
+    // 4. Supplied new barcode validates and updates
+    let updated4 = update_variant(
+        &conn,
+        UpdateVariantInput {
+            id: created.variant.id.clone(),
+            sku: None,
+            barcode: Some("9780201379624".into()),
+            price_override_minor: None,
+            cost_price_minor: None,
+            is_active: true,
+        },
+    )
+    .expect("update with new barcode");
+    assert_eq!(updated4.barcode.as_deref(), Some("9780201379624"));
+
+    // 5. Explicit clear of SKU (Some("")) clears SKU to NULL
+    let updated5 = update_variant(
+        &conn,
+        UpdateVariantInput {
+            id: created.variant.id.clone(),
+            sku: Some("   ".into()),
+            barcode: None,
+            price_override_minor: None,
+            cost_price_minor: None,
+            is_active: true,
+        },
+    )
+    .expect("update with cleared sku");
+    assert_eq!(updated5.sku, None);
+}
+
+#[test]
 fn test_exact_money_validation_and_overflow_rejection() {
     let conn = setup_test_db();
     let product_id = create_sample_variable_product(&conn, "Test Overflow");
@@ -320,7 +449,7 @@ fn test_exact_money_validation_and_overflow_rejection() {
             barcode: None,
             price_override_minor: Some(-100),
             cost_price_minor: None,
-            attribute_value_ids: vec![],
+            attribute_value_ids: Vec::new(),
         },
     );
     assert!(matches!(err_neg, Err(VariantError::Validation(_))));
@@ -334,7 +463,7 @@ fn test_exact_money_validation_and_overflow_rejection() {
             barcode: None,
             price_override_minor: Some(MAX_SAFE_MINOR_UNITS + 1),
             cost_price_minor: None,
-            attribute_value_ids: vec![],
+            attribute_value_ids: Vec::new(),
         },
     );
     assert!(matches!(err_overflow, Err(VariantError::Validation(_))));
@@ -390,7 +519,7 @@ fn test_product_variant_multiple_values_for_same_definition_rejected() {
 }
 
 // =========================================================================
-// 4. ACTIVE COMBINATION UNIQUENESS TESTS
+// 4. ACTIVE COMBINATION UNIQUENESS & REACTIVATION TESTS
 // =========================================================================
 
 #[test]
@@ -450,6 +579,114 @@ fn test_active_combination_uniqueness_enforced() {
     ));
 }
 
+#[test]
+fn test_variant_reactivation_duplicate_combination_rejected() {
+    let conn = setup_test_db();
+    let product_id = create_sample_variable_product(&conn, "Reactivate Test");
+
+    let def_size = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Size".into(),
+            sort_order: None,
+        },
+    )
+    .expect("def Size");
+
+    let val_m = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: def_size.id,
+            value: "M".into(),
+            sort_order: None,
+        },
+    )
+    .expect("val M");
+
+    // 1. Create Variant 1 with [Size: M]
+    let v1 = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("REACT-1".into()),
+            barcode: None,
+            price_override_minor: None,
+            cost_price_minor: None,
+            attribute_value_ids: vec![val_m.id.clone()],
+        },
+    )
+    .expect("v1 created");
+
+    // 2. Soft-delete Variant 1
+    soft_delete_variant(&conn, &v1.variant.id).expect("v1 soft deleted");
+
+    // 3. Create Variant 2 with [Size: M] (now active)
+    let v2 = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("REACT-2".into()),
+            barcode: None,
+            price_override_minor: None,
+            cost_price_minor: None,
+            attribute_value_ids: vec![val_m.id.clone()],
+        },
+    )
+    .expect("v2 created");
+
+    // 4. Attempting to reactivate Variant 1 via update_variant must fail
+    let err_reactivate = update_variant(
+        &conn,
+        UpdateVariantInput {
+            id: v1.variant.id.clone(),
+            sku: None,
+            barcode: None,
+            price_override_minor: None,
+            cost_price_minor: None,
+            is_active: true,
+        },
+    );
+    assert!(
+        matches!(err_reactivate, Err(VariantError::DuplicateCombination(_))),
+        "Reactivation must reject duplicate active combination"
+    );
+
+    // 5. Attempting to reactivate Variant 1 via bulk_update_variant_status must also fail
+    let err_bulk_reactivate = bulk_update_variant_status(
+        &conn,
+        BulkUpdateVariantStatusInput {
+            variant_ids: vec![v1.variant.id.clone()],
+            is_active: true,
+        },
+    );
+    assert!(
+        matches!(
+            err_bulk_reactivate,
+            Err(VariantError::DuplicateCombination(_))
+        ),
+        "Bulk reactivation must reject duplicate active combination"
+    );
+
+    // 6. Soft-delete Variant 2
+    soft_delete_variant(&conn, &v2.variant.id).expect("v2 soft deleted");
+
+    // 7. Now Variant 1 reactivation must succeed
+    let reactivated = update_variant(
+        &conn,
+        UpdateVariantInput {
+            id: v1.variant.id.clone(),
+            sku: None,
+            barcode: None,
+            price_override_minor: None,
+            cost_price_minor: None,
+            is_active: true,
+        },
+    )
+    .expect("v1 successfully reactivated");
+    assert!(reactivated.is_active);
+    assert_eq!(reactivated.deleted_at, None);
+}
+
 // =========================================================================
 // 5. CARTESIAN PRODUCT & MATRIX GENERATION TESTS
 // =========================================================================
@@ -457,14 +694,14 @@ fn test_active_combination_uniqueness_enforced() {
 #[test]
 fn test_cartesian_product_1d_2d_and_3d_generation() {
     // 1D: [S, M, L] -> 3 combinations
-    let d1 = vec![vec!["S".to_string(), "M".to_string(), "L".to_string()]];
+    let d1 = vec![vec!["S".into(), "M".into(), "L".into()]];
     let res1 = compute_cartesian_product(&d1);
     assert_eq!(res1.len(), 3);
 
     // 2D: [S, M] x [Red, Blue] -> 4 combinations
     let d2 = vec![
-        vec!["S".to_string(), "M".to_string()],
-        vec!["Red".to_string(), "Blue".to_string()],
+        vec!["S".into(), "M".into()],
+        vec!["Red".into(), "Blue".into()],
     ];
     let res2 = compute_cartesian_product(&d2);
     assert_eq!(res2.len(), 4);
@@ -475,9 +712,9 @@ fn test_cartesian_product_1d_2d_and_3d_generation() {
 
     // 3D: [S, M] x [Red, Blue] x [Cotton, Linen] -> 8 combinations
     let d3 = vec![
-        vec!["S".to_string(), "M".to_string()],
-        vec!["Red".to_string(), "Blue".to_string()],
-        vec!["Cotton".to_string(), "Linen".to_string()],
+        vec!["S".into(), "M".into()],
+        vec!["Red".into(), "Blue".into()],
+        vec!["Cotton".into(), "Linen".into()],
     ];
     let res3 = compute_cartesian_product(&d3);
     assert_eq!(res3.len(), 8);
@@ -719,7 +956,7 @@ fn test_table_local_sku_namespace_equality_adr0007_decision_a() {
         name: "Shared SKU Product".to_string(),
         description: None,
         category_id: None,
-        sku: Some("ELEC-000001".to_string()),
+        sku: Some("ELEC-000001".into()),
         barcode: None,
         product_type: Some("variable".to_string()),
         base_price_minor: 1000,
@@ -738,11 +975,11 @@ fn test_table_local_sku_namespace_equality_adr0007_decision_a() {
         &conn,
         CreateVariantInput {
             product_id: prod.id,
-            sku: Some("ELEC-000001".to_string()),
+            sku: Some("ELEC-000001".into()),
             barcode: None,
             price_override_minor: None,
             cost_price_minor: None,
-            attribute_value_ids: vec![],
+            attribute_value_ids: Vec::new(),
         },
     )
     .expect("variant created with same SKU as product under table-local namespace");
@@ -779,11 +1016,11 @@ fn test_matrix_sku_collision_causes_sequence_advancement_decision_b() {
         &conn,
         CreateVariantInput {
             product_id: product_id.clone(),
-            sku: Some("ELEC-000001".to_string()),
+            sku: Some("ELEC-000001".into()),
             barcode: None,
             price_override_minor: None,
             cost_price_minor: None,
-            attribute_value_ids: vec![],
+            attribute_value_ids: Vec::new(),
         },
     )
     .expect("pre-occupied variant created");
@@ -823,11 +1060,11 @@ fn test_archived_variant_sku_remains_reserved_decision_c() {
         &conn,
         CreateVariantInput {
             product_id: product_id.clone(),
-            sku: Some("RES-000001".to_string()),
+            sku: Some("RES-000001".into()),
             barcode: None,
             price_override_minor: None,
             cost_price_minor: None,
-            attribute_value_ids: vec![],
+            attribute_value_ids: Vec::new(),
         },
     )
     .expect("variant created");
@@ -840,15 +1077,81 @@ fn test_archived_variant_sku_remains_reserved_decision_c() {
         &conn,
         CreateVariantInput {
             product_id,
-            sku: Some("RES-000001".to_string()),
+            sku: Some("RES-000001".into()),
             barcode: None,
             price_override_minor: None,
             cost_price_minor: None,
-            attribute_value_ids: vec![],
+            attribute_value_ids: Vec::new(),
         },
     );
 
     assert!(matches!(err_reuse, Err(VariantError::DuplicateSku(_))));
+}
+
+#[test]
+fn test_matrix_sku_collision_advances_past_archived_variant_sku() {
+    let conn = setup_test_db();
+    let product_id = create_sample_variable_product(&conn, "Archived SKU Advance Test");
+
+    let def_size = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Size".into(),
+            sort_order: None,
+        },
+    )
+    .expect("def Size");
+
+    let val_s = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: def_size.id.clone(),
+            value: "S".into(),
+            sort_order: None,
+        },
+    )
+    .expect("val S");
+
+    // 1. Create variant with SKU "ARCH-000001"
+    let v = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("ARCH-000001".into()),
+            barcode: None,
+            price_override_minor: None,
+            cost_price_minor: None,
+            attribute_value_ids: Vec::new(),
+        },
+    )
+    .expect("v created");
+
+    // 2. Soft delete the variant so it is archived
+    soft_delete_variant(&conn, &v.variant.id).expect("v archived");
+
+    // 3. Matrix generation with prefix "ARCH" must detect that "ARCH-000001" is reserved by
+    // an archived variant, advance sequence, and allocate "ARCH-000002"
+    let res = generate_variant_matrix(
+        &conn,
+        GenerateMatrixInput {
+            product_id,
+            dimensions: vec![MatrixDimensionInput {
+                attribute_definition_id: def_size.id,
+                attribute_value_ids: vec![val_s.id],
+            }],
+            default_price_override_minor: None,
+            default_cost_price_minor: None,
+            sku_prefix: Some("ARCH".into()),
+        },
+    )
+    .expect("matrix generation advances sequence past archived variant SKU");
+
+    assert_eq!(res.created_variants.len(), 1);
+    assert_eq!(
+        res.created_variants[0].variant.sku.as_deref(),
+        Some("ARCH-000002"),
+        "Generator must advance past archived variant SKU sequence"
+    );
 }
 
 #[test]
@@ -878,7 +1181,7 @@ fn test_matrix_sku_allocation_transaction_rollback_on_failure() {
     // Pre-allocate sequence 1 for prefix "ROLL"
     let _ = crate::barcode::generate_next_sku(&conn, Some("ROLL")).expect("allocated 1");
 
-    // Pre-seed a conflicting SKU in product_variants that will fail the bounded retry (Decision B)
+    // Pre-seed 21 conflicting SKUs in product_variants that will fail the bounded retry (Decision B)
     for i in 2..=22 {
         let occupied_sku = format!("ROLL-{i:06}");
         conn.execute(
@@ -905,12 +1208,21 @@ fn test_matrix_sku_allocation_transaction_rollback_on_failure() {
 
     assert!(err.is_err(), "Exceeded bounded retries must fail");
 
-    // Verify that because the transaction rolled back, the candidate variant was not created
+    // Verify atomic rollback on product_variants: row count must remain at the seeded 21 rows
+    let pv_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM product_variants", [], |r| r.get(0))
+        .expect("count product_variants");
+    assert_eq!(
+        pv_count, 21,
+        "product_variants count must remain at exactly the 21 seeded rows after rollback"
+    );
+
+    // Verify that variant_attribute_values has zero link rows
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM variant_attribute_values", [], |r| {
             r.get(0)
         })
-        .expect("count");
+        .expect("count variant_attribute_values");
     assert_eq!(
         count, 0,
         "All matrix variant inserts must roll back on failure"
@@ -934,7 +1246,7 @@ fn test_bulk_update_variant_status_and_prices_atomicity() {
             barcode: None,
             price_override_minor: Some(1000),
             cost_price_minor: Some(500),
-            attribute_value_ids: vec![],
+            attribute_value_ids: Vec::new(),
         },
     )
     .expect("v1");
@@ -947,7 +1259,7 @@ fn test_bulk_update_variant_status_and_prices_atomicity() {
             barcode: None,
             price_override_minor: Some(2000),
             cost_price_minor: Some(1000),
-            attribute_value_ids: vec![],
+            attribute_value_ids: Vec::new(),
         },
     )
     .expect("v2");
@@ -964,7 +1276,9 @@ fn test_bulk_update_variant_status_and_prices_atomicity() {
     .expect("bulk prices updated");
     assert_eq!(price_res.updated_count, 2);
 
-    let v1_updated = get_variant(&conn, &v1.variant.id).unwrap().unwrap();
+    let v1_updated = get_variant(&conn, &v1.variant.id)
+        .expect("get v1")
+        .expect("v1 exists");
     assert_eq!(v1_updated.price_override_minor, Some(3500));
     assert_eq!(v1_updated.cost_price_minor, Some(1800));
 
@@ -979,7 +1293,9 @@ fn test_bulk_update_variant_status_and_prices_atomicity() {
     .expect("bulk status updated");
     assert_eq!(status_res.updated_count, 2);
 
-    let v1_inactive = get_variant(&conn, &v1.variant.id).unwrap().unwrap();
+    let v1_inactive = get_variant(&conn, &v1.variant.id)
+        .expect("get v1")
+        .expect("v1 exists");
     assert!(!v1_inactive.is_active);
     assert!(v1_inactive.deleted_at.is_some());
 
@@ -995,7 +1311,9 @@ fn test_bulk_update_variant_status_and_prices_atomicity() {
     assert!(matches!(err_bulk, Err(VariantError::NotFound(_))));
 
     // Price of v1 must NOT have changed to 9999
-    let v1_check = get_variant(&conn, &v1.variant.id).unwrap().unwrap();
+    let v1_check = get_variant(&conn, &v1.variant.id)
+        .expect("get v1")
+        .expect("v1 exists");
     assert_eq!(v1_check.price_override_minor, Some(3500));
 }
 
@@ -1039,12 +1357,12 @@ fn test_variant_barcode_and_sku_lookup_and_search() {
     // Lookup by barcode
     let by_bc = get_variant_by_barcode(&conn, "9780201379624").expect("lookup barcode");
     assert!(by_bc.is_some());
-    assert_eq!(by_bc.unwrap().variant.id, v.variant.id);
+    assert_eq!(by_bc.expect("v").variant.id, v.variant.id);
 
     // Lookup by SKU
     let by_sku = get_variant_by_sku(&conn, "CRIMSON-01").expect("lookup sku");
     assert!(by_sku.is_some());
-    assert_eq!(by_sku.unwrap().variant.id, v.variant.id);
+    assert_eq!(by_sku.expect("v").variant.id, v.variant.id);
 
     // Search by attribute value "Crimson"
     let search_res = search_variants(&conn, Some(&product_id), "Crimson").expect("search");
@@ -1052,14 +1370,93 @@ fn test_variant_barcode_and_sku_lookup_and_search() {
     assert_eq!(search_res[0].variant.id, v.variant.id);
 }
 
+#[test]
+fn test_search_variants_wildcards_and_limits() {
+    let conn = setup_test_db();
+    let product_id = create_sample_variable_product(&conn, "Wildcard Product");
+
+    // 1. Create variants with special characters in SKU: '%', '_', '\'
+    let v_pct = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("ITEM%SPECIAL".into()),
+            barcode: None,
+            price_override_minor: None,
+            cost_price_minor: None,
+            attribute_value_ids: Vec::new(),
+        },
+    )
+    .expect("v_pct");
+
+    let v_under = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("ITEM_SPECIAL".into()),
+            barcode: None,
+            price_override_minor: None,
+            cost_price_minor: None,
+            attribute_value_ids: Vec::new(),
+        },
+    )
+    .expect("v_under");
+
+    let v_slash = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("ITEM\\SPECIAL".into()),
+            barcode: None,
+            price_override_minor: None,
+            cost_price_minor: None,
+            attribute_value_ids: Vec::new(),
+        },
+    )
+    .expect("v_slash");
+
+    // 2. Searching for '%' matches only literal '%'
+    let res_pct = search_variants(&conn, Some(&product_id), "%SPECIAL").expect("search %");
+    assert_eq!(res_pct.len(), 1);
+    assert_eq!(res_pct[0].variant.id, v_pct.variant.id);
+
+    // 3. Searching for '_' matches only literal '_'
+    let res_under = search_variants(&conn, Some(&product_id), "ITEM_SPEC").expect("search _");
+    assert_eq!(res_under.len(), 1);
+    assert_eq!(res_under[0].variant.id, v_under.variant.id);
+
+    // 4. Searching for '\' matches only literal '\'
+    let res_slash = search_variants(&conn, Some(&product_id), "\\SPECIAL").expect("search \\");
+    assert_eq!(res_slash.len(), 1);
+    assert_eq!(res_slash[0].variant.id, v_slash.variant.id);
+
+    // 5. Empty or whitespace query returns empty results without scan
+    let res_empty = search_variants(&conn, Some(&product_id), "   ").expect("search empty");
+    assert_eq!(res_empty.len(), 0);
+
+    // 6. Search results are capped at DEFAULT_SEARCH_LIMIT
+    let bulk_prod = create_sample_variable_product(&conn, "Limit Bulk Product");
+    for i in 0..105 {
+        conn.execute(
+            "INSERT INTO product_variants (id, product_id, sku, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 1, datetime('now'), datetime('now'))",
+            params![format!("lim-var-{i}"), bulk_prod, format!("BULK-{i:04}")],
+        )
+        .expect("insert bulk");
+    }
+
+    let capped_res = search_variants(&conn, Some(&bulk_prod), "BULK").expect("search bulk");
+    assert_eq!(capped_res.len(), DEFAULT_SEARCH_LIMIT);
+}
+
 // =========================================================================
-// 8. AUTHORIZATION TESTS
+// 8. AUTHORIZATION & CROSS-TENANT SCOPE TESTS
 // =========================================================================
 
 #[test]
 fn test_variant_catalog_authorization() {
     let conn = setup_test_db();
-    let (org_id, branch_id) = create_test_org_and_branch(&conn);
+    let (_org_id, branch_id) = create_test_org_and_branch(&conn);
 
     // User with ProductsManage permission
     let user_mgr = create_test_user_with_creds(
@@ -1095,4 +1492,84 @@ fn test_variant_catalog_authorization() {
     // Both can read catalog
     assert!(authorize_catalog_read(&conn, &session_mgr.id).is_ok());
     assert!(authorize_catalog_read(&conn, &session_cashier.id).is_ok());
+}
+
+#[test]
+fn test_cross_tenant_variant_mutation_denied() {
+    let conn = setup_test_db();
+
+    // 1. Create Organization A and Branch A
+    let (org_a_id, branch_a_id) = create_test_org_and_branch(&conn);
+    let user_a = create_test_user_with_creds(
+        &conn,
+        &branch_a_id,
+        "admin_a",
+        "Admin Org A",
+        "pass_a_123",
+        "admin",
+    );
+    let session_a =
+        create_local_session(&conn, &user_a.id, &branch_a_id, None, None, None).expect("session a");
+
+    // 2. Create Organization B and Branch B
+    let org_b = crate::organization::create_organization(
+        &conn,
+        crate::organization::CreateOrganizationInput {
+            name: "Organization B".into(),
+            default_currency: Some("USD".into()),
+            default_language: Some("en".into()),
+        },
+    )
+    .expect("org b");
+    let branch_b = crate::branch::create_branch(
+        &conn,
+        crate::branch::CreateBranchInput {
+            organization_id: org_b.id.clone(),
+            name: "Branch B".into(),
+            code: "BR-B".into(),
+        },
+    )
+    .expect("branch b");
+    let user_b = create_test_user_with_creds(
+        &conn,
+        &branch_b.id,
+        "admin_b",
+        "Admin Org B",
+        "pass_b_123",
+        "admin",
+    );
+    let session_b =
+        create_local_session(&conn, &user_b.id, &branch_b.id, None, None, None).expect("session b");
+
+    // 3. Configure Org A as the catalog organization in business_settings
+    conn.execute(
+        "INSERT INTO business_settings (id, business_name, default_currency, organization_id)
+         VALUES ('bs-var-test', 'Org A Store', 'USD', ?1)
+         ON CONFLICT(id) DO UPDATE SET organization_id = ?1",
+        params![org_a_id],
+    )
+    .expect("business settings set to org a");
+
+    // 4. Session A (matching Org A) has valid scoped authorization for catalog mutation
+    let auth_a = require_scoped_permission(
+        &conn,
+        &session_a.id,
+        Permission::ProductsManage,
+        Some(&org_a_id),
+        None,
+    );
+    assert!(auth_a.is_ok(), "Org A admin authorized for Org A catalog");
+
+    // 5. Session B (cross-tenant Org B with ProductsManage) is rejected with ScopeMismatch for Org A catalog
+    let auth_b = require_scoped_permission(
+        &conn,
+        &session_b.id,
+        Permission::ProductsManage,
+        Some(&org_a_id),
+        None,
+    );
+    assert!(
+        matches!(auth_b, Err(AuthMiddlewareError::ScopeMismatch { .. })),
+        "Org B admin with ProductsManage must be rejected with ScopeMismatch when attempting to mutate Org A catalog"
+    );
 }

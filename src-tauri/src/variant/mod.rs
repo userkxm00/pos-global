@@ -13,6 +13,9 @@ pub const MAX_CARTESIAN_COMBINATIONS: usize = 5_000;
 /// Bounded safety limit for sequential candidate SKU collision retries against product_variants.
 pub const MAX_SKU_COLLISION_RETRIES: usize = 20;
 
+/// Maximum number of search results returned by variant queries to prevent unbounded scans.
+pub const DEFAULT_SEARCH_LIMIT: usize = 100;
+
 /// Canonical Attribute Definition entity (e.g., "Size", "Color", "Material").
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AttributeDefinition {
@@ -81,6 +84,13 @@ pub struct CreateVariantInput {
 }
 
 /// Input payload for updating an existing product variant.
+/// Semantics:
+/// - `sku: None` => preserve current SKU
+/// - `sku: Some("")` (empty string) => explicitly clear SKU to NULL
+/// - `sku: Some("VALUE")` => validate and update to new SKU
+/// - `barcode: None` => preserve current barcode
+/// - `barcode: Some("")` (empty string) => explicitly clear barcode to NULL
+/// - `barcode: Some("VALUE")` => validate and update to new barcode
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateVariantInput {
     pub id: String,
@@ -314,6 +324,20 @@ pub fn validate_price_minor(price: Option<i64>) -> Result<Option<i64>, VariantEr
         }
     }
     Ok(price)
+}
+
+/// Escapes special SQLite LIKE pattern wildcards (`\`, `%`, `_`) using `\` as the escape character.
+pub fn escape_like_pattern(pattern: &str) -> String {
+    let mut escaped = String::with_capacity(pattern.len() + 8);
+    for c in pattern.chars() {
+        match c {
+            '\\' => escaped.push_str("\\\\"),
+            '%' => escaped.push_str("\\%"),
+            '_' => escaped.push_str("\\_"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +631,38 @@ fn check_variant_sku_conflict(
     Ok(())
 }
 
+/// Enforces active-combination uniqueness when activating or reactivating a variant.
+/// Ensures no other active variant for the same product has the exact same attribute combination.
+fn check_variant_combination_conflict_on_activation(
+    conn: &Connection,
+    product_id: &str,
+    target_variant_id: &str,
+) -> Result<(), VariantError> {
+    let target_vals = get_variant_attribute_values(conn, target_variant_id)?;
+    if target_vals.is_empty() {
+        return Ok(());
+    }
+    let target_set: std::collections::HashSet<String> =
+        target_vals.into_iter().map(|v| v.id).collect();
+
+    let other_active = list_variants_by_product(conn, product_id, Some(true))?;
+    for other in other_active {
+        if other.id == target_variant_id {
+            continue;
+        }
+        let other_vals = get_variant_attribute_values(conn, &other.id)?;
+        let other_set: std::collections::HashSet<String> =
+            other_vals.into_iter().map(|v| v.id).collect();
+        if target_set == other_set {
+            return Err(VariantError::DuplicateCombination(format!(
+                "Cannot activate variant '{target_variant_id}': another active variant ('{}') already has the exact same attribute combination",
+                other.id
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub fn create_variant(
     conn: &Connection,
     input: CreateVariantInput,
@@ -786,6 +842,14 @@ pub fn list_variants_by_product(
     Ok(variants)
 }
 
+/// Updates an existing product variant with partial update semantics.
+/// - `input.sku = None` => preserve existing SKU
+/// - `input.sku = Some("")` => explicitly clear SKU to NULL
+/// - `input.sku = Some("val")` => validate, conflict-check, and update SKU
+/// - `input.barcode = None` => preserve existing barcode
+/// - `input.barcode = Some("")` => explicitly clear barcode to NULL
+/// - `input.barcode = Some("val")` => validate, conflict-check, and update barcode
+/// - If activating (`is_active = true`), enforces active-combination uniqueness against other active variants.
 pub fn update_variant(
     conn: &Connection,
     input: UpdateVariantInput,
@@ -796,41 +860,53 @@ pub fn update_variant(
     let existing = get_variant(conn, &input.id)?
         .ok_or_else(|| VariantError::NotFound(format!("Variant '{}' not found", input.id)))?;
 
+    // Partial update semantics for SKU:
+    // None => preserve; Some("") => clear to NULL; Some("val") => validate & update
     let clean_sku = match input.sku {
-        Some(ref s) if !s.trim().is_empty() => {
+        None => existing.sku.clone(),
+        Some(ref s) if s.trim().is_empty() => None,
+        Some(ref s) => {
             let val = crate::barcode::validate_sku(s)?;
             check_variant_sku_conflict(conn, &val, Some(&input.id))?;
             Some(val)
         }
-        _ => None,
     };
 
+    // Partial update semantics for Barcode:
+    // None => preserve; Some("") => clear to NULL; Some("val") => validate & update
     let clean_barcode = match input.barcode {
-        Some(ref b) if !b.trim().is_empty() => {
+        None => {
+            if input.is_active {
+                if let Some(ref bc) = existing.barcode {
+                    check_variant_barcode_conflict(conn, bc, Some(&input.id))?;
+                }
+            }
+            existing.barcode.clone()
+        }
+        Some(ref b) if b.trim().is_empty() => None,
+        Some(ref b) => {
             let trimmed = b.trim();
             if input.is_active {
                 check_variant_barcode_conflict(conn, trimmed, Some(&input.id))?;
             }
             Some(trimmed.to_string())
         }
-        _ => None,
     };
 
-    let (is_active_int, deleted_at_expr) = if input.is_active {
-        (1, "NULL")
-    } else {
-        (0, "datetime('now')")
-    };
+    // If activating (or staying active), enforce combination uniqueness against other active variants
+    if input.is_active {
+        check_variant_combination_conflict_on_activation(conn, &existing.product_id, &existing.id)?;
+    }
 
-    let sql = format!(
-        "UPDATE product_variants
-         SET sku = ?1, barcode = ?2, price_override_minor = ?3, cost_price_minor = ?4,
-             is_active = ?5, deleted_at = {deleted_at_expr}, updated_at = datetime('now')
-         WHERE id = ?6"
-    );
+    let is_active_int = if input.is_active { 1 } else { 0 };
 
     conn.execute(
-        &sql,
+        "UPDATE product_variants
+         SET sku = ?1, barcode = ?2, price_override_minor = ?3, cost_price_minor = ?4,
+             is_active = ?5,
+             deleted_at = CASE WHEN ?5 = 1 THEN NULL ELSE datetime('now') END,
+             updated_at = datetime('now')
+         WHERE id = ?6",
         params![
             clean_sku,
             clean_barcode,
@@ -874,11 +950,13 @@ pub fn compute_cartesian_product(dimensions: &[Vec<String>]) -> Vec<Vec<String>>
     if dimensions.is_empty() {
         return Vec::new();
     }
-    let mut result: Vec<Vec<String>> = vec![Vec::new()];
     for dim in dimensions {
         if dim.is_empty() {
             return Vec::new();
         }
+    }
+    let mut result: Vec<Vec<String>> = vec![Vec::new()];
+    for dim in dimensions {
         let mut next = Vec::with_capacity(result.len() * dim.len());
         for existing in &result {
             for val in dim {
@@ -892,11 +970,10 @@ pub fn compute_cartesian_product(dimensions: &[Vec<String>]) -> Vec<Vec<String>>
     result
 }
 
-fn validate_matrix_dimensions(
+fn validate_parent_product_for_matrix(
     conn: &Connection,
     product_id: &str,
-    dimensions: &[MatrixDimensionInput],
-) -> Result<Vec<Vec<AttributeValue>>, VariantError> {
+) -> Result<(), VariantError> {
     let product = crate::product::get_product(conn, product_id)?
         .ok_or_else(|| VariantError::NotFound(format!("Product '{product_id}' not found")))?;
 
@@ -913,12 +990,12 @@ fn validate_matrix_dimensions(
         )));
     }
 
-    if dimensions.is_empty() {
-        return Err(VariantError::Validation(
-            "At least one attribute dimension is required for matrix generation".into(),
-        ));
-    }
+    Ok(())
+}
 
+fn check_duplicate_attribute_definitions(
+    dimensions: &[MatrixDimensionInput],
+) -> Result<(), VariantError> {
     let mut seen_defs = std::collections::HashSet::new();
     for dim in dimensions {
         if !seen_defs.insert(&dim.attribute_definition_id) {
@@ -928,64 +1005,96 @@ fn validate_matrix_dimensions(
             )));
         }
     }
+    Ok(())
+}
+
+fn resolve_single_dimension_values(
+    conn: &Connection,
+    dim: &MatrixDimensionInput,
+) -> Result<Vec<AttributeValue>, VariantError> {
+    if dim.attribute_value_ids.is_empty() {
+        return Err(VariantError::Validation(format!(
+            "Attribute definition '{}' has no selected values",
+            dim.attribute_definition_id
+        )));
+    }
+
+    get_attribute_definition(conn, &dim.attribute_definition_id)?.ok_or_else(|| {
+        VariantError::NotFound(format!(
+            "Attribute definition '{}' not found",
+            dim.attribute_definition_id
+        ))
+    })?;
+
+    let mut seen_vals = std::collections::HashSet::new();
+    let mut resolved_vals = Vec::with_capacity(dim.attribute_value_ids.len());
+
+    for val_id in &dim.attribute_value_ids {
+        if !seen_vals.insert(val_id) {
+            return Err(VariantError::Validation(format!(
+                "Duplicate attribute value '{val_id}' in dimension '{}'",
+                dim.attribute_definition_id
+            )));
+        }
+
+        let val = get_attribute_value(conn, val_id)?.ok_or_else(|| {
+            VariantError::NotFound(format!("Attribute value '{val_id}' not found"))
+        })?;
+
+        if val.attribute_definition_id != dim.attribute_definition_id {
+            return Err(VariantError::Validation(format!(
+                "Attribute value '{}' belongs to definition '{}', not '{}'",
+                val.id, val.attribute_definition_id, dim.attribute_definition_id
+            )));
+        }
+
+        resolved_vals.push(val);
+    }
+
+    Ok(resolved_vals)
+}
+
+fn check_and_multiply_combinations(
+    current_total: usize,
+    count: usize,
+) -> Result<usize, VariantError> {
+    let next_total = current_total.checked_mul(count).ok_or_else(|| {
+        VariantError::Validation(format!(
+            "Matrix generation overflow: projected combinations exceed {MAX_CARTESIAN_COMBINATIONS}"
+        ))
+    })?;
+
+    if next_total > MAX_CARTESIAN_COMBINATIONS {
+        return Err(VariantError::Validation(format!(
+            "Projected combination count ({next_total}) exceeds maximum allowed limit of {MAX_CARTESIAN_COMBINATIONS}"
+        )));
+    }
+
+    Ok(next_total)
+}
+
+fn validate_matrix_dimensions(
+    conn: &Connection,
+    product_id: &str,
+    dimensions: &[MatrixDimensionInput],
+) -> Result<Vec<Vec<AttributeValue>>, VariantError> {
+    validate_parent_product_for_matrix(conn, product_id)?;
+
+    if dimensions.is_empty() {
+        return Err(VariantError::Validation(
+            "At least one attribute dimension is required for matrix generation".into(),
+        ));
+    }
+
+    check_duplicate_attribute_definitions(dimensions)?;
 
     let mut resolved_dimensions = Vec::with_capacity(dimensions.len());
     let mut total_combinations: usize = 1;
 
     for dim in dimensions {
-        if dim.attribute_value_ids.is_empty() {
-            return Err(VariantError::Validation(format!(
-                "Attribute definition '{}' has no selected values",
-                dim.attribute_definition_id
-            )));
-        }
-
-        get_attribute_definition(conn, &dim.attribute_definition_id)?.ok_or_else(|| {
-            VariantError::NotFound(format!(
-                "Attribute definition '{}' not found",
-                dim.attribute_definition_id
-            ))
-        })?;
-
-        let mut seen_vals = std::collections::HashSet::new();
-        let mut resolved_vals = Vec::with_capacity(dim.attribute_value_ids.len());
-
-        for val_id in &dim.attribute_value_ids {
-            if !seen_vals.insert(val_id) {
-                return Err(VariantError::Validation(format!(
-                    "Duplicate attribute value '{val_id}' in dimension '{}'",
-                    dim.attribute_definition_id
-                )));
-            }
-
-            let val = get_attribute_value(conn, val_id)?.ok_or_else(|| {
-                VariantError::NotFound(format!("Attribute value '{val_id}' not found"))
-            })?;
-
-            if val.attribute_definition_id != dim.attribute_definition_id {
-                return Err(VariantError::Validation(format!(
-                    "Attribute value '{}' belongs to definition '{}', not '{}'",
-                    val.id, val.attribute_definition_id, dim.attribute_definition_id
-                )));
-            }
-
-            resolved_vals.push(val);
-        }
-
-        total_combinations = total_combinations
-            .checked_mul(resolved_vals.len())
-            .ok_or_else(|| {
-                VariantError::Validation(format!(
-                    "Matrix generation overflow: projected combinations exceed {MAX_CARTESIAN_COMBINATIONS}"
-                ))
-            })?;
-
-        if total_combinations > MAX_CARTESIAN_COMBINATIONS {
-            return Err(VariantError::Validation(format!(
-                "Projected combination count ({total_combinations}) exceeds maximum allowed limit of {MAX_CARTESIAN_COMBINATIONS}"
-            )));
-        }
-
+        let resolved_vals = resolve_single_dimension_values(conn, dim)?;
+        total_combinations =
+            check_and_multiply_combinations(total_combinations, resolved_vals.len())?;
         resolved_dimensions.push(resolved_vals);
     }
 
@@ -1076,7 +1185,7 @@ fn allocate_variant_sku(
         let candidate = crate::barcode::generate_next_sku(tx, Some(prefix))?;
 
         // Under Decision C and migration 001's unconditional UNIQUE constraint,
-        // candidate must not exist anywhere in product_variants.
+        // candidate must not exist anywhere in product_variants (active or archived).
         let occupied: bool = tx
             .query_row(
                 "SELECT 1 FROM product_variants WHERE sku = ?1 COLLATE NOCASE",
@@ -1216,6 +1325,7 @@ pub fn generate_variant_matrix(
 }
 
 /// Atomically bulk updates active status for a list of variant IDs.
+/// When activating (`is_active = true`), validates active-combination uniqueness and barcode uniqueness.
 pub fn bulk_update_variant_status(
     conn: &Connection,
     input: BulkUpdateVariantStatusInput,
@@ -1230,10 +1340,16 @@ pub fn bulk_update_variant_status(
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
 
     for id in &input.variant_ids {
-        get_variant(&tx, id)?
+        let variant = get_variant(&tx, id)?
             .ok_or_else(|| VariantError::NotFound(format!("Variant '{id}' not found")))?;
 
         if input.is_active {
+            // When reactivating, verify active-combination uniqueness and barcode conflict
+            check_variant_combination_conflict_on_activation(&tx, &variant.product_id, id)?;
+            if let Some(ref bc) = variant.barcode {
+                check_variant_barcode_conflict(&tx, bc, Some(id))?;
+            }
+
             tx.execute(
                 "UPDATE product_variants
                  SET is_active = 1, deleted_at = NULL, updated_at = datetime('now')
@@ -1360,13 +1476,21 @@ pub fn get_variant_by_sku(
 }
 
 /// Searches variants by SKU, barcode, or attribute value for a given product or across the catalog.
+/// Escapes LIKE wildcards (`\`, `%`, `_`) and applies an explicit limit (`DEFAULT_SEARCH_LIMIT`).
+/// Empty or blank queries return empty results without scanning the catalog.
 pub fn search_variants(
     conn: &Connection,
     product_id: Option<&str>,
     query: &str,
 ) -> Result<Vec<VariantWithAttributes>, VariantError> {
     let trimmed = query.trim();
-    let pattern = format!("%{trimmed}%");
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let escaped = escape_like_pattern(trimmed);
+    let pattern = format!("%{escaped}%");
+    let limit = DEFAULT_SEARCH_LIMIT as i64;
 
     let sql = match product_id {
         Some(_) => {
@@ -1376,8 +1500,9 @@ pub fn search_variants(
              LEFT JOIN variant_attribute_values vav ON pv.id = vav.variant_id
              LEFT JOIN attribute_values av ON vav.attribute_value_id = av.id
              WHERE pv.product_id = ?1 AND pv.is_active = 1 AND pv.deleted_at IS NULL
-               AND (pv.sku LIKE ?2 OR pv.barcode LIKE ?2 OR av.value LIKE ?2)
-             ORDER BY pv.created_at ASC"
+               AND (pv.sku LIKE ?2 ESCAPE '\\' OR pv.barcode LIKE ?2 ESCAPE '\\' OR av.value LIKE ?2 ESCAPE '\\')
+             ORDER BY pv.created_at ASC
+             LIMIT ?3"
         }
         None => {
             "SELECT DISTINCT pv.id, pv.product_id, pv.sku, pv.barcode, pv.price_override_minor,
@@ -1386,19 +1511,20 @@ pub fn search_variants(
              LEFT JOIN variant_attribute_values vav ON pv.id = vav.variant_id
              LEFT JOIN attribute_values av ON vav.attribute_value_id = av.id
              WHERE pv.is_active = 1 AND pv.deleted_at IS NULL
-               AND (pv.sku LIKE ?1 OR pv.barcode LIKE ?1 OR av.value LIKE ?1)
-             ORDER BY pv.created_at ASC"
+               AND (pv.sku LIKE ?1 ESCAPE '\\' OR pv.barcode LIKE ?1 ESCAPE '\\' OR av.value LIKE ?1 ESCAPE '\\')
+             ORDER BY pv.created_at ASC
+             LIMIT ?2"
         }
     };
 
     let mut stmt = conn.prepare(sql)?;
     let variants: Vec<ProductVariant> = match product_id {
         Some(pid) => stmt
-            .query_map(params![pid, pattern], map_product_variant_row)?
+            .query_map(params![pid, pattern, limit], map_product_variant_row)?
             .filter_map(Result::ok)
             .collect(),
         None => stmt
-            .query_map(params![pattern], map_product_variant_row)?
+            .query_map(params![pattern, limit], map_product_variant_row)?
             .filter_map(Result::ok)
             .collect(),
     };
