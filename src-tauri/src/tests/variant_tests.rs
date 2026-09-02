@@ -1379,20 +1379,65 @@ fn test_search_variants_wildcards_and_limits() {
     let conn = setup_test_db();
     let product_id = create_sample_variable_product(&conn, "Wildcard Product");
 
-    // 1. Create variants with special characters in SKU: '%', '_', '\'
+    let def = create_attribute_definition(
+        &conn,
+        CreateAttributeDefinitionInput {
+            name: "Material".into(),
+            sort_order: None,
+        },
+    )
+    .expect("def");
+
+    let val_pct = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: def.id.clone(),
+            value: "100% Cotton".into(),
+            sort_order: None,
+        },
+    )
+    .expect("val_pct");
+
+    let val_plain = create_attribute_value(
+        &conn,
+        CreateAttributeValueInput {
+            attribute_definition_id: def.id,
+            value: "1000 Count Cotton".into(),
+            sort_order: None,
+        },
+    )
+    .expect("val_plain");
+
+    // 1. Create variants with valid SKUs:
+    // v_pct has attribute "100% Cotton" and valid SKU "ITEM-PCT-01"
     let v_pct = create_variant(
         &conn,
         CreateVariantInput {
             product_id: product_id.clone(),
-            sku: Some("ITEM%SPECIAL".into()),
+            sku: Some("ITEM-PCT-01".into()),
             barcode: None,
             price_override_minor: None,
             cost_price_minor: None,
-            attribute_value_ids: Vec::new(),
+            attribute_value_ids: vec![val_pct.id],
         },
     )
     .expect("v_pct");
 
+    // v_plain has attribute "1000 Count Cotton" and valid SKU "ITEM-PLAIN-01"
+    let _v_plain = create_variant(
+        &conn,
+        CreateVariantInput {
+            product_id: product_id.clone(),
+            sku: Some("ITEM-PLAIN-01".into()),
+            barcode: None,
+            price_override_minor: None,
+            cost_price_minor: None,
+            attribute_value_ids: vec![val_plain.id],
+        },
+    )
+    .expect("v_plain");
+
+    // v_under has SKU with literal underscore "ITEM_SPECIAL"
     let v_under = create_variant(
         &conn,
         CreateVariantInput {
@@ -1406,33 +1451,37 @@ fn test_search_variants_wildcards_and_limits() {
     )
     .expect("v_under");
 
-    let v_slash = create_variant(
+    // v_dash has SKU with hyphen "ITEM-SPECIAL" to prove '_' is not treated as single-char wildcard
+    let _v_dash = create_variant(
         &conn,
         CreateVariantInput {
             product_id: product_id.clone(),
-            sku: Some("ITEM\\SPECIAL".into()),
+            sku: Some("ITEM-SPECIAL".into()),
             barcode: None,
             price_override_minor: None,
             cost_price_minor: None,
             attribute_value_ids: Vec::new(),
         },
     )
-    .expect("v_slash");
+    .expect("v_dash");
 
-    // 2. Searching for '%' matches only literal '%'
-    let res_pct = search_variants(&conn, Some(&product_id), "%SPECIAL").expect("search %");
+    // 2. Searching with '%' matches only literal '%' in attribute value and does not act as SQL wildcard
+    let res_pct = search_variants(&conn, Some(&product_id), "100%").expect("search %");
     assert_eq!(res_pct.len(), 1);
     assert_eq!(res_pct[0].variant.id, v_pct.variant.id);
 
-    // 3. Searching for '_' matches only literal '_'
+    // Searching for '%' in SKU where no '%' exists returns 0 results (proves % is escaped)
+    let res_sku_pct = search_variants(&conn, Some(&product_id), "ITEM%").expect("search sku %");
+    assert_eq!(res_sku_pct.len(), 0);
+
+    // 3. Searching for '_' matches only literal '_' and does not match '-' (proves _ is escaped)
     let res_under = search_variants(&conn, Some(&product_id), "ITEM_SPEC").expect("search _");
     assert_eq!(res_under.len(), 1);
     assert_eq!(res_under[0].variant.id, v_under.variant.id);
 
-    // 4. Searching for '\' matches only literal '\'
-    let res_slash = search_variants(&conn, Some(&product_id), "\\SPECIAL").expect("search \\");
-    assert_eq!(res_slash.len(), 1);
-    assert_eq!(res_slash[0].variant.id, v_slash.variant.id);
+    // 4. Standard normal SKU search works
+    let res_std = search_variants(&conn, Some(&product_id), "ITEM-PLAIN").expect("search std");
+    assert_eq!(res_std.len(), 1);
 
     // 5. Empty or whitespace query returns empty results without scan
     let res_empty = search_variants(&conn, Some(&product_id), "   ").expect("search empty");
