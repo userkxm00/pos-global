@@ -112,6 +112,7 @@ fn test_migration_014_upgrades_from_013_with_representative_data() {
 
     assert_eq!(price_minor, Some(1999));
     assert!(cost_minor.is_none());
+    assert_eq!(is_active, 1);
     assert!(!created_at.is_empty());
     assert_eq!(created_at.len(), 19);
 
@@ -1519,7 +1520,7 @@ fn test_cross_tenant_variant_mutation_denied() {
         create_local_session(&conn, &user_a.id, &branch_a_id, "password", None).expect("session a");
 
     // 2. Create Organization B and Branch B
-    let (org_b_id, branch_b_id) = create_test_org_and_branch(&conn);
+    let (_org_b_id, branch_b_id) = create_test_org_and_branch(&conn);
     let user_b = create_test_user_with_creds(
         &conn,
         &branch_b_id,
