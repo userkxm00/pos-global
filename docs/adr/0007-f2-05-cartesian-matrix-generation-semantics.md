@@ -32,10 +32,10 @@ This ADR records the project-level architectural decisions governing F2.05 execu
    - `products.sku` and `product_variants.sku` operate in separate namespaces.
    - A Product and a Variant may share the same SKU string without cross-table violation.
    - No cross-table constraint or unified SKU registry is introduced.
-2. **Decision B — F2.05 Local Active-Variant Collision Check**:
+2. **Decision B — F2.05 Local Variant Collision Check & Sequence Advancement**:
    - F2.05 matrix generation must reuse the canonical F2.03 generator `crate::barcode::generate_next_sku` when `sku_prefix` is supplied.
    - F2.05 must not modify `src-tauri/src/barcode/generator.rs`.
-   - Instead, F2.05 matrix generation takes responsibility for checking candidates against active `product_variants` inside the immediate generation transaction, advancing the sequence if a collision occurs, and failing closed if a bounded safety limit is exceeded.
+   - Instead, F2.05 matrix generation takes responsibility for checking candidates against ALL `product_variants` rows (both active and archived, since Variant SKUs remain reserved under Decision C) inside the immediate generation transaction, advancing the sequence if a collision occurs, and failing closed if a bounded safety limit is exceeded.
    - Slug-based SKUs (e.g. `{prefix}-{size}-{color}`) are strictly banned.
 3. **Decision C — Soft-Deleted Variant SKUs Remain Reserved**:
    - Archived/soft-deleted Variant SKUs (`is_active = 0` or `deleted_at IS NOT NULL`) remain permanently reserved.
@@ -65,12 +65,12 @@ This ADR records the project-level architectural decisions governing F2.05 execu
 ### Decision B — Matrix SKU Collision Handling & Sequence Advancement
 - When `sku_prefix` is provided in `GenerateMatrixInput`, F2.05 **MUST reuse the canonical F2.03 generator** `crate::barcode::generate_next_sku`.
 - When `sku_prefix` is omitted or `None`, generated variants receive `sku = NULL`.
-- Because the F2.03 generator inspects only `products`, F2.05 matrix generation must wrap candidate retrieval with a **local active-Variant collision check**:
+- Because the F2.03 generator inspects only `products`, F2.05 matrix generation must wrap candidate retrieval with a **local Variant collision check across all variant rows**:
   1. Start the F2.05 `Immediate` transaction.
   2. Request a candidate SKU from canonical `generate_next_sku(&tx, Some(prefix))`.
-  3. Query `tx` for collision against active variants: `SELECT 1 FROM product_variants WHERE sku = ?1 COLLATE NOCASE AND is_active = 1`.
+  3. Query `tx` for collision against all variants (active and archived): `SELECT 1 FROM product_variants WHERE sku = ?1 COLLATE NOCASE`.
   4. If occupied, loop to request the next sequence from canonical `generate_next_sku(&tx, Some(prefix))` and check again.
-  5. Continue until a candidate is confirmed unoccupied in active variants.
+  5. Continue until a candidate is confirmed unoccupied across all `product_variants`.
   6. Bound this resolution loop (fail closed with `VariantError::Validation` if unique candidate cannot be allocated within safety limit).
   7. The final Variant insert and SKU sequence mutation remain inside the same transaction.
 - **Constraints**:

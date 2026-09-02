@@ -177,7 +177,7 @@ pub fn append_name_or_description_search(
 #[cfg(test)]
 mod tests {
 
-    use super::init_database;
+    use super::{init_database, MIGRATIONS};
     use rusqlite::Connection;
 
     #[test]

@@ -1637,25 +1637,36 @@ fn test_authorization_does_not_leak_resource_existence() {
         create_local_session(&conn, &user_cashier.id, &branch_id, "password", None)
             .expect("session cashier");
 
-    // 1. Authorized caller + valid ID: succeeds
-    let auth_ok = authorize_catalog_mutation(&conn, &session_mgr.id);
-    assert!(auth_ok.is_ok());
-    let get_valid = get_variant(&conn, &v.variant.id).expect("get valid");
-    assert!(get_valid.is_some());
+    // End-to-end operation entry point under session
+    let delete_under_session = |session_id: &str, variant_id: &str| -> Result<(), String> {
+        authorize_catalog_mutation(&conn, session_id)?;
+        soft_delete_variant(&conn, variant_id).map_err(|e| e.to_string())
+    };
 
-    // 2. Authorized caller + unknown ID: returns None (NotFound)
-    let get_unknown = get_variant(&conn, "non-existent-id").expect("get unknown");
-    assert!(get_unknown.is_none());
+    // 1. Authorized caller + valid ID: succeeds
+    let res_mgr_valid = delete_under_session(&session_mgr.id, &v.variant.id);
+    assert!(res_mgr_valid.is_ok(), "Authorized deletion must succeed");
+
+    // 2. Authorized caller + unknown ID: fails with NotFound
+    let res_mgr_unknown = delete_under_session(&session_mgr.id, "non-existent-id");
+    assert!(
+        res_mgr_unknown.is_err(),
+        "Authorized deletion of non-existent resource must return NotFound"
+    );
+    assert!(
+        res_mgr_unknown.unwrap_err().contains("not found"),
+        "Authorized error must indicate NotFound"
+    );
 
     // 3. Unauthorized caller + existing ID: fails authorization check
-    let unauth_existing = authorize_catalog_mutation(&conn, &session_cashier.id);
+    let unauth_existing = delete_under_session(&session_cashier.id, &v.variant.id);
     assert!(
         unauth_existing.is_err(),
         "Unauthorized caller must fail authorization check"
     );
 
     // 4. Unauthorized caller + unknown ID: fails with the EXACT same authorization error without leaking existence
-    let unauth_unknown = authorize_catalog_mutation(&conn, &session_cashier.id);
+    let unauth_unknown = delete_under_session(&session_cashier.id, "non-existent-id");
     assert!(
         unauth_unknown.is_err(),
         "Unauthorized caller must fail authorization check"

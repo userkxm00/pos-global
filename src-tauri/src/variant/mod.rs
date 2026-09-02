@@ -91,6 +91,10 @@ pub struct CreateVariantInput {
 /// - `barcode: None` => preserve current barcode
 /// - `barcode: Some("")` (empty string) => explicitly clear barcode to NULL
 /// - `barcode: Some("VALUE")` => validate and update to new barcode
+/// - `price_override_minor: None` => clear price override to NULL (variant inherits parent product base price)
+/// - `price_override_minor: Some(val)` => validate and set price override in minor units
+/// - `cost_price_minor: None` => clear cost price to NULL
+/// - `cost_price_minor: Some(val)` => validate and set cost price in minor units
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateVariantInput {
     pub id: String,
