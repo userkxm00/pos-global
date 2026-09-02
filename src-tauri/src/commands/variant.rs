@@ -22,7 +22,6 @@ pub fn create_attribute_definition(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // Authorization must happen before any resource inspection
     authorize_catalog_mutation(&conn, &session_id)?;
     crate::variant::create_attribute_definition(&conn, request).map_err(|e| e.to_string())
 }
@@ -38,7 +37,6 @@ pub fn get_attribute_definition(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // Authorization must happen before resource existence is revealed
     authorize_catalog_read(&conn, &session_id)?;
     match crate::variant::get_attribute_definition(&conn, &id).map_err(|e| e.to_string())? {
         Some(def) => Ok(def),
@@ -71,19 +69,7 @@ pub fn create_attribute_value(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_mutation(&conn, &session_id)?;
-
-    // 2. Validate existence for authorized caller
-    crate::variant::get_attribute_definition(&conn, &request.attribute_definition_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| {
-            format!(
-                "Attribute definition with ID '{}' not found",
-                request.attribute_definition_id
-            )
-        })?;
-
     crate::variant::create_attribute_value(&conn, request).map_err(|e| e.to_string())
 }
 
@@ -116,16 +102,7 @@ pub fn list_attribute_values_by_definition(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_read(&conn, &session_id)?;
-
-    // 2. Validate existence for authorized caller
-    crate::variant::get_attribute_definition(&conn, &attribute_definition_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| {
-            format!("Attribute definition with ID '{attribute_definition_id}' not found")
-        })?;
-
     crate::variant::list_attribute_values_by_definition(&conn, &attribute_definition_id)
         .map_err(|e| e.to_string())
 }
@@ -141,14 +118,7 @@ pub fn create_variant(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_mutation(&conn, &session_id)?;
-
-    // 2. Validate existence for authorized caller
-    crate::product::get_product(&conn, &request.product_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Parent product with ID '{}' not found", request.product_id))?;
-
     crate::variant::create_variant(&conn, request).map_err(|e| e.to_string())
 }
 
@@ -189,14 +159,7 @@ pub fn list_variants_by_product(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_read(&conn, &session_id)?;
-
-    // 2. Validate existence for authorized caller
-    crate::product::get_product(&conn, &product_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Product with ID '{product_id}' not found"))?;
-
     let variants = crate::variant::list_variants_by_product(&conn, &product_id, active_only)
         .map_err(|e| e.to_string())?;
 
@@ -224,14 +187,7 @@ pub fn update_variant(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_mutation(&conn, &session_id)?;
-
-    // 2. Validate existence for authorized caller
-    crate::variant::get_variant(&conn, &request.id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Variant with ID '{}' not found", request.id))?;
-
     crate::variant::update_variant(&conn, request).map_err(|e| e.to_string())
 }
 
@@ -246,14 +202,7 @@ pub fn delete_variant(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_mutation(&conn, &session_id)?;
-
-    // 2. Validate existence for authorized caller
-    crate::variant::get_variant(&conn, &id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Variant with ID '{id}' not found"))?;
-
     crate::variant::soft_delete_variant(&conn, &id).map_err(|e| e.to_string())
 }
 
@@ -268,14 +217,7 @@ pub fn preview_variant_matrix(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_read(&conn, &session_id)?;
-
-    // 2. Validate existence for authorized caller
-    crate::product::get_product(&conn, &request.product_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Product with ID '{}' not found", request.product_id))?;
-
     crate::variant::preview_variant_matrix(&conn, request).map_err(|e| e.to_string())
 }
 
@@ -290,14 +232,7 @@ pub fn generate_variant_matrix(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_mutation(&conn, &session_id)?;
-
-    // 2. Validate existence for authorized caller
-    crate::product::get_product(&conn, &request.product_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Product with ID '{}' not found", request.product_id))?;
-
     crate::variant::generate_variant_matrix(&conn, request).map_err(|e| e.to_string())
 }
 
@@ -312,16 +247,7 @@ pub fn bulk_update_variant_status(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_mutation(&conn, &session_id)?;
-
-    // 2. Validate existence for authorized caller
-    for id in &request.variant_ids {
-        crate::variant::get_variant(&conn, id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("Variant with ID '{id}' not found"))?;
-    }
-
     crate::variant::bulk_update_variant_status(&conn, request).map_err(|e| e.to_string())
 }
 
@@ -336,16 +262,7 @@ pub fn bulk_update_variant_prices(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_mutation(&conn, &session_id)?;
-
-    // 2. Validate existence for authorized caller
-    for id in &request.variant_ids {
-        crate::variant::get_variant(&conn, id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("Variant with ID '{id}' not found"))?;
-    }
-
     crate::variant::bulk_update_variant_prices(&conn, request).map_err(|e| e.to_string())
 }
 
@@ -391,15 +308,6 @@ pub fn search_variants(
         .lock()
         .map_err(|e| format!("database lock failed: {e}"))?;
 
-    // 1. Authorize caller first
     authorize_catalog_read(&conn, &session_id)?;
-
-    // 2. If product_id specified, validate existence for authorized caller
-    if let Some(ref pid) = product_id {
-        crate::product::get_product(&conn, pid)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("Product with ID '{pid}' not found"))?;
-    }
-
     crate::variant::search_variants(&conn, product_id.as_deref(), &query).map_err(|e| e.to_string())
 }
