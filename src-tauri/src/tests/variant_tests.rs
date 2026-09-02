@@ -352,7 +352,7 @@ fn test_update_variant_partial_update_semantics() {
             barcode: Some("9780201379624".into()),
             price_override_minor: Some(1000),
             cost_price_minor: Some(500),
-            attribute_value_ids: vec![],
+            attribute_value_ids: Vec::new(),
         },
     )
     .expect("variant created");
@@ -1469,8 +1469,8 @@ fn test_variant_catalog_authorization() {
         "manager",
     )
     .expect("manager user created");
-    let session_mgr =
-        create_local_session(&conn, &user_mgr.id, &branch_id, None, None, None).expect("session");
+    let session_mgr = create_local_session(&conn, &user_mgr.id, &branch_id, "password", None)
+        .expect("session mgr");
 
     // User without ProductsManage permission (Cashier)
     let user_cashier = create_test_user_with_creds(
@@ -1484,8 +1484,8 @@ fn test_variant_catalog_authorization() {
     )
     .expect("cashier user created");
     let session_cashier =
-        create_local_session(&conn, &user_cashier.id, &branch_id, None, None, None)
-            .expect("session");
+        create_local_session(&conn, &user_cashier.id, &branch_id, "password", None)
+            .expect("session cashier");
 
     // Manager can mutate catalog
     assert!(authorize_catalog_mutation(&conn, &session_mgr.id).is_ok());
@@ -1515,7 +1515,7 @@ fn test_cross_tenant_variant_mutation_denied() {
     )
     .expect("user a created");
     let session_a =
-        create_local_session(&conn, &user_a.id, &branch_a_id, None, None, None).expect("session a");
+        create_local_session(&conn, &user_a.id, &branch_a_id, "password", None).expect("session a");
 
     // 2. Create Organization B and Branch B
     let org_b = crate::organization::create_organization(
@@ -1547,7 +1547,7 @@ fn test_cross_tenant_variant_mutation_denied() {
     )
     .expect("user b created");
     let session_b =
-        create_local_session(&conn, &user_b.id, &branch_b.id, None, None, None).expect("session b");
+        create_local_session(&conn, &user_b.id, &branch_b.id, "password", None).expect("session b");
 
     // 3. Configure Org A as the catalog organization in business_settings
     conn.execute(
