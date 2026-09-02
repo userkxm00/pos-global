@@ -876,10 +876,8 @@ pub fn update_variant(
     // None => preserve; Some("") => clear to NULL; Some("val") => validate & update
     let clean_barcode = match input.barcode {
         None => {
-            if input.is_active {
-                if let Some(ref bc) = existing.barcode {
-                    check_variant_barcode_conflict(conn, bc, Some(&input.id))?;
-                }
+            if let (true, Some(ref bc)) = (input.is_active, &existing.barcode) {
+                check_variant_barcode_conflict(conn, bc, Some(&input.id))?;
             }
             existing.barcode.clone()
         }
