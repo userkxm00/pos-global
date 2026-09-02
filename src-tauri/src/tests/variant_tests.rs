@@ -1462,11 +1462,13 @@ fn test_variant_catalog_authorization() {
     let user_mgr = create_test_user_with_creds(
         &conn,
         &branch_id,
-        "manager",
         "Manager User",
-        "mgr_pass_123",
+        Some("manager"),
+        Some("mgr_pass_123"),
+        None,
         "manager",
-    );
+    )
+    .expect("manager user created");
     let session_mgr =
         create_local_session(&conn, &user_mgr.id, &branch_id, None, None, None).expect("session");
 
@@ -1474,11 +1476,13 @@ fn test_variant_catalog_authorization() {
     let user_cashier = create_test_user_with_creds(
         &conn,
         &branch_id,
-        "cashier",
         "Cashier User",
-        "cashier_pass_123",
+        Some("cashier"),
+        Some("cashier_pass_123"),
+        None,
         "cashier",
-    );
+    )
+    .expect("cashier user created");
     let session_cashier =
         create_local_session(&conn, &user_cashier.id, &branch_id, None, None, None)
             .expect("session");
@@ -1503,11 +1507,13 @@ fn test_cross_tenant_variant_mutation_denied() {
     let user_a = create_test_user_with_creds(
         &conn,
         &branch_a_id,
-        "admin_a",
         "Admin Org A",
-        "pass_a_123",
+        Some("admin_a"),
+        Some("pass_a_123"),
+        None,
         "admin",
-    );
+    )
+    .expect("user a created");
     let session_a =
         create_local_session(&conn, &user_a.id, &branch_a_id, None, None, None).expect("session a");
 
@@ -1533,11 +1539,13 @@ fn test_cross_tenant_variant_mutation_denied() {
     let user_b = create_test_user_with_creds(
         &conn,
         &branch_b.id,
-        "admin_b",
         "Admin Org B",
-        "pass_b_123",
+        Some("admin_b"),
+        Some("pass_b_123"),
+        None,
         "admin",
-    );
+    )
+    .expect("user b created");
     let session_b =
         create_local_session(&conn, &user_b.id, &branch_b.id, None, None, None).expect("session b");
 
