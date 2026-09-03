@@ -23,6 +23,7 @@ mod tests;
 mod unit;
 mod user;
 mod variant;
+mod warranty;
 mod weighted;
 
 use tauri::Manager;
@@ -144,6 +145,10 @@ fn main() {
             commands::serial::lookup_serial_instance,
             commands::serial::list_serial_instances,
             commands::serial::update_serial_status,
+            commands::warranty::calculate_warranty_expiration,
+            commands::warranty::evaluate_warranty_coverage,
+            commands::warranty::register_instance_warranty,
+            commands::warranty::get_instance_warranty,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
