@@ -6,32 +6,31 @@
 ## Current
 
 - Current Phase: Phase 2 — Product & inventory core
-- Current Milestone: F2.07 — Batches, expiry dates & FEFO
-- Milestone Status: PR #75 OPEN / SONAR COGNITIVE COMPLEXITY REMEDIATED
-- Branch: `feature/f2-07-batches-expiry-fefo`
-- HEAD: `4426759fabb1e1242c7474ece9205924ec28fa98`
-- Remote HEAD: `4426759fabb1e1242c7474ece9205924ec28fa98` (`origin/feature/f2-07-batches-expiry-fefo`)
-- PR: #75 (https://github.com/userkxm00/pos-global/pull/75)
-- Working Tree: Clean (audited and verified)
-- Last Completed Action: Refactored validate_batch_dates in batch/mod.rs into focused helpers normalize_and_validate_expiry and normalize_and_validate_mfg, reducing Cognitive Complexity from 20 to <= 15 (resolving SonarCloud S3776)
+- Current Milestone: F2.08 — Serial / IMEI / Assets
+- Milestone Status: IMPLEMENTED / READY FOR COMMIT & PR
+- Branch: `feature/f2-08-serial-imei-assets`
+- HEAD: `5e525ecacf7d8d14f54158e249ce4f699d19ded7`
+- Remote HEAD: `5e525ecacf7d8d14f54158e249ce4f699d19ded7` (`origin/main`)
+- PR: Pending creation
+- Working Tree: Clean across authorized F2.08 files
+- Last Completed Action: Implemented F2.08 Migration 017, domain engine in `serial/mod.rs`, Tauri IPC commands in `commands/serial.rs`, and comprehensive unit/integration/migration test suite in `tests/serial_tests.rs` (36 test cases)
 - Current Blocker: None
-- Next Authorized Action: Push remediation to origin and verify SonarCloud and CI
-- Exact F2.07 Scope Implemented:
-  - ADR-0009 created and accepted (`docs/adr/0009-f2-07-batch-expiry-fefo-architecture-semantics.md`)
-  - Migration file `016_batches_and_expiry.sql` created rebuilding `product_batches` with nullable `expiry_date`, integer milli precision (`quantity_milli INTEGER NOT NULL CHECK (quantity_milli >= 0)`), legacy `quantity REAL` removed, partial unique indexes for case-insensitive batch numbers, and fail-closed pre-validation
-  - Registered `016_batches_and_expiry` in `MIGRATIONS` array in `src-tauri/src/db/mod.rs`
-  - Domain engine in `src-tauri/src/batch/mod.rs` implementing orthogonal capability checks (`is_batch_tracked`, `is_expiry_required`, `is_fefo_enabled`), calendar date validation with leap year handling, lifecycle status transitions with terminal depleted/recalled states, and deterministic read-only FEFO planning (`plan_fefo_allocation`)
-  - Tauri IPC commands in `src-tauri/src/commands/batch.rs` (`create_product_batch`, `get_product_batch`, `list_product_batches`, `update_batch_status`, `plan_fefo_allocation`) with branch/tenant scope enforcement
-  - Comprehensive unit/integration/migration test suite with 25 test functions in `src-tauri/src/tests/batch_tests.rs`
+- Next Authorized Action: Commit, push feature branch to origin, and create pull request into `main`
+- Exact F2.08 Scope Implemented:
+  - ADR-0010 accepted (`docs/adr/0010-f2-08-serial-imei-assets-architecture-semantics.md`)
+  - Migration file `017_serial_imei_assets.sql` created rebuilding `serial_numbers` with nullable `serial_number`, `imei`, and `asset_tag`, check constraint asserting at least one identifier, integer minor precision `cost_price_minor`, partial unique indexes (global NOCASE serial, global IMEI, branch-scoped NOCASE asset tag), and fail-closed pre-validation
+  - Registered `017_serial_imei_assets` in `MIGRATIONS` array in `src-tauri/src/db/mod.rs`
+  - Domain engine in `src-tauri/src/serial/mod.rs` implementing orthogonal capability checks (`is_serial_tracked`), 15-digit Luhn checksum validation for IMEI, trimming/length validation, lifecycle state transitions with terminal `recalled`/`disposed` states, and CRUD operations
+  - Tauri IPC commands in `src-tauri/src/commands/serial.rs` (`create_serial_instance`, `get_serial_instance`, `lookup_serial_instance`, `list_serial_instances`, `update_serial_status`) with branch/tenant scope enforcement and fail-closed existence-leakage prevention
+  - Comprehensive unit/integration/migration test suite in `src-tauri/src/tests/serial_tests.rs` (36 tests)
 - Protected Future Scope (STRICTLY PRESERVED / UNTOUCHED):
-  - F2.08: Serial / IMEI / assets
   - F2.09: Warranty
   - F2.10–F2.15: Locations, bins, stock ledger, transfers, adjustments, stock count reconciliation
   - F2.19 / F7.03: Variable-weight barcode parsing (EAN-13 prefixes 20-29) and scale label printing
-  - F2.23: Batch / Expiry / FEFO UI (React frontend)
+  - F2.24: Serial / IMEI / Assets UI (React frontend)
   - Phase 3: Sales and cash transactions (reference slice `src-tauri/src/commands/sales.rs` remains frozen)
   - Phase 4: Purchasing, receiving (GRN), and supplier batch association
-  - Phase 10: Hardware scale device drivers / protocols
+  - Phase 10: Hardware scale/scanner device drivers / protocols
 - Latest Validation State:
   - `cargo fmt --check`: PASSED
   - `npm test`: PASSED

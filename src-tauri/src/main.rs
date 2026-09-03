@@ -17,6 +17,7 @@ mod organization;
 mod permission;
 mod product;
 mod register;
+mod serial;
 #[cfg(test)]
 mod tests;
 mod unit;
@@ -138,6 +139,11 @@ fn main() {
             commands::batch::list_product_batches,
             commands::batch::update_batch_status,
             commands::batch::plan_fefo_allocation,
+            commands::serial::create_serial_instance,
+            commands::serial::get_serial_instance,
+            commands::serial::lookup_serial_instance,
+            commands::serial::list_serial_instances,
+            commands::serial::update_serial_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

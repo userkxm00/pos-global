@@ -66,6 +66,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "016_batches_and_expiry",
         include_str!("migrations/016_batches_and_expiry.sql"),
     ),
+    (
+        "017_serial_imei_assets",
+        include_str!("migrations/017_serial_imei_assets.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {
