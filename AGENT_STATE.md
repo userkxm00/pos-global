@@ -9,13 +9,13 @@
 - Current Milestone: F2.07 — Batches, expiry dates & FEFO
 - Milestone Status: PR #75 OPEN / REMEDIATION AUDITED
 - Branch: `feature/f2-07-batches-expiry-fefo`
-- HEAD: `1a4afce01799181b8bfc6bc2bcbff091a3e65065`
-- Remote HEAD: `1a4afce01799181b8bfc6bc2bcbff091a3e65065` (`origin/feature/f2-07-batches-expiry-fefo`)
+- HEAD: `f71f914820ffd5060851c882ca64649600170f6b`
+- Remote HEAD: `f71f914820ffd5060851c882ca64649600170f6b` (`origin/feature/f2-07-batches-expiry-fefo`)
 - PR: #75 (https://github.com/userkxm00/pos-global/pull/75)
-- Working Tree: Hardened migration with duplicate pre-validation, staged uniqueness check, clippy fixes, and regression tests
-- Last Completed Action: Added fail-closed duplicate pre-validation to migration 016, fixed leap-year clippy lint, collapsed nested if-let, corrected test helper signatures, and strengthened migration rollback tests
+- Working Tree: Disambiguated glob command imports in batch_tests.rs
+- Last Completed Action: Disambiguated batch command test imports, verified migration 016 duplicate guards and atomic rollback
 - Current Blocker: None
-- Next Authorized Action: Commit remediation and push to origin
+- Next Authorized Action: Commit and push import disambiguation to origin
 - Exact F2.07 Scope Implemented:
   - ADR-0009 created and accepted (`docs/adr/0009-f2-07-batch-expiry-fefo-architecture-semantics.md`)
   - Migration file `016_batches_and_expiry.sql` created rebuilding `product_batches` with nullable `expiry_date`, integer milli precision (`quantity_milli INTEGER NOT NULL CHECK (quantity_milli >= 0)`), legacy `quantity REAL` removed, partial unique indexes for case-insensitive batch numbers, and fail-closed pre-validation
