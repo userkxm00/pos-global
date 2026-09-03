@@ -7,16 +7,16 @@
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.06 — Weighted products
-- Milestone Status: PR_OPEN_CI_TRIAGE (PR #74 open; targeted forensic remediation of Clippy and CodeRabbit feedback underway)
+- Milestone Status: PR_OPEN_CI_TRIAGE (PR #74 open; Greptile P1 mass unit boundary resolved, CodeRabbit product_id trimming resolved, SQLite base_price and nullable unit_type remediated)
 - Branch: `feature/f2-06-weighted-products` (local workspace) / `origin/feature/f2-06-weighted-products` (remote)
-- HEAD: `3f88c4003dee1ac186bf43619c7a640d0bd27f52`
-- Remote HEAD: `3f88c4003dee1ac186bf43619c7a640d0bd27f52` (`origin/feature/f2-06-weighted-products`)
+- HEAD: `b1bd06d4c104432480bd5a6f80615f546450390a`
+- Remote HEAD: `b1bd06d4c104432480bd5a6f80615f546450390a` (`origin/feature/f2-06-weighted-products`)
 - PR: #74 (open, https://github.com/userkxm00/pos-global/pull/74)
-- PR HEAD: `3f88c4003dee1ac186bf43619c7a640d0bd27f52`
-- Working Tree: Forensic remediation in progress
-- Last Completed Action: PR #74 opened; CI check runs inspected; Clippy E0308, dead-code, and unit conversion root causes remediated
+- PR HEAD: `b1bd06d4c104432480bd5a6f80615f546450390a`
+- Working Tree: Forensic remediation verified; awaiting commit authorization
+- Last Completed Action: Clippy passed with 0 warnings; exact CI test failure analyzed (SQLite base_price column & nullable unit_type); Greptile P1 and CodeRabbit findings resolved; tests updated
 - Current Blocker: Local environment lacks MSVC C++ Build Tools (`link.exe` / `kernel32.lib`) and MinGW GCC (`gcc.exe`); authoritative cargo test execution runs in remote GitHub Actions CI.
-- Next Authorized Action: Local validation and preparation of remediation report
+- Next Authorized Action: Awaiting user review and authorization to commit and push the verified remediation
 - Exact F2.06 Scope Implemented:
   - Migration file `015_weighted_products.sql` created with table `product_weight_configs` (no redundant index, no premature hardware columns)
   - Registered `015_weighted_products` in `MIGRATIONS` array in `src-tauri/src/db/mod.rs`

@@ -192,6 +192,13 @@ If a product satisfies either condition:
 - The resolved unit MUST have `dimension = 'mass'` (`UnitDimension::Mass`).
 - If `unit_type` is missing or resolves to any dimension other than `'mass'` (e.g. `'count'`, `'volume'`, `'length'`), the operation MUST be rejected with `WeightedError::InvalidUnitDimension`.
 
+#### C. Supported Mass Units Boundary (F2.06 Canonical Metric Scope)
+While the general units catalog (`units` table) supports various mass units (including `oz`, `lb`), F2.06 exact integer financial calculation strictly supports canonical metric mass units:
+- `kg` (Kilogram)
+- `g` (Gram)
+
+Products assigned non-canonical or non-metric mass units (such as `oz` or `lb`) are rejected at configuration and calculation time (`WeightedError::Validation`) because exact integer normalization cannot be guaranteed without introducing arbitrary rational fractions or floating-point approximations. Expanding weighted pricing to imperial or non-metric mass units is deferred to a future dedicated ADR.
+
 ---
 
 ## Consequences

@@ -254,6 +254,24 @@ fn test_volume_dimension_rejection() {
 }
 
 #[test]
+fn test_unsupported_mass_unit_rejection() {
+    let conn = setup_test_db();
+    // Non-canonical mass units (e.g. "oz", "lb") exist in units catalog with dimension 'mass',
+    // but F2.06 exact integer pricing requires canonical metric mass units ('kg' or 'g').
+    let p_oz = make_test_product(&conn, "Bulk Ounces", "weighted", Some("oz"), 150);
+    let err_oz = validate_weighted_product_unit(&conn, &p_oz).unwrap_err();
+    assert!(
+        matches!(err_oz, WeightedError::Validation(msg) if msg.contains("Unsupported mass unit"))
+    );
+
+    let p_lb = make_test_product(&conn, "Bulk Pounds", "weighted", Some("lb"), 450);
+    let err_lb = validate_weighted_product_unit(&conn, &p_lb).unwrap_err();
+    assert!(
+        matches!(err_lb, WeightedError::Validation(msg) if msg.contains("Unsupported mass unit"))
+    );
+}
+
+#[test]
 fn test_missing_unit_rejection() {
     let conn = setup_test_db();
     let p_none = make_test_product(&conn, "Mystery Weighted", "weighted", None, 100);
@@ -617,6 +635,41 @@ fn test_calculate_weighted_item_cross_unit_normalized() {
     assert_eq!(res.total_price_minor, 1000);
 }
 
+#[test]
+fn test_product_id_whitespace_trimming() {
+    let conn = setup_test_db();
+    let pid = make_test_product(&conn, "Trimmed Produce", "weighted", Some("kg"), 200);
+    let padded_pid = format!("  {pid}  ");
+
+    // Config upsert with padded product_id succeeds and normalizes key
+    let cfg = upsert_product_weight_config(
+        &conn,
+        &UpsertWeightConfigInput {
+            product_id: padded_pid.clone(),
+            default_tare_milli: Some(25),
+            min_weight_milli: None,
+            max_weight_milli: None,
+        },
+    )
+    .expect("upsert with padded id");
+    assert_eq!(cfg.product_id, pid);
+
+    // Query with padded product_id succeeds
+    let fetched = get_product_weight_config(&conn, &padded_pid)
+        .expect("fetch with padded id")
+        .expect("found");
+    assert_eq!(fetched.default_tare_milli, 25);
+
+    // Calculation with padded product_id succeeds
+    let calc =
+        calculate_weighted_item(&conn, &padded_pid, 1025, None, None).expect("calc with padded id");
+    assert_eq!(calc.net_weight_milli, 1000);
+    assert_eq!(calc.total_price_minor, 200);
+
+    // Delete with padded product_id succeeds
+    delete_product_weight_config(&conn, &padded_pid).expect("delete with padded id");
+}
+
 // =========================================================================
 // 5. TAURI IPC COMMAND & AUTHORIZATION TESTS
 // =========================================================================
@@ -698,6 +751,7 @@ fn test_weighted_commands_authorization_manager_allowed() {
 #[test]
 fn test_weighted_commands_unauthenticated_session_denied() {
     let conn = setup_test_db();
+    let (_, _branch_id) = create_test_org_and_branch(&conn);
     let pid = make_test_product(&conn, "Secured Apples", "weighted", Some("kg"), 250);
 
     let input = UpsertWeightConfigInput {

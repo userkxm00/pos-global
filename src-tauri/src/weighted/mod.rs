@@ -231,6 +231,7 @@ pub fn validate_weight_bounds(
 /// Determines whether a product is classified as weighted, either via `product_type = 'weighted'`
 /// or via active capability `'WEIGHT'` in `product_capabilities`.
 pub fn is_product_weighted(conn: &Connection, product_id: &str) -> Result<bool, WeightedError> {
+    let product_id = product_id.trim();
     let ptype: Option<String> = conn
         .query_row(
             "SELECT product_type FROM products WHERE id = ?1 AND is_active = 1",
@@ -266,18 +267,21 @@ pub fn is_product_weighted(conn: &Connection, product_id: &str) -> Result<bool, 
 }
 
 /// Enforces that a weighted product has an assigned unit in `products.unit_type`
-/// resolving to `units.code COLLATE NOCASE` with `dimension = 'mass'`.
+/// resolving to `units.code COLLATE NOCASE` with `dimension = 'mass'` and supported
+/// metric mass units ('kg' or 'g') for exact integer pricing.
 pub fn validate_weighted_product_unit(
     conn: &Connection,
     product_id: &str,
 ) -> Result<String, WeightedError> {
+    let product_id = product_id.trim();
     let unit_code: Option<String> = conn
         .query_row(
             "SELECT unit_type FROM products WHERE id = ?1",
             params![product_id],
-            |row| row.get(0),
+            |row| row.get::<_, Option<String>>(0),
         )
-        .optional()?;
+        .optional()?
+        .flatten();
 
     let unit_code = match unit_code {
         Some(code) if !code.trim().is_empty() => code.trim().to_string(),
@@ -307,6 +311,14 @@ pub fn validate_weighted_product_unit(
             unit_code,
             dimension: dimension_str,
         });
+    }
+
+    // F2.06 exact integer pricing supports canonical metric mass units: kg and g
+    let unit_lower = unit_code.to_lowercase();
+    if unit_lower != "kg" && unit_lower != "g" {
+        return Err(WeightedError::Validation(format!(
+            "Unsupported mass unit '{unit_code}' for weighted product. F2.06 requires canonical metric mass units ('kg' or 'g') for exact integer pricing."
+        )));
     }
 
     Ok(unit_code)
@@ -406,11 +418,12 @@ pub fn get_product_weight_config(
     conn: &Connection,
     product_id: &str,
 ) -> Result<Option<ProductWeightConfig>, WeightedError> {
+    let product_id = product_id.trim();
     let config = conn
         .query_row(
             "SELECT product_id, default_tare_milli, min_weight_milli, max_weight_milli, created_at, updated_at
              FROM product_weight_configs WHERE product_id = ?1",
-            params![product_id.trim()],
+            params![product_id],
             map_weight_config_row,
         )
         .optional()?;
@@ -423,9 +436,10 @@ pub fn delete_product_weight_config(
     conn: &Connection,
     product_id: &str,
 ) -> Result<(), WeightedError> {
+    let product_id = product_id.trim();
     let affected = conn.execute(
         "DELETE FROM product_weight_configs WHERE product_id = ?1",
-        params![product_id.trim()],
+        params![product_id],
     )?;
 
     if affected == 0 {
@@ -446,6 +460,8 @@ pub fn calculate_weighted_item(
     custom_tare_milli: Option<i64>,
     source_unit: Option<&str>,
 ) -> Result<WeightedCalculationResult, WeightedError> {
+    let product_id = product_id.trim();
+
     // 1. Verify product exists and is classified as weighted
     if !is_product_weighted(conn, product_id)? {
         return Err(WeightedError::Validation(format!(
@@ -453,22 +469,24 @@ pub fn calculate_weighted_item(
         )));
     }
 
-    // 2. Fetch product base price
+    // 2. Fetch product base price (stored as REAL in products.base_price, converted to exact integer minor)
     let row_opt = conn
         .query_row(
-            "SELECT base_price_minor FROM products WHERE id = ?1 AND is_active = 1",
-            params![product_id.trim()],
-            |row| row.get::<_, i64>(0),
+            "SELECT base_price FROM products WHERE id = ?1 AND is_active = 1",
+            params![product_id],
+            |row| row.get::<_, f64>(0),
         )
         .optional()?;
 
-    let Some(unit_price_minor) = row_opt else {
+    let Some(base_price_real) = row_opt else {
         return Err(WeightedError::NotFound(format!(
             "Product '{product_id}' not found or inactive"
         )));
     };
 
-    // 3. Validate product unit dimension
+    let unit_price_minor = crate::product::real_to_minor(base_price_real);
+
+    // 3. Validate product unit dimension and metric requirement
     let pricing_unit = validate_weighted_product_unit(conn, product_id)?;
 
     // 4. Normalize gross weight if measured in a different metric mass unit
@@ -476,7 +494,14 @@ pub fn calculate_weighted_item(
         Some(unit)
             if !unit.trim().is_empty() && !unit.trim().eq_ignore_ascii_case(&pricing_unit) =>
         {
-            normalize_metric_mass_quantity_milli(gross_weight_milli, unit, &pricing_unit)?
+            let unit_trimmed = unit.trim();
+            let unit_lower = unit_trimmed.to_lowercase();
+            if unit_lower != "kg" && unit_lower != "g" {
+                return Err(WeightedError::Validation(format!(
+                    "Unsupported scale measurement unit '{unit_trimmed}'. F2.06 requires canonical metric mass units ('kg' or 'g')."
+                )));
+            }
+            normalize_metric_mass_quantity_milli(gross_weight_milli, unit_trimmed, &pricing_unit)?
         }
         _ => gross_weight_milli,
     };
