@@ -1,6 +1,9 @@
 // Integration and unit tests for F2.06 — Weighted Products (ADR-0008).
 
-use crate::db::DbState;
+use crate::commands::weighted::{
+    calculate_weighted_item_impl, delete_product_weight_config_impl,
+    get_product_weight_config_impl, set_product_weight_config_impl,
+};
 use crate::product::{create_product, CreateProductInput};
 use crate::tests::test_helpers::{
     apply_migrations_up_to, create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
@@ -14,7 +17,6 @@ use crate::weighted::{
     UpsertWeightConfigInput, WeightedError,
 };
 use rusqlite::{params, Connection};
-use std::sync::Mutex;
 
 fn make_test_product(
     conn: &Connection,
@@ -157,29 +159,37 @@ fn test_arithmetic_overflow_rejection() {
 
 #[test]
 fn test_exact_cross_unit_normalization() {
-    // Identity kg -> kg
+    // Identity kg -> kg: 1.250 kg = 1,250 milli-kg
     assert_eq!(
         normalize_metric_mass_quantity_milli(1250, "kg", "kg").expect("kg-kg"),
         1250
     );
 
-    // Identity g -> g
+    // Identity g -> g: 2.500 g = 2,500 milli-g
     assert_eq!(
         normalize_metric_mass_quantity_milli(2500, "g", "g").expect("g-g"),
         2500
     );
 
-    // Grams to kg pricing milli-units: 1250 grams is 1250 milli-kg
+    // Whole grams in milli-g to kg pricing milli-units: 1,250 g = 1,250,000 milli-g = 1,250 milli-kg
     assert_eq!(
-        normalize_metric_mass_quantity_milli(1250, "g", "kg").expect("g-kg"),
+        normalize_metric_mass_quantity_milli(1_250_000, "g", "kg").expect("g-kg"),
         1250
     );
 
-    // Kg milli-units to g pricing milli-units: 2 milli-kg = 2 grams = 2000 milli-g
+    // Sub-gram fractional remainder in milli-g to kg pricing rejected to prevent loss of exactness
+    let err_subgram = normalize_metric_mass_quantity_milli(1250, "g", "kg").unwrap_err();
+    assert!(matches!(err_subgram, WeightedError::Validation(_)));
+
+    // Kg milli-units to g pricing milli-units: 2 milli-kg = 2 grams = 2,000 milli-g
     assert_eq!(
         normalize_metric_mass_quantity_milli(2, "kg", "g").expect("kg-g"),
         2000
     );
+
+    // Negative measured quantity rejected
+    let err_neg = normalize_metric_mass_quantity_milli(-50, "kg", "kg").unwrap_err();
+    assert!(matches!(err_neg, WeightedError::NegativeWeight(_)));
 
     // Unsupported unit conversion rejected
     let err = normalize_metric_mass_quantity_milli(100, "lb", "kg").unwrap_err();
@@ -534,7 +544,7 @@ fn test_calculate_weighted_item_uses_default_tare() {
     .expect("upsert config");
 
     // Gross: 1250g, Default tare: 50g -> Net: 1200g. Price: 1200 * 350 / 1000 = 420 minor ($4.20)
-    let res = calculate_weighted_item(&conn, &pid, 1250, None).expect("calc item");
+    let res = calculate_weighted_item(&conn, &pid, 1250, None, None).expect("calc item");
     assert_eq!(res.gross_weight_milli, 1250);
     assert_eq!(res.tare_weight_milli, 50);
     assert_eq!(res.net_weight_milli, 1200);
@@ -559,7 +569,7 @@ fn test_calculate_weighted_item_custom_tare_overrides_default() {
     .expect("upsert config");
 
     // Custom tare 100g overrides default 50g: Gross 1250g, Tare 100g -> Net 1150g. Price: 1150 * 300 / 1000 = 345 minor
-    let res = calculate_weighted_item(&conn, &pid, 1250, Some(100)).expect("calc item");
+    let res = calculate_weighted_item(&conn, &pid, 1250, Some(100), None).expect("calc item");
     assert_eq!(res.tare_weight_milli, 100);
     assert_eq!(res.net_weight_milli, 1150);
     assert_eq!(res.total_price_minor, 345);
@@ -582,15 +592,29 @@ fn test_calculate_weighted_item_enforces_bounds() {
     .expect("upsert config");
 
     // Gross 300g < min 500g
-    let err_min = calculate_weighted_item(&conn, &pid, 300, None).unwrap_err();
+    let err_min = calculate_weighted_item(&conn, &pid, 300, None, None).unwrap_err();
     assert!(matches!(err_min, WeightedError::WeightOutOfBounds { .. }));
 
     // Gross 2500g > max 2000g
-    let err_max = calculate_weighted_item(&conn, &pid, 2500, None).unwrap_err();
+    let err_max = calculate_weighted_item(&conn, &pid, 2500, None, None).unwrap_err();
     assert!(matches!(err_max, WeightedError::WeightOutOfBounds { .. }));
 
     // Gross 1500g is valid
-    assert!(calculate_weighted_item(&conn, &pid, 1500, None).is_ok());
+    assert!(calculate_weighted_item(&conn, &pid, 1500, None, None).is_ok());
+}
+
+#[test]
+fn test_calculate_weighted_item_cross_unit_normalized() {
+    let conn = setup_test_db();
+    let pid = make_test_product(&conn, "Bulk Coffee", "weighted", Some("kg"), 2000); // $20.00/kg
+
+    // Gross 500,000 milli-g (500g = 0.500 kg), Tare None -> Net 500 milli-kg. Price: 500 * 2000 / 1000 = 1000 minor ($10.00)
+    let res =
+        calculate_weighted_item(&conn, &pid, 500_000, None, Some("g")).expect("calc cross unit");
+    assert_eq!(res.gross_weight_milli, 500_000);
+    assert_eq!(res.net_weight_milli, 500);
+    assert_eq!(res.unit_price_minor, 2000);
+    assert_eq!(res.total_price_minor, 1000);
 }
 
 // =========================================================================
@@ -616,53 +640,59 @@ fn test_weighted_commands_authorization_manager_allowed() {
     let session_mgr = create_local_session(&conn, &user_manager.id, &branch_id, "pin", None)
         .expect("mgr session");
 
+    let user_cashier = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Produce Cashier",
+        Some("produce_cashier"),
+        None,
+        None,
+        "cashier",
+    )
+    .expect("cashier created");
+
+    let session_cashier = create_local_session(&conn, &user_cashier.id, &branch_id, "pin", None)
+        .expect("cashier session");
+
     let pid = make_test_product(&conn, "Command Bananas", "weighted", Some("kg"), 200);
 
-    let state = tauri::State::from(Box::leak(Box::new(DbState(Mutex::new(conn)))));
+    let input = UpsertWeightConfigInput {
+        product_id: pid.clone(),
+        default_tare_milli: Some(30),
+        min_weight_milli: Some(100),
+        max_weight_milli: Some(5000),
+    };
 
-    // 1. Set weight config
-    let config = crate::commands::weighted::set_product_weight_config(
-        state.clone(),
-        session_mgr.id.clone(),
-        UpsertWeightConfigInput {
-            product_id: pid.clone(),
-            default_tare_milli: Some(30),
-            min_weight_milli: Some(100),
-            max_weight_milli: Some(5000),
-        },
-    )
-    .expect("manager can set config");
+    // 1. Cashier cannot mutate weight config (fails authorization)
+    let unauth_err =
+        set_product_weight_config_impl(&conn, &session_cashier.id, &input).unwrap_err();
+    assert!(unauth_err.contains("permission") || unauth_err.contains("unauthorized"));
+
+    // 2. Manager can set weight config
+    let config = set_product_weight_config_impl(&conn, &session_mgr.id, &input)
+        .expect("manager can set config");
     assert_eq!(config.default_tare_milli, 30);
 
-    // 2. Read weight config
-    let fetched = crate::commands::weighted::get_product_weight_config(
-        state.clone(),
-        session_mgr.id.clone(),
-        pid.clone(),
-    )
-    .expect("manager can read config")
-    .expect("found");
+    // 3. Manager and Cashier can read weight config (both have catalog read)
+    let fetched = get_product_weight_config_impl(&conn, &session_mgr.id, &pid)
+        .expect("manager can read config")
+        .expect("found");
     assert_eq!(fetched.default_tare_milli, 30);
 
-    // 3. Calculate weighted item
-    let calc = crate::commands::weighted::calculate_weighted_item(
-        state.clone(),
-        session_mgr.id.clone(),
-        pid.clone(),
-        1030,
-        None,
-    )
-    .expect("manager can calculate");
+    let fetched_cashier = get_product_weight_config_impl(&conn, &session_cashier.id, &pid)
+        .expect("cashier can read config")
+        .expect("found");
+    assert_eq!(fetched_cashier.default_tare_milli, 30);
+
+    // 4. Calculate weighted item under session
+    let calc = calculate_weighted_item_impl(&conn, &session_mgr.id, &pid, 1030, None, None)
+        .expect("manager can calculate");
     assert_eq!(calc.net_weight_milli, 1000);
     assert_eq!(calc.total_price_minor, 200);
 
-    // 4. Delete weight config
-    crate::commands::weighted::delete_product_weight_config(
-        state.clone(),
-        session_mgr.id.clone(),
-        pid.clone(),
-    )
-    .expect("manager can delete config");
+    // 5. Manager can delete weight config
+    delete_product_weight_config_impl(&conn, &session_mgr.id, &pid)
+        .expect("manager can delete config");
 }
 
 #[test]
@@ -670,19 +700,15 @@ fn test_weighted_commands_unauthenticated_session_denied() {
     let conn = setup_test_db();
     let pid = make_test_product(&conn, "Secured Apples", "weighted", Some("kg"), 250);
 
-    let state = tauri::State::from(Box::leak(Box::new(DbState(Mutex::new(conn)))));
+    let input = UpsertWeightConfigInput {
+        product_id: pid.clone(),
+        default_tare_milli: Some(10),
+        min_weight_milli: None,
+        max_weight_milli: None,
+    };
 
-    let err = crate::commands::weighted::set_product_weight_config(
-        state.clone(),
-        "invalid_session_token_12345".to_string(),
-        UpsertWeightConfigInput {
-            product_id: pid.clone(),
-            default_tare_milli: Some(10),
-            min_weight_milli: None,
-            max_weight_milli: None,
-        },
-    )
-    .unwrap_err();
+    let err =
+        set_product_weight_config_impl(&conn, "invalid_session_token_12345", &input).unwrap_err();
 
     assert!(err.contains("session") || err.contains("unauthorized") || err.contains("permission"));
 }

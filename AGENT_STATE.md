@@ -7,16 +7,16 @@
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.06 — Weighted products
-- Milestone Status: IMPLEMENTATION_WRITTEN_LOCAL_VALIDATION_PARTIAL (5 tracked modified, 5 untracked new; frontend/formatting/foundation PASS; cargo test UNVERIFIED LOCALLY due to host linker)
-- Branch: `feature/f2-06-weighted-products` (local workspace) / `origin/main` (base)
-- HEAD: `98cbb9b9c9c0dbf5ff9fa550b5afe75f5c5ed3b2`
-- Remote HEAD: `98cbb9b9c9c0dbf5ff9fa550b5afe75f5c5ed3b2` (`origin/main`)
-- PR: None for F2.06 yet
-- PR HEAD: N/A
-- Working Tree: 5 tracked modified files, 5 untracked new files for F2.06; zero files unrelated to F2.06
-- Last Completed Action: F2.06 implementation written according to ADR-0008; pre-commit read-only audit executed; local validation executed (cargo fmt PASS, npm test PASS, npm run build PASS, validate_foundation PASS, git diff --check PASS; cargo test UNVERIFIED LOCALLY)
-- Current Blocker: Local environment lacks MSVC C++ Build Tools (`link.exe` / `kernel32.lib`) and MinGW GCC (`gcc.exe`), preventing local execution of native host build scripts in `cargo test` / `cargo check`. Verification is delegated to GitHub Actions CI upon PR creation.
-- Next Authorized Action: Awaiting user pre-commit review and authorization to commit to `feature/f2-06-weighted-products` and open PR for live CI matrix verification
+- Milestone Status: PR_OPEN_CI_TRIAGE (PR #74 open; targeted forensic remediation of Clippy and CodeRabbit feedback underway)
+- Branch: `feature/f2-06-weighted-products` (local workspace) / `origin/feature/f2-06-weighted-products` (remote)
+- HEAD: `3f88c4003dee1ac186bf43619c7a640d0bd27f52`
+- Remote HEAD: `3f88c4003dee1ac186bf43619c7a640d0bd27f52` (`origin/feature/f2-06-weighted-products`)
+- PR: #74 (open, https://github.com/userkxm00/pos-global/pull/74)
+- PR HEAD: `3f88c4003dee1ac186bf43619c7a640d0bd27f52`
+- Working Tree: Forensic remediation in progress
+- Last Completed Action: PR #74 opened; CI check runs inspected; Clippy E0308, dead-code, and unit conversion root causes remediated
+- Current Blocker: Local environment lacks MSVC C++ Build Tools (`link.exe` / `kernel32.lib`) and MinGW GCC (`gcc.exe`); authoritative cargo test execution runs in remote GitHub Actions CI.
+- Next Authorized Action: Local validation and preparation of remediation report
 - Exact F2.06 Scope Implemented:
   - Migration file `015_weighted_products.sql` created with table `product_weight_configs` (no redundant index, no premature hardware columns)
   - Registered `015_weighted_products` in `MIGRATIONS` array in `src-tauri/src/db/mod.rs`

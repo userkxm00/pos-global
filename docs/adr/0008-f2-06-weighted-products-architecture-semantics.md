@@ -1,7 +1,7 @@
 # ADR-0008 — F2.06 Weighted Products Architecture & Calculation Semantics
 
-Status: Accepted  
-Date: 2026-09-03  
+Status: Accepted
+Date: 2026-09-03
 
 ## Context
 
@@ -123,14 +123,14 @@ CREATE TABLE product_weight_configs (
 Because $Q_{milli}$ is *always* defined as thousandths of the product's pricing unit $U_p$, the division by $1000$ scales $Q_{milli}$ back to whole units of $U_p$ in every case.
 
 #### C. Exact Cross-Unit Weight Normalization (Zero Floating-Point)
-F2.06 strictly prohibits using `f64` conversions from `src-tauri/src/unit/mod.rs` for authoritative financial price determination. When mass conversion between supported units (`kg` and `g`) is required:
-- Metric mass conversion is defined by exact integer ratio:
-  $$1\text{ kg} = 1,000\text{ g}$$
-- To convert a weight measured in grams ($W_g$ in integer milligrams or grams) into $Q_{milli}$ of a product priced in kilograms ($U_p = \text{kg}$):
-  $$Q_{milli}(\text{kg}) = W_{\text{grams}}$$
-  *(Exact 1:1 correspondence: 1 gram is exactly 1 milli-kilogram)*.
-- To convert a weight measured in kilograms ($W_{kg}$ in milli-kilograms) into $Q_{milli}$ of a product priced in grams ($U_p = \text{g}$):
-  $$Q_{milli}(\text{g}) = W_{kg\text{ (milli)}} \times 1000$$
+F2.06 strictly prohibits using `f64` conversions from `src-tauri/src/unit/mod.rs` for authoritative financial price determination. When mass conversion between supported metric units (`kg` and `g`) is required:
+- Metric mass conversion is governed by the exact integer ratio:
+  $$1\text{ kg} = 1,000\text{ g} \implies 1\text{ milli-kg} = 1\text{ g} = 1,000\text{ milli-g}$$
+- To convert a weight measured in milli-grams ($W_{\text{milli-g}}$) into $Q_{milli}$ of a product priced in kilograms ($U_p = \text{kg}$):
+  $$Q_{milli}(\text{kg}) = \frac{W_{\text{milli-g}}}{1000}$$
+  Sub-gram fractional remainders ($W_{\text{milli-g}} \pmod{1000} \ne 0$) cannot be losslessly represented in integer milli-kilograms and are rejected fail-closed to prevent precision loss.
+- To convert a weight measured in milli-kilograms ($W_{\text{milli-kg}}$) into $Q_{milli}$ of a product priced in grams ($U_p = \text{g}$):
+  $$Q_{milli}(\text{g}) = W_{\text{milli-kg}} \times 1000$$
 - This integer normalization is exact, lossless, and free from IEEE 754 precision drift.
 - General `f64` conversions from F2.04 are restricted to informational UI display and must never feed into financial calculations.
 
@@ -148,16 +148,16 @@ pub fn calculate_weighted_price(
     if unit_price_minor < 0 {
         return Err(WeightedError::Validation("Unit price cannot be negative".into()));
     }
-    
+
     // Checked arithmetic: (net_weight_milli * unit_price_minor + 500) / 1000
     let product = net_weight_milli
         .checked_mul(unit_price_minor)
         .ok_or_else(|| WeightedError::Overflow("Multiplication overflow in price calculation".into()))?;
-        
+
     let with_rounding = product
         .checked_add(500)
         .ok_or_else(|| WeightedError::Overflow("Addition overflow in rounding calculation".into()))?;
-        
+
     Ok(with_rounding / 1000)
 }
 ```

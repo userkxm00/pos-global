@@ -159,23 +159,38 @@ pub fn calculate_weighted_price(
 }
 
 /// Exact integer scaling between canonical metric mass units (kg and g).
-/// Converts a quantity in `from_unit_code` to thousandths (milli-units) of `pricing_unit_code`.
+/// Converts a quantity expressed in thousandths (milli-units) of `from_unit_code`
+/// to thousandths (milli-units) of `pricing_unit_code`.
 pub fn normalize_metric_mass_quantity_milli(
-    measured_quantity: i64,
+    measured_quantity_milli: i64,
     from_unit_code: &str,
     pricing_unit_code: &str,
 ) -> Result<i64, WeightedError> {
+    if measured_quantity_milli < 0 {
+        return Err(WeightedError::NegativeWeight(
+            "Measured quantity cannot be negative".into(),
+        ));
+    }
     let from_clean = from_unit_code.trim().to_lowercase();
     let to_clean = pricing_unit_code.trim().to_lowercase();
 
     match (from_clean.as_str(), to_clean.as_str()) {
-        ("kg", "kg") | ("g", "g") => Ok(measured_quantity),
-        // From grams to kg milli-units: 1 gram = 1 milli-kg (exact 1:1 identity)
-        ("g", "kg") => Ok(measured_quantity),
-        // From kg milli-units to g milli-units: 1 kg milli = 1 g = 1000 g milli
-        ("kg", "g") => measured_quantity
+        ("kg", "kg") | ("g", "g") => Ok(measured_quantity_milli),
+        // 1 milli-kg = 1 gram = 1,000 milli-g
+        ("kg", "g") => measured_quantity_milli
             .checked_mul(1000)
             .ok_or_else(|| WeightedError::Overflow("Overflow converting kg to g milli-units".into())),
+        // 1,000 milli-g = 1 gram = 1 milli-kg
+        // Sub-gram remainder is rejected to prevent precision loss in integer representation
+        ("g", "kg") => {
+            if measured_quantity_milli % 1000 != 0 {
+                return Err(WeightedError::Validation(format!(
+                    "Quantity {measured_quantity_milli} milli-grams has sub-gram remainder ({rem} milli-g) which cannot be losslessly converted to whole milli-kilograms",
+                    rem = measured_quantity_milli % 1000
+                )));
+            }
+            Ok(measured_quantity_milli / 1000)
+        }
         (f, t) => Err(WeightedError::Validation(format!(
             "Unsupported mass conversion from '{f}' to '{t}'. Only 'kg' and 'g' exact integer conversions are supported in F2.06"
         ))),
@@ -353,19 +368,10 @@ pub fn upsert_product_weight_config(
         }
     }
 
-    // Verify product exists and has active status
-    let product_exists: bool = conn
-        .query_row(
-            "SELECT 1 FROM products WHERE id = ?1 AND is_active = 1",
-            params![product_id],
-            |_| Ok(true),
-        )
-        .optional()?
-        .unwrap_or(false);
-
-    if !product_exists {
-        return Err(WeightedError::NotFound(format!(
-            "Product '{product_id}' not found or inactive"
+    // Verify product exists, is active, and is classified as weighted
+    if !is_product_weighted(conn, product_id)? {
+        return Err(WeightedError::Validation(format!(
+            "Product '{product_id}' is not configured as a weighted product (must have product_type = 'weighted' or active 'WEIGHT' capability)"
         )));
     }
 
@@ -438,8 +444,16 @@ pub fn calculate_weighted_item(
     product_id: &str,
     gross_weight_milli: i64,
     custom_tare_milli: Option<i64>,
+    source_unit: Option<&str>,
 ) -> Result<WeightedCalculationResult, WeightedError> {
-    // 1. Fetch product unit and base price
+    // 1. Verify product exists and is classified as weighted
+    if !is_product_weighted(conn, product_id)? {
+        return Err(WeightedError::Validation(format!(
+            "Product '{product_id}' is not configured as a weighted product"
+        )));
+    }
+
+    // 2. Fetch product base price
     let row_opt = conn
         .query_row(
             "SELECT base_price_minor FROM products WHERE id = ?1 AND is_active = 1",
@@ -454,25 +468,35 @@ pub fn calculate_weighted_item(
         )));
     };
 
-    // 2. Validate product unit dimension
-    validate_weighted_product_unit(conn, product_id)?;
+    // 3. Validate product unit dimension
+    let pricing_unit = validate_weighted_product_unit(conn, product_id)?;
 
-    // 3. Resolve tare weight (custom tare overrides default tare)
+    // 4. Normalize gross weight if measured in a different metric mass unit
+    let normalized_gross_milli = match source_unit {
+        Some(unit)
+            if !unit.trim().is_empty() && !unit.trim().eq_ignore_ascii_case(&pricing_unit) =>
+        {
+            normalize_metric_mass_quantity_milli(gross_weight_milli, unit, &pricing_unit)?
+        }
+        _ => gross_weight_milli,
+    };
+
+    // 5. Resolve tare weight (custom tare overrides default tare)
     let config = get_product_weight_config(conn, product_id)?;
     let tare_weight_milli = match custom_tare_milli {
         Some(custom) => custom,
         None => config.as_ref().map(|c| c.default_tare_milli).unwrap_or(0),
     };
 
-    // 4. Deduct tare
-    let net_weight_milli = deduct_tare(gross_weight_milli, tare_weight_milli)?;
+    // 6. Deduct tare
+    let net_weight_milli = deduct_tare(normalized_gross_milli, tare_weight_milli)?;
 
-    // 5. Enforce configured boundaries if config exists
+    // 7. Enforce configured boundaries if config exists
     if let Some(cfg) = &config {
         validate_weight_bounds(net_weight_milli, cfg.min_weight_milli, cfg.max_weight_milli)?;
     }
 
-    // 6. Calculate exact integer half-up price
+    // 8. Calculate exact integer half-up price
     let total_price_minor = calculate_weighted_price(net_weight_milli, unit_price_minor)?;
 
     Ok(WeightedCalculationResult {
