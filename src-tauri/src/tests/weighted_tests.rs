@@ -256,18 +256,26 @@ fn test_volume_dimension_rejection() {
 #[test]
 fn test_unsupported_mass_unit_rejection() {
     let conn = setup_test_db();
-    // Non-canonical mass units (e.g. "oz", "lb") exist in units catalog with dimension 'mass',
+    // Non-canonical mass units (e.g. "oz", "lb") can exist in units catalog with dimension 'mass',
     // but F2.06 exact integer pricing requires canonical metric mass units ('kg' or 'g').
+    conn.execute(
+        "INSERT INTO units (code, name, dimension, precision) VALUES ('oz', 'Ounce', 'mass', 3), ('lb', 'Pound', 'mass', 3)",
+        [],
+    )
+    .expect("insert custom mass units");
+
     let p_oz = make_test_product(&conn, "Bulk Ounces", "weighted", Some("oz"), 150);
     let err_oz = validate_weighted_product_unit(&conn, &p_oz).unwrap_err();
     assert!(
-        matches!(err_oz, WeightedError::Validation(msg) if msg.contains("Unsupported mass unit"))
+        matches!(err_oz, WeightedError::Validation(msg) if msg.contains("Unsupported mass unit")),
+        "Expected Validation error for 'oz', got: {err_oz:?}"
     );
 
     let p_lb = make_test_product(&conn, "Bulk Pounds", "weighted", Some("lb"), 450);
     let err_lb = validate_weighted_product_unit(&conn, &p_lb).unwrap_err();
     assert!(
-        matches!(err_lb, WeightedError::Validation(msg) if msg.contains("Unsupported mass unit"))
+        matches!(err_lb, WeightedError::Validation(msg) if msg.contains("Unsupported mass unit")),
+        "Expected Validation error for 'lb', got: {err_lb:?}"
     );
 }
 
@@ -629,10 +637,36 @@ fn test_calculate_weighted_item_cross_unit_normalized() {
     // Gross 500,000 milli-g (500g = 0.500 kg), Tare None -> Net 500 milli-kg. Price: 500 * 2000 / 1000 = 1000 minor ($10.00)
     let res =
         calculate_weighted_item(&conn, &pid, 500_000, None, Some("g")).expect("calc cross unit");
-    assert_eq!(res.gross_weight_milli, 500_000);
+    // All result weights are expressed in the product's pricing unit (milli-kg)
+    assert_eq!(res.gross_weight_milli, 500);
+    assert_eq!(res.tare_weight_milli, 0);
     assert_eq!(res.net_weight_milli, 500);
+    assert_eq!(
+        res.gross_weight_milli - res.tare_weight_milli,
+        res.net_weight_milli
+    );
     assert_eq!(res.unit_price_minor, 2000);
     assert_eq!(res.total_price_minor, 1000);
+}
+
+#[test]
+fn test_calculate_weighted_item_cross_unit_kg_to_g() {
+    let conn = setup_test_db();
+    let pid = make_test_product(&conn, "Specialty Saffron", "weighted", Some("g"), 10); // $0.10/g
+
+    // Gross 2 milli-kg (2 grams), Tare None -> Net 2000 milli-g. Price: 2000 * 10 / 1000 = 20 minor ($0.20)
+    let res =
+        calculate_weighted_item(&conn, &pid, 2, None, Some("kg")).expect("calc cross unit kg to g");
+    // All result weights are expressed in the product's pricing unit (milli-g)
+    assert_eq!(res.gross_weight_milli, 2000);
+    assert_eq!(res.tare_weight_milli, 0);
+    assert_eq!(res.net_weight_milli, 2000);
+    assert_eq!(
+        res.gross_weight_milli - res.tare_weight_milli,
+        res.net_weight_milli
+    );
+    assert_eq!(res.unit_price_minor, 10);
+    assert_eq!(res.total_price_minor, 20);
 }
 
 #[test]
@@ -764,5 +798,11 @@ fn test_weighted_commands_unauthenticated_session_denied() {
     let err =
         set_product_weight_config_impl(&conn, "invalid_session_token_12345", &input).unwrap_err();
 
-    assert!(err.contains("session") || err.contains("unauthorized") || err.contains("permission"));
+    let err_lower = err.to_lowercase();
+    assert!(
+        err_lower.contains("auth")
+            || err_lower.contains("session")
+            || err_lower.contains("permission"),
+        "Expected authentication/session error, got: {err}"
+    );
 }

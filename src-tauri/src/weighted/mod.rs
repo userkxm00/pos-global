@@ -525,7 +525,7 @@ pub fn calculate_weighted_item(
     let total_price_minor = calculate_weighted_price(net_weight_milli, unit_price_minor)?;
 
     Ok(WeightedCalculationResult {
-        gross_weight_milli,
+        gross_weight_milli: normalized_gross_milli,
         tare_weight_milli,
         net_weight_milli,
         unit_price_minor,
