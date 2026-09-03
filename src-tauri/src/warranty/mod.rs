@@ -349,20 +349,20 @@ pub fn is_warranty_tracked(conn: &Connection, product_id: &str) -> Result<bool, 
          WHERE p.id = ?1",
     )?;
 
-    let row = stmt.query_row(params![product_id], |row| {
-        let warranty_months: Option<i32> = row.get(0)?;
-        let has_cap: i64 = row.get(1)?;
-        let months_positive = warranty_months.map(|m| m > 0).unwrap_or(false);
-        Ok(months_positive || (has_cap != 0))
-    });
+    let (warranty_months, has_cap): (Option<i32>, i64) =
+        match stmt.query_row(params![product_id], |row| Ok((row.get(0)?, row.get(1)?))) {
+            Ok(vals) => vals,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Err(WarrantyError::Validation(format!(
+                    "Product '{product_id}' not found"
+                )));
+            }
+            Err(e) => return Err(WarrantyError::Database(e.to_string())),
+        };
 
-    match row {
-        Ok(tracked) => Ok(tracked),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Err(WarrantyError::Validation(format!(
-            "Product '{product_id}' not found"
-        ))),
-        Err(e) => Err(WarrantyError::Database(e.to_string())),
-    }
+    validate_warranty_months(warranty_months)?;
+    let months_positive = warranty_months.map(|m| m > 0).unwrap_or(false);
+    Ok(months_positive || (has_cap != 0))
 }
 
 // =========================================================================
@@ -427,6 +427,8 @@ pub fn register_instance_warranty(
             let prod_months: Option<i32> = prod_stmt
                 .query_row(params![product_id], |row| row.get(0))
                 .map_err(|e| WarrantyError::Database(e.to_string()))?;
+
+            validate_warranty_months(prod_months)?;
 
             match prod_months {
                 Some(m) if m > 0 => m as u32,

@@ -609,6 +609,27 @@ fn test_warranty_ipc_authorization_and_isolation() {
         }
         _ => panic!("expected Active coverage"),
     }
+
+    // 6. Direct command test for calculate_warranty_expiration_impl
+    let exp_cmd =
+        calculate_warranty_expiration_impl(&conn, &session_admin.id, "2026-01-15", 12).unwrap();
+    assert_eq!(exp_cmd, "2027-01-15");
+
+    // 7. Direct command test for evaluate_warranty_coverage_impl
+    let cov_cmd = evaluate_warranty_coverage_impl(
+        &conn,
+        &session_admin.id,
+        Some("2027-01-15"),
+        Some("2026-06-01"),
+        true,
+    )
+    .unwrap();
+    match cov_cmd {
+        WarrantyCoverageStatus::Active { days_remaining, .. } => {
+            assert!(days_remaining > 0);
+        }
+        _ => panic!("expected Active coverage"),
+    }
 }
 
 // =========================================================================
