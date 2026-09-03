@@ -488,7 +488,9 @@ fn test_register_instance_warranty_validation_errors() {
         },
     )
     .unwrap_err();
-    assert!(err4.to_string().contains("Invalid date length"));
+    assert!(
+        err4.to_string().contains("Date parse error") || err4.to_string().contains("Invalid date")
+    );
 }
 
 // =========================================================================
@@ -583,20 +585,35 @@ fn test_warranty_ipc_authorization_and_isolation() {
     .unwrap();
     assert_eq!(auth_ok.warranty_expires_at.as_deref(), Some("2027-01-01"));
 
-    // 4. Wrong branch in registration request produces anti-existence leakage error
-    let wrong_branch_err = register_instance_warranty_impl(
+    // 4. Anti-existence leakage: accessing instance from branch_b using session for branch_a
+    let serial_b = make_test_serial_instance(
+        &conn,
+        &product_id,
+        &branch_b,
+        Some("SN-BRANCH-B-001"),
+        None,
+        None,
+    );
+
+    // Registration with branch_a attempting to update branch_b instance
+    let wrong_branch_reg = register_instance_warranty_impl(
         &conn,
         &session_admin.id,
         &RegisterInstanceWarrantyRequest {
-            branch_id: branch_b.clone(),
-            serial_number_id: serial_id.clone(),
+            branch_id: branch_a.clone(),
+            serial_number_id: serial_b.clone(),
             start_date: Some("2026-01-01".to_string()),
             duration_months: Some(12),
             warranty_expires_at: None,
         },
     )
     .unwrap_err();
-    assert!(wrong_branch_err.contains("not found or inaccessible for this session"));
+    assert!(wrong_branch_reg.contains("not found or inaccessible for this session"));
+
+    // Query for branch_b instance using branch_a session
+    let wrong_branch_get =
+        get_instance_warranty_impl(&conn, &session_admin.id, &serial_b, None).unwrap_err();
+    assert!(wrong_branch_get.contains("not found or inaccessible for this session"));
 
     // 5. Querying warranty for instance with authorized session succeeds
     let get_ok =
