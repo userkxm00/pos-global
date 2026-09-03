@@ -31,6 +31,8 @@ mod register_tests;
 mod rls_migration_tests;
 #[path = "sales_tests.rs"]
 mod sales_tests;
+#[path = "serial_tests.rs"]
+mod serial_tests;
 #[path = "session_tests.rs"]
 mod session_tests;
 #[path = "sku_tests.rs"]

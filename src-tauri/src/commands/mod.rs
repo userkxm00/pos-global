@@ -14,6 +14,7 @@ pub mod organization;
 pub mod product;
 pub mod register;
 pub mod sales;
+pub mod serial;
 pub mod unit;
 pub mod variant;
 pub mod weighted;
