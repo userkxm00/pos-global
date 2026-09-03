@@ -474,16 +474,21 @@ fn check_identifier_collisions(
     Ok(())
 }
 
-fn map_sqlite_collision_error(e: rusqlite::Error) -> SerialError {
+/// Maps raw SQLite errors to domain `SerialError`.
+/// Specifically classifies verified UNIQUE constraint violations into typed duplicate variants.
+pub fn map_sqlite_collision_error(e: rusqlite::Error) -> SerialError {
     let is_unique_constraint = match &e {
         rusqlite::Error::SqliteFailure(err, _) => {
-            err.extended_code == 2067 || err.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+            err.extended_code == 2067
+                || (err.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+                    && err.extended_code == 0
+                    && e.to_string().contains("UNIQUE constraint failed"))
         }
         _ => false,
     };
 
-    let msg = e.to_string();
-    if is_unique_constraint || msg.contains("UNIQUE constraint failed") {
+    if is_unique_constraint {
+        let msg = e.to_string();
         if msg.contains("idx_serial_numbers_serial_active")
             || msg.contains("serial_numbers.serial_number")
         {
@@ -502,7 +507,7 @@ fn map_sqlite_collision_error(e: rusqlite::Error) -> SerialError {
         }
     }
 
-    SerialError::Database(msg)
+    SerialError::Database(e.to_string())
 }
 
 // =========================================================================

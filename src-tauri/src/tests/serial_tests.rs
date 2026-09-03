@@ -1664,17 +1664,67 @@ fn test_map_sqlite_collision_error_coverage() {
     )
     .unwrap();
 
-    // Trigger raw SQLite unique violation on serial_number
+    // A. Real serial UNIQUE collision -> raw rusqlite error -> map_sqlite_collision_error -> DuplicateSerial
     let err_ser = conn
         .execute(
             "INSERT INTO serial_numbers (product_id, branch_id, serial_number) VALUES (?1, ?2, 'collide-sn')",
             params![product_id, branch_id],
         )
         .unwrap_err();
-    let mapped_ser = SerialError::from(err_ser);
-    assert!(matches!(mapped_ser, SerialError::Database(_)));
+    let mapped_ser = map_sqlite_collision_error(err_ser);
+    assert!(
+        matches!(mapped_ser, SerialError::DuplicateSerial(_)),
+        "Raw serial unique constraint violation must map to DuplicateSerial"
+    );
 
-    // Verify duplicate error mappings through domain engine
+    // B. Real IMEI UNIQUE collision -> raw rusqlite error -> map_sqlite_collision_error -> DuplicateImei
+    let err_imei = conn
+        .execute(
+            "INSERT INTO serial_numbers (product_id, branch_id, imei) VALUES (?1, ?2, ?3)",
+            params![product_id, branch_id, VALID_IMEI_1],
+        )
+        .unwrap_err();
+    let mapped_imei = map_sqlite_collision_error(err_imei);
+    assert!(
+        matches!(mapped_imei, SerialError::DuplicateImei(_)),
+        "Raw IMEI unique constraint violation must map to DuplicateImei"
+    );
+
+    // C. Real asset-tag UNIQUE collision -> raw rusqlite error -> map_sqlite_collision_error -> DuplicateAssetTag
+    let err_tag = conn
+        .execute(
+            "INSERT INTO serial_numbers (product_id, branch_id, asset_tag) VALUES (?1, ?2, 'collide-tag')",
+            params![product_id, branch_id],
+        )
+        .unwrap_err();
+    let mapped_tag = map_sqlite_collision_error(err_tag);
+    assert!(
+        matches!(mapped_tag, SerialError::DuplicateAssetTag(_)),
+        "Raw asset tag unique constraint violation must map to DuplicateAssetTag"
+    );
+
+    // D. Non-UNIQUE SQLite error (foreign key constraint violation) -> map_sqlite_collision_error -> Database
+    let err_fk = conn
+        .execute(
+            "INSERT INTO serial_numbers (product_id, branch_id, serial_number) VALUES ('nonexistent-prod', ?1, 'DIFF-SN-999')",
+            params![branch_id],
+        )
+        .unwrap_err();
+    let mapped_fk = map_sqlite_collision_error(err_fk);
+    assert!(
+        matches!(mapped_fk, SerialError::Database(_)),
+        "Foreign key violation must map to SerialError::Database"
+    );
+
+    // E. Syntax / arbitrary SQLite error -> map_sqlite_collision_error -> Database
+    let err_syntax = conn.execute("INVALID SQL STATEMENT", []).unwrap_err();
+    let mapped_syntax = map_sqlite_collision_error(err_syntax);
+    assert!(
+        matches!(mapped_syntax, SerialError::Database(_)),
+        "Syntax error must map to SerialError::Database"
+    );
+
+    // Verify duplicate error mappings through domain engine pre-check path
     let dup_sn = create_serial_instance(
         &conn,
         &CreateSerialInput {

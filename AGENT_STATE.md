@@ -7,17 +7,15 @@
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.08 — Serial / IMEI / Assets
-- Milestone Status: PR #76 REMEDIATION PASS 2 / CANONICAL ID GENERATION
+- Milestone Status: PR #76 REMEDIATION / COLLISION MAPPING DIRECT COVERAGE
 - Branch: `feature/f2-08-serial-imei-assets`
 - Remote PR: PR #76 (`https://github.com/userkxm00/pos-global/pull/76`)
-- Last Completed Action: Completed Pass 2 remediation on PR #76:
-  1. ID Generation: replaced Rust UUID generation with canonical SQLite `DEFAULT (lower(hex(randomblob(16))))` via RETURNING
-  2. Clippy type complexity: factored `NormalizedIdentifiers` type alias in `src-tauri/src/serial/mod.rs`
-  3. Regression test: added `test_create_serial_instance_canonical_id_generation` verifying 32 lowercase hex ID from database
-  4. Test type fix: corrected non-null `created_at` tuple typing in `test_migration_017_upgrade_preserves_legacy_data`
-  5. All earlier fixes preserved: Unicode character count (`chars().count() <= 100`), auth-first order, collision mapping, `FromStr for SerialStatus`, Sonar maintainability fixes
+- Last Completed Action: Direct SQLite collision-mapping test and mapper safety remediation:
+  1. Made `map_sqlite_collision_error` public and hardened it to strictly prioritize SQLite extended error code 2067 (`SQLITE_CONSTRAINT_UNIQUE`) before checking message substrings.
+  2. Updated `test_map_sqlite_collision_error_coverage` to pass raw SQLite errors directly through `map_sqlite_collision_error` for serial collision (`DuplicateSerial`), IMEI collision (`DuplicateImei`), asset tag collision (`DuplicateAssetTag`), foreign key violation (`Database`), and syntax error (`Database`).
+  3. Preserved canonical database ID generation (`lower(hex(randomblob(16)))`), zero inventory mutations, and all scope firewalls.
 - Current Blocker: None
-- Next Authorized Action: Commit, push to `feature/f2-08-serial-imei-assets`, monitor remote CI and reviews on PR #76 to green state, and stop.
+- Next Authorized Action: Validate locally, commit, push to `feature/f2-08-serial-imei-assets`, monitor remote CI and reviews to green state, and stop.
 - Exact F2.08 Scope Implemented:
   - ADR-0010 accepted (`docs/adr/0010-f2-08-serial-imei-assets-architecture-semantics.md`)
   - Migration file `017_serial_imei_assets.sql` created rebuilding `serial_numbers` with nullable `serial_number`, `imei`, and `asset_tag`, check constraint asserting at least one identifier, integer minor precision `cost_price_minor`, partial unique indexes (global NOCASE serial, global IMEI, branch-scoped NOCASE asset tag), and fail-closed pre-validation
