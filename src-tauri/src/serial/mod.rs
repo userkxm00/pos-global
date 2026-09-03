@@ -567,7 +567,7 @@ pub fn create_serial_instance(
         norm_asset_tag.as_deref(),
     )?;
 
-    let id = crate::auth::generate_id();
+    let id = uuid::Uuid::new_v4().to_string();
 
     let sql = format!(
         "INSERT INTO serial_numbers (
