@@ -754,6 +754,127 @@ fn test_identifier_trimming_and_max_length() {
     assert!(matches!(err, SerialError::Validation(_)));
 }
 
+#[test]
+fn test_unicode_character_count_serial_and_asset_tag() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Unicode Product", true);
+
+    // 1. ASCII 100 characters accepted
+    let ascii_100 = "A".repeat(100);
+    assert_eq!(ascii_100.chars().count(), 100);
+    assert_eq!(ascii_100.len(), 100);
+    let inst_ascii_100 = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some(ascii_100.clone()),
+            imei: None,
+            asset_tag: Some(ascii_100),
+            cost_price_minor: None,
+        },
+    );
+    assert!(
+        inst_ascii_100.is_ok(),
+        "ASCII exactly 100 chars must be accepted"
+    );
+
+    // 2. ASCII 101 characters rejected
+    let ascii_101 = "A".repeat(101);
+    assert_eq!(ascii_101.chars().count(), 101);
+    let err_ascii_101 = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some(ascii_101),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
+        },
+    );
+    assert!(err_ascii_101.is_err(), "ASCII 101 chars must be rejected");
+
+    // 3. Multibyte Unicode below 100 characters accepted (e.g. 50 characters of 'ñ', which is 100 UTF-8 bytes)
+    let unicode_50 = "ñ".repeat(50);
+    assert_eq!(unicode_50.chars().count(), 50);
+    assert_eq!(unicode_50.len(), 100);
+    let inst_uni_50 = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some(unicode_50.clone()),
+            imei: None,
+            asset_tag: Some(unicode_50),
+            cost_price_minor: None,
+        },
+    );
+    assert!(
+        inst_uni_50.is_ok(),
+        "Multibyte 50 chars (100 bytes) must be accepted"
+    );
+
+    // 4. Multibyte Unicode exactly 100 characters accepted (e.g. 100 characters of 'ñ', which is 200 UTF-8 bytes)
+    let unicode_100 = "ñ".repeat(100);
+    assert_eq!(unicode_100.chars().count(), 100);
+    assert_eq!(unicode_100.len(), 200);
+    let inst_uni_100 = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some(unicode_100.clone()),
+            imei: None,
+            asset_tag: Some(unicode_100),
+            cost_price_minor: None,
+        },
+    );
+    assert!(
+        inst_uni_100.is_ok(),
+        "Multibyte 100 chars (200 bytes) must be accepted"
+    );
+
+    // 5. Multibyte Unicode 101 characters rejected (101 characters of 'ñ', 202 UTF-8 bytes)
+    let unicode_101 = "ñ".repeat(101);
+    assert_eq!(unicode_101.chars().count(), 101);
+    let err_uni_101 = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some(unicode_101.clone()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
+        },
+    );
+    assert!(err_uni_101.is_err(), "Multibyte 101 chars must be rejected");
+
+    let err_tag_101 = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id,
+            branch_id,
+            variant_id: None,
+            serial_number: None,
+            imei: None,
+            asset_tag: Some(unicode_101),
+            cost_price_minor: None,
+        },
+    );
+    assert!(
+        err_tag_101.is_err(),
+        "Asset tag multibyte 101 chars must be rejected"
+    );
+}
+
 // =========================================================================
 // 3. IMEI VALIDATION TESTS
 // =========================================================================
@@ -1377,4 +1498,232 @@ fn test_list_serial_instances_ipc_command() {
     .expect("filter by product");
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].serial_number.as_deref(), Some("SN-LIST-A1"));
+}
+
+#[test]
+fn test_update_serial_status_auth_and_leakage_order() {
+    let conn = setup_test_db();
+    let (org_id, branch_1, _) = create_test_user_hierarchy(&conn);
+    let branch_2 = crate::branch::create_branch(
+        &conn,
+        crate::branch::CreateBranchInput {
+            organization_id: org_id,
+            name: "Branch 2".into(),
+            address: None,
+            currency: None,
+            is_active: Some(true),
+        },
+    )
+    .unwrap()
+    .id;
+
+    let manager_b1 = create_test_user_with_creds(
+        &conn,
+        &branch_1,
+        "Manager B1",
+        Some("mgr_b1"),
+        Some("pass123"),
+        Some("1234"),
+        "manager",
+    )
+    .unwrap();
+    let cashier_b1 = create_test_user_with_creds(
+        &conn,
+        &branch_1,
+        "Cashier B1",
+        Some("cashier_b1"),
+        Some("pass123"),
+        Some("1234"),
+        "cashier",
+    )
+    .unwrap();
+
+    let product_id = make_test_product(&conn, "Security Device", true);
+
+    // Create item in branch 2
+    let inst_b2 = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_2,
+            variant_id: None,
+            serial_number: Some("B2-SECRET-ITEM".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
+        },
+    )
+    .unwrap();
+
+    // Create item in branch 1
+    let inst_b1 = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id,
+            branch_id: branch_1.clone(),
+            variant_id: None,
+            serial_number: Some("B1-ITEM".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
+        },
+    )
+    .unwrap();
+
+    let session_mgr_b1 =
+        create_local_session(&conn, &manager_b1.id, &branch_1, "pin", None).unwrap();
+    let session_cashier_b1 =
+        create_local_session(&conn, &cashier_b1.id, &branch_1, "pin", None).unwrap();
+
+    // 1. Unauthenticated request denied
+    let err_unauth = update_serial_status_impl(
+        &conn,
+        "invalid_session_id",
+        &UpdateSerialStatusInput {
+            id: inst_b1.id.clone(),
+            branch_id: branch_1.clone(),
+            status: SerialStatus::Reserved,
+        },
+    )
+    .unwrap_err();
+    assert!(err_unauth.contains("Authentication required"));
+
+    // 2. Authenticated but unauthorized (cashier lacking inventory.adjust)
+    let err_perm = update_serial_status_impl(
+        &conn,
+        &session_cashier_b1.id,
+        &UpdateSerialStatusInput {
+            id: inst_b1.id.clone(),
+            branch_id: branch_1.clone(),
+            status: SerialStatus::Reserved,
+        },
+    )
+    .unwrap_err();
+    assert!(err_perm.contains("Permission denied") || err_perm.contains("permission"));
+
+    // 3. Nonexistent ID with manager session
+    let err_nonexistent = update_serial_status_impl(
+        &conn,
+        &session_mgr_b1.id,
+        &UpdateSerialStatusInput {
+            id: "nonexistent-id".into(),
+            branch_id: branch_1.clone(),
+            status: SerialStatus::Reserved,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err_nonexistent,
+        "Serial instance 'nonexistent-id' not found or inaccessible for this session"
+    );
+
+    // 4. Branch 2 item queried using Branch 1 credentials -> Must return identical "not found or inaccessible" error
+    // (zero existence leakage: manager cannot discover whether B2 item exists)
+    let err_leakage = update_serial_status_impl(
+        &conn,
+        &session_mgr_b1.id,
+        &UpdateSerialStatusInput {
+            id: inst_b2.id.clone(),
+            branch_id: branch_1.clone(),
+            status: SerialStatus::Reserved,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err_leakage,
+        format!(
+            "Serial instance '{}' not found or inaccessible for this session",
+            inst_b2.id
+        )
+    );
+
+    // 5. Authorized update succeeds
+    let updated = update_serial_status_impl(
+        &conn,
+        &session_mgr_b1.id,
+        &UpdateSerialStatusInput {
+            id: inst_b1.id,
+            branch_id: branch_1,
+            status: SerialStatus::Reserved,
+        },
+    )
+    .expect("authorized update succeeds");
+    assert_eq!(updated.status, SerialStatus::Reserved);
+}
+
+#[test]
+fn test_map_sqlite_collision_error_coverage() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Collision Product", true);
+
+    create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some("COLLIDE-SN".into()),
+            imei: Some(VALID_IMEI_1.into()),
+            asset_tag: Some("COLLIDE-TAG".into()),
+            cost_price_minor: None,
+        },
+    )
+    .unwrap();
+
+    // Trigger raw SQLite unique violation on serial_number
+    let err_ser = conn
+        .execute(
+            "INSERT INTO serial_numbers (product_id, branch_id, serial_number) VALUES (?1, ?2, 'collide-sn')",
+            params![product_id, branch_id],
+        )
+        .unwrap_err();
+    let mapped_ser = SerialError::from(err_ser);
+    assert!(matches!(mapped_ser, SerialError::Database(_)));
+
+    // Verify duplicate error mappings through domain engine
+    let dup_sn = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some("COLLIDE-SN".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(dup_sn, SerialError::DuplicateSerial(_)));
+
+    let dup_imei = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: None,
+            imei: Some(VALID_IMEI_1.into()),
+            asset_tag: None,
+            cost_price_minor: None,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(dup_imei, SerialError::DuplicateImei(_)));
+
+    let dup_tag = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id,
+            branch_id,
+            variant_id: None,
+            serial_number: None,
+            imei: None,
+            asset_tag: Some("collide-tag".into()),
+            cost_price_minor: None,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(dup_tag, SerialError::DuplicateAssetTag(_)));
 }

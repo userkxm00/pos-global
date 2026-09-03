@@ -89,8 +89,18 @@ pub fn update_serial_status_impl(
     session_id: &str,
     request: &UpdateSerialStatusInput,
 ) -> Result<SerializedInstance, String> {
+    require_scoped_permission(
+        conn,
+        session_id,
+        Permission::InventoryAdjust,
+        None,
+        Some(&request.branch_id),
+    )
+    .map_err(|e| e.to_string())?;
+
     let existing = crate::serial::get_serial_instance(conn, &request.id)
         .map_err(|e| e.to_string())?
+        .filter(|inst| inst.branch_id == request.branch_id)
         .ok_or_else(|| {
             format!(
                 "Serial instance '{}' not found or inaccessible for this session",
@@ -98,15 +108,7 @@ pub fn update_serial_status_impl(
             )
         })?;
 
-    require_scoped_permission(
-        conn,
-        session_id,
-        Permission::InventoryAdjust,
-        None,
-        Some(&existing.branch_id),
-    )
-    .map_err(|e| e.to_string())?;
-
+    let _ = existing;
     crate::serial::update_serial_status(conn, request).map_err(|e| e.to_string())
 }
 

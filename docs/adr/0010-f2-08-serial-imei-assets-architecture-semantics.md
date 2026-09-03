@@ -1,7 +1,7 @@
 # ADR-0010 — F2.08 Serial, IMEI & Tracked Assets Architecture & Semantics
 
-Status: Accepted  
-Date: 2026-09-03  
+Status: Accepted
+Date: 2026-09-03
 
 ---
 

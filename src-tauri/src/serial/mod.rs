@@ -3,6 +3,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Persisted operational lifecycle status for serialized inventory instances.
 ///
@@ -41,8 +42,16 @@ impl SerialStatus {
         }
     }
 
-    /// Parses a string slice into a typed `SerialStatus`.
-    pub fn from_str(s: &str) -> Result<Self, SerialError> {
+    /// Returns whether this status represents a permanent terminal state.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, SerialStatus::Recalled | SerialStatus::Disposed)
+    }
+}
+
+impl FromStr for SerialStatus {
+    type Err = SerialError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
             "in_stock" => Ok(SerialStatus::InStock),
             "reserved" => Ok(SerialStatus::Reserved),
@@ -55,11 +64,6 @@ impl SerialStatus {
                 "Invalid serial status '{other}'. Allowed: in_stock, reserved, sold, transferred, defective, recalled, disposed"
             ))),
         }
-    }
-
-    /// Returns whether this status represents a permanent terminal state.
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, SerialStatus::Recalled | SerialStatus::Disposed)
     }
 }
 
@@ -124,37 +128,49 @@ pub struct SerialFilter {
 }
 
 /// Strongly-typed domain errors for serialized inventory operations.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SerialError {
-    #[error("Validation error: {0}")]
     Validation(String),
-
-    #[error("Duplicate serial number: {0}")]
     DuplicateSerial(String),
-
-    #[error("Duplicate IMEI: {0}")]
     DuplicateImei(String),
-
-    #[error("Duplicate asset tag: {0}")]
     DuplicateAssetTag(String),
-
-    #[error("Serial instance not found: {0}")]
     NotFound(String),
-
-    #[error("Product '{0}' is not tracked by serial or IMEI")]
     ProductNotSerialized(String),
-
-    #[error("Invalid variant: {0}")]
     InvalidVariant(String),
-
-    #[error("Invalid status transition from '{from}' to '{to}'")]
     InvalidStatusTransition { from: String, to: String },
-
-    #[error("Cannot update status of {0}: terminal state")]
     TerminalStatus(String),
+    Database(String),
+}
 
-    #[error("Database error: {0}")]
-    Database(#[from] rusqlite::Error),
+impl std::fmt::Display for SerialError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SerialError::Validation(msg) => write!(f, "Validation error: {msg}"),
+            SerialError::DuplicateSerial(msg) => write!(f, "Duplicate serial number: {msg}"),
+            SerialError::DuplicateImei(msg) => write!(f, "Duplicate IMEI: {msg}"),
+            SerialError::DuplicateAssetTag(msg) => write!(f, "Duplicate asset tag: {msg}"),
+            SerialError::NotFound(msg) => write!(f, "Serial instance not found: {msg}"),
+            SerialError::ProductNotSerialized(msg) => {
+                write!(f, "Product '{msg}' is not tracked by serial or IMEI")
+            }
+            SerialError::InvalidVariant(msg) => write!(f, "Invalid variant: {msg}"),
+            SerialError::InvalidStatusTransition { from, to } => {
+                write!(f, "Invalid status transition from '{from}' to '{to}'")
+            }
+            SerialError::TerminalStatus(msg) => {
+                write!(f, "Cannot update status of {msg}: terminal state")
+            }
+            SerialError::Database(msg) => write!(f, "Database error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for SerialError {}
+
+impl From<rusqlite::Error> for SerialError {
+    fn from(err: rusqlite::Error) -> Self {
+        SerialError::Database(err.to_string())
+    }
 }
 
 // =========================================================================
@@ -181,6 +197,7 @@ pub fn validate_luhn_checksum(digits: &str) -> bool {
 }
 
 /// Normalizes and validates a serial number string.
+/// Enforces Unicode character-count limits (`chars().count() <= 100`).
 pub fn validate_serial_number(s: &str) -> Result<String, SerialError> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
@@ -188,7 +205,7 @@ pub fn validate_serial_number(s: &str) -> Result<String, SerialError> {
             "Serial number cannot be empty or whitespace-only".to_string(),
         ));
     }
-    if trimmed.len() > 100 {
+    if trimmed.chars().count() > 100 {
         return Err(SerialError::Validation(
             "Serial number exceeds maximum length of 100 characters".to_string(),
         ));
@@ -213,6 +230,7 @@ pub fn validate_imei(imei: &str) -> Result<String, SerialError> {
 }
 
 /// Normalizes and validates an internal asset tag string.
+/// Enforces Unicode character-count limits (`chars().count() <= 100`).
 pub fn validate_asset_tag(tag: &str) -> Result<String, SerialError> {
     let trimmed = tag.trim();
     if trimmed.is_empty() {
@@ -220,7 +238,7 @@ pub fn validate_asset_tag(tag: &str) -> Result<String, SerialError> {
             "Asset tag cannot be empty or whitespace-only".to_string(),
         ));
     }
-    if trimmed.len() > 100 {
+    if trimmed.chars().count() > 100 {
         return Err(SerialError::Validation(
             "Asset tag exceeds maximum length of 100 characters".to_string(),
         ));
@@ -364,7 +382,7 @@ pub fn is_serial_tracked(conn: &Connection, product_id: &str) -> Result<bool, Se
         Err(rusqlite::Error::QueryReturnedNoRows) => Err(SerialError::Validation(format!(
             "Product '{product_id}' not found"
         ))),
-        Err(e) => Err(SerialError::Database(e)),
+        Err(e) => Err(SerialError::Database(e.to_string())),
     }
 }
 
@@ -402,7 +420,7 @@ pub fn verify_variant_association(
         Err(rusqlite::Error::QueryReturnedNoRows) => Err(SerialError::InvalidVariant(format!(
             "Variant '{variant_id}' not found"
         ))),
-        Err(e) => Err(SerialError::Database(e)),
+        Err(e) => Err(SerialError::Database(e.to_string())),
     }
 }
 
@@ -454,16 +472,34 @@ fn check_identifier_collisions(
 }
 
 fn map_sqlite_collision_error(e: rusqlite::Error) -> SerialError {
+    let is_unique_constraint = match &e {
+        rusqlite::Error::SqliteFailure(err, _) => {
+            err.extended_code == 2067 || err.code == rusqlite::ffi::ErrorCode::ConstraintViolation
+        }
+        _ => false,
+    };
+
     let msg = e.to_string();
-    if msg.contains("idx_serial_numbers_serial_active") {
-        SerialError::DuplicateSerial("Serial number already exists".to_string())
-    } else if msg.contains("idx_serial_numbers_imei_active") {
-        SerialError::DuplicateImei("IMEI already exists".to_string())
-    } else if msg.contains("idx_serial_numbers_asset_tag_branch") {
-        SerialError::DuplicateAssetTag("Asset tag already exists in this branch".to_string())
-    } else {
-        SerialError::Database(e)
+    if is_unique_constraint || msg.contains("UNIQUE constraint failed") {
+        if msg.contains("idx_serial_numbers_serial_active")
+            || msg.contains("serial_numbers.serial_number")
+        {
+            return SerialError::DuplicateSerial("Serial number already exists".to_string());
+        }
+        if msg.contains("idx_serial_numbers_imei_active") || msg.contains("serial_numbers.imei") {
+            return SerialError::DuplicateImei("IMEI already exists".to_string());
+        }
+        if msg.contains("idx_serial_numbers_asset_tag_branch")
+            || msg.contains("serial_numbers.branch_id, serial_numbers.asset_tag")
+            || msg.contains("serial_numbers.asset_tag")
+        {
+            return SerialError::DuplicateAssetTag(
+                "Asset tag already exists in this branch".to_string(),
+            );
+        }
     }
+
+    SerialError::Database(msg)
 }
 
 // =========================================================================
@@ -625,8 +661,7 @@ pub fn list_serial_instances(
     query.push_str(" ORDER BY created_at DESC, id ASC");
 
     let mut stmt = conn.prepare(&query)?;
-    let rusqlite_params: Vec<&dyn rusqlite::ToSql> =
-        params_vec.iter().map(|b| b.as_ref()).collect();
+    let rusqlite_params: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
 
     let rows = stmt.query_map(rusqlite_params.as_slice(), row_to_instance)?;
 
@@ -664,5 +699,5 @@ pub fn update_serial_status(
         params![input.status.as_str(), input.id],
         row_to_instance,
     )
-    .map_err(SerialError::Database)
+    .map_err(|e| SerialError::Database(e.to_string()))
 }

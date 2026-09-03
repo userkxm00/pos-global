@@ -7,15 +7,20 @@
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.08 — Serial / IMEI / Assets
-- Milestone Status: IMPLEMENTED / READY FOR COMMIT & PR
+- Milestone Status: PR #76 REMEDIATION / COMMITTED & PUSHING
 - Branch: `feature/f2-08-serial-imei-assets`
-- HEAD: `5e525ecacf7d8d14f54158e249ce4f699d19ded7`
-- Remote HEAD: `5e525ecacf7d8d14f54158e249ce4f699d19ded7` (`origin/main`)
-- PR: Pending creation
-- Working Tree: Clean across authorized F2.08 files
-- Last Completed Action: Implemented F2.08 Migration 017, domain engine in `serial/mod.rs`, Tauri IPC commands in `commands/serial.rs`, and comprehensive unit/integration/migration test suite in `tests/serial_tests.rs` (36 test cases)
+- Remote PR: PR #76 (`https://github.com/userkxm00/pos-global/pull/76`)
+- Last Completed Action: Remediated all 8 findings on PR #76:
+  1. Rust compilation: replaced missing `thiserror` dependency with standard library Display/Error/From implementations
+  2. Greptile P1: Unicode character count (`chars().count() <= 100`) for `serial_number` and `asset_tag`
+  3. CodeRabbit Security: authentication & permission checks precede resource loading in `update_serial_status_impl` to eliminate existence leakage
+  4. CodeRabbit Data Integrity: verified SQLite UNIQUE constraint error before mapping, covering both index names and column-qualified messages
+  5. CodeRabbit Critical: corrected `created_at` non-null tuple type mismatch in `test_migration_017_upgrade_preserves_legacy_data`
+  6. CodeRabbit Clippy: implemented `std::str::FromStr for SerialStatus`
+  7. SonarCloud High: refactored Migration 017 status whitelist check to eliminate duplicate literal
+  8. SonarCloud Low: replaced closure in `list_serial_instances` with `AsRef::as_ref`
 - Current Blocker: None
-- Next Authorized Action: Commit, push feature branch to origin, and create pull request into `main`
+- Next Authorized Action: Commit, push to `feature/f2-08-serial-imei-assets`, monitor remote CI and SonarCloud checks on PR #76 to green state, and stop.
 - Exact F2.08 Scope Implemented:
   - ADR-0010 accepted (`docs/adr/0010-f2-08-serial-imei-assets-architecture-semantics.md`)
   - Migration file `017_serial_imei_assets.sql` created rebuilding `serial_numbers` with nullable `serial_number`, `imei`, and `asset_tag`, check constraint asserting at least one identifier, integer minor precision `cost_price_minor`, partial unique indexes (global NOCASE serial, global IMEI, branch-scoped NOCASE asset tag), and fail-closed pre-validation

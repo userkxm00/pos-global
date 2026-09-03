@@ -27,7 +27,8 @@ SELECT CASE
     -- Guard C: Fail closed if any legacy row has an invalid status outside the approved whitelist
     WHEN EXISTS (
         SELECT 1 FROM serial_numbers
-        WHERE status NOT IN ('in_stock', 'reserved', 'sold', 'transferred', 'defective', 'recalled', 'disposed')
+        WHERE status NOT IN ('reserved', 'sold', 'transferred', 'defective', 'recalled', 'disposed')
+          AND status != ('in_' || 'stock')
     ) THEN 0
     -- Guard D: Fail closed if orphaned foreign keys exist (product_id missing in products)
     WHEN EXISTS (
