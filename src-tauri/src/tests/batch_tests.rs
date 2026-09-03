@@ -5,7 +5,8 @@ use crate::batch::*;
 use crate::commands::batch::{create_product_batch_impl, get_product_batch_impl};
 use crate::product::{create_product, CreateProductInput};
 use crate::tests::test_helpers::{
-    create_test_org_and_branch, create_test_user_hierarchy, setup_test_db, setup_test_db_up_to,
+    create_test_org_and_branch, create_test_user_hierarchy, create_test_user_with_creds,
+    setup_test_db, setup_test_db_up_to,
 };
 use crate::user::session::create_local_session;
 use crate::variant::{create_variant, CreateVariantInput};
@@ -898,10 +899,34 @@ fn test_fefo_planning_strictly_read_only_invariant() {
 #[test]
 fn test_create_batch_command_authorized_and_unauthenticated() {
     let conn = setup_test_db();
-    let (_, branch_id, user) = create_test_user_hierarchy(&conn);
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let manager = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Batch Manager",
+        Some("batch_mgr"),
+        Some("pass123"),
+        Some("1234"),
+        "manager",
+    )
+    .expect("create manager");
+    let cashier = create_test_user_with_creds(
+        &conn,
+        &branch_id,
+        "Batch Cashier",
+        Some("batch_cashier"),
+        Some("pass123"),
+        Some("1234"),
+        "cashier",
+    )
+    .expect("create cashier");
+
     let product_id = make_test_product(&conn, "Organic Honey", true);
 
-    let session = create_local_session(&conn, &user.id, &branch_id, "pin", None).expect("session");
+    let session_mgr =
+        create_local_session(&conn, &manager.id, &branch_id, "pin", None).expect("manager session");
+    let session_cashier =
+        create_local_session(&conn, &cashier.id, &branch_id, "pin", None).expect("cashier session");
 
     let req = CreateBatchInput {
         product_id: product_id.clone(),
@@ -914,11 +939,15 @@ fn test_create_batch_command_authorized_and_unauthenticated() {
         expiry_date: Some("2099-01-01".into()),
     };
 
-    // Authenticated user with inventory adjust permission succeeds
-    let b = create_product_batch_impl(&conn, &session.id, &req).expect("create batch");
+    // 1. Cashier without InventoryAdjust permission is denied
+    let err_perm = create_product_batch_impl(&conn, &session_cashier.id, &req).unwrap_err();
+    assert!(err_perm.contains("Permission denied") || err_perm.contains("permission"));
+
+    // 2. Authenticated manager with InventoryAdjust permission succeeds
+    let b = create_product_batch_impl(&conn, &session_mgr.id, &req).expect("create batch");
     assert_eq!(b.batch_number.as_deref(), Some("HONEY-01"));
 
-    // Unauthenticated session fails
+    // 3. Unauthenticated session fails
     let err_auth = create_product_batch_impl(&conn, "nonexistent_session", &req).unwrap_err();
     assert!(err_auth.contains("Authentication required"));
 }
