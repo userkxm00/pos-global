@@ -7,13 +7,13 @@
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.07 — Batches, expiry dates & FEFO
-- Milestone Status: PR #75 REMEDIATION VERIFIED / READY FOR PUSH
+- Milestone Status: PR #75 OPEN / REMEDIATION AUDITED
 - Branch: `feature/f2-07-batches-expiry-fefo`
-- HEAD: `73f2ee82121eea988fa90f50e111da23a3fd747f`
-- Remote HEAD: `73f2ee82121eea988fa90f50e111da23a3fd747f` (`origin/feature/f2-07-batches-expiry-fefo`)
+- HEAD: `1a4afce01799181b8bfc6bc2bcbff091a3e65065`
+- Remote HEAD: `1a4afce01799181b8bfc6bc2bcbff091a3e65065` (`origin/feature/f2-07-batches-expiry-fefo`)
 - PR: #75 (https://github.com/userkxm00/pos-global/pull/75)
-- Working Tree: Clean (remediation ready for commit)
-- Last Completed Action: Remediated PR #75: resolved command namespace collision, fixed ?3 duplicate check parameter bug, implemented temporary guard table in migration 016, supported legacy NULL batch_number, refactored create_batch cognitive complexity, stabilized test fixtures, added docstrings, and reduced duplication
+- Working Tree: Hardened migration with duplicate pre-validation, staged uniqueness check, clippy fixes, and regression tests
+- Last Completed Action: Added fail-closed duplicate pre-validation to migration 016, fixed leap-year clippy lint, collapsed nested if-let, corrected test helper signatures, and strengthened migration rollback tests
 - Current Blocker: None
 - Next Authorized Action: Commit remediation and push to origin
 - Exact F2.07 Scope Implemented:

@@ -354,7 +354,7 @@ pub fn validate_iso_calendar_date(s: &str) -> Result<(), BatchError> {
         )));
     }
 
-    let is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    let is_leap = (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400);
     let max_days = match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
@@ -624,13 +624,11 @@ pub fn create_batch(
         ],
     );
 
-    if let Err(ref e) = insert_res {
-        if let rusqlite::Error::SqliteFailure(err, Some(ref msg)) = e {
-            if err.code == rusqlite::ErrorCode::ConstraintViolation && msg.contains("UNIQUE") {
-                return Err(BatchError::DuplicateBatchNumber(format!(
-                    "Batch number '{batch_number}' already exists for this product in branch '{branch_id}'"
-                )));
-            }
+    if let Err(rusqlite::Error::SqliteFailure(err, Some(ref msg))) = &insert_res {
+        if err.code == rusqlite::ErrorCode::ConstraintViolation && msg.contains("UNIQUE") {
+            return Err(BatchError::DuplicateBatchNumber(format!(
+                "Batch number '{batch_number}' already exists for this product in branch '{branch_id}'"
+            )));
         }
     }
     insert_res?;

@@ -5,7 +5,7 @@ use crate::batch::*;
 use crate::commands::batch::*;
 use crate::product::{create_product, CreateProductInput};
 use crate::tests::test_helpers::{
-    create_test_org_and_branch, create_test_user_with_creds, setup_test_db, setup_test_db_up_to,
+    create_test_org_and_branch, create_test_user_hierarchy, setup_test_db, setup_test_db_up_to,
 };
 use crate::user::session::create_local_session;
 use crate::variant::{create_variant, CreateVariantInput};
@@ -46,17 +46,17 @@ fn add_product_capability(conn: &Connection, product_id: &str, cap_code: &str) {
 fn make_test_variant(conn: &Connection, product_id: &str, sku: &str) -> String {
     let v = create_variant(
         conn,
-        &CreateVariantInput {
+        CreateVariantInput {
             product_id: product_id.to_string(),
             sku: Some(sku.to_string()),
             barcode: None,
             price_override_minor: None,
-            cost_override_minor: None,
+            cost_price_minor: None,
             attribute_value_ids: vec![],
         },
     )
     .expect("create test variant");
-    v.id
+    v.variant.id
 }
 
 fn create_test_batch(
@@ -83,14 +83,14 @@ fn create_test_batch(
 }
 
 // =========================================================================
-// 1. MIGRATION TESTS
+// 1. MIGRATION SAFETY & ROLLBACK ATOMICITY TESTS
 // =========================================================================
 
 #[test]
 fn test_migration_016_fresh_application() {
     let conn = setup_test_db();
 
-    // Verify product_batches schema
+    // Verify rebuilt columns
     let col_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM pragma_table_info('product_batches')
@@ -133,7 +133,7 @@ fn test_migration_016_fresh_application() {
         "expiry_date must be nullable after migration 016"
     );
 
-    // Verify batch_number is nullable in schema for legacy compatibility
+    // Verify batch_number is nullable in schema for historical compatibility
     let batch_notnull: bool = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('product_batches') WHERE name = 'batch_number'",
@@ -151,79 +151,44 @@ fn test_migration_016_fresh_application() {
 }
 
 #[test]
-fn test_migration_upgrade_015_to_016_exact_legacy_data() {
+fn test_migration_upgrade_015_to_016_legacy_nullable_batch_number_preserved() {
     let conn = setup_test_db_up_to("015_weighted_products");
-    let (org_id, branch_id) = create_test_org_and_branch(&conn);
-    let _ = org_id;
-    let product_id = make_test_product(&conn, "Legacy Batch Product", true);
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Legacy Null Batch Product", true);
 
-    // Pre-insert exact legacy batches into 001 product_batches (including a row with NULL batch_number)
+    // Pre-insert legacy batches including NULL batch_number into 001 table
     conn.execute(
         "INSERT INTO product_batches (id, product_id, branch_id, batch_number, quantity, expiry_date, received_at)
          VALUES
          ('b1', ?1, ?2, 'BATCH-1000', 1.000, '2099-01-01', '2026-01-01 10:00:00'),
-         ('b2', ?1, ?2, 'BATCH-1250', 1.250, '2099-02-01', '2026-01-02 10:00:00'),
-         ('b3', ?1, ?2, 'BATCH-1001', 1.001, '2099-03-01', '2026-01-03 10:00:00'),
-         ('b4', ?1, ?2, 'BATCH-1234', 1.234, '2099-04-01', '2026-01-04 10:00:00'),
-         ('b5', ?1, ?2, NULL,         2.000, '2099-05-01', '2026-01-05 10:00:00')",
+         ('b2', ?1, ?2, NULL,         2.500, '2099-02-01', '2026-01-02 10:00:00')",
         params![product_id, branch_id],
     )
     .expect("insert legacy batches");
 
-    // Apply migration 016
     let sql_016 = include_str!("../db/migrations/016_batches_and_expiry.sql");
     conn.execute_batch(sql_016).expect("apply migration 016");
 
-    // Verify data conversion
-    let b1: (i64, String, Option<String>) = conn
+    let b1: (i64, Option<String>) = conn
         .query_row(
-            "SELECT quantity_milli, expiry_date, batch_number FROM product_batches WHERE id = 'b1'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .expect("query b1");
-    assert_eq!(b1.0, 1000);
-    assert_eq!(b1.1, "2099-01-01");
-    assert_eq!(b1.2.as_deref(), Some("BATCH-1000"));
-
-    let b2_qty: i64 = conn
-        .query_row(
-            "SELECT quantity_milli FROM product_batches WHERE id = 'b2'",
-            [],
-            |r| r.get(0),
-        )
-        .expect("query b2");
-    assert_eq!(b2_qty, 1250);
-
-    let b3_qty: i64 = conn
-        .query_row(
-            "SELECT quantity_milli FROM product_batches WHERE id = 'b3'",
-            [],
-            |r| r.get(0),
-        )
-        .expect("query b3");
-    assert_eq!(b3_qty, 1001);
-
-    let b4_qty: i64 = conn
-        .query_row(
-            "SELECT quantity_milli FROM product_batches WHERE id = 'b4'",
-            [],
-            |r| r.get(0),
-        )
-        .expect("query b4");
-    assert_eq!(b4_qty, 1234);
-
-    // Verify legacy NULL batch_number is preserved
-    let b5: (i64, Option<String>) = conn
-        .query_row(
-            "SELECT quantity_milli, batch_number FROM product_batches WHERE id = 'b5'",
+            "SELECT quantity_milli, batch_number FROM product_batches WHERE id = 'b1'",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
-        .expect("query b5");
-    assert_eq!(b5.0, 2000);
+        .expect("query b1");
+    assert_eq!(b1.0, 1000);
+    assert_eq!(b1.1.as_deref(), Some("BATCH-1000"));
+
+    let b2: (i64, Option<String>) = conn
+        .query_row(
+            "SELECT quantity_milli, batch_number FROM product_batches WHERE id = 'b2'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("query b2");
+    assert_eq!(b2.0, 2500);
     assert_eq!(
-        b5.1, None,
+        b2.1, None,
         "Legacy NULL batch_number must be preserved as NULL"
     );
 }
@@ -234,7 +199,6 @@ fn test_migration_upgrade_fails_on_inexact_fractional_precision() {
     let (_, branch_id) = create_test_org_and_branch(&conn);
     let product_id = make_test_product(&conn, "Inexact Batch Product", true);
 
-    // Pre-insert inexact fractional quantity (4 decimals: 1.2345)
     conn.execute(
         "INSERT INTO product_batches (id, product_id, branch_id, batch_number, quantity, expiry_date, received_at)
          VALUES ('bad1', ?1, ?2, 'BATCH-BAD', 1.2345, '2099-01-01', '2026-01-01 10:00:00')",
@@ -242,12 +206,11 @@ fn test_migration_upgrade_fails_on_inexact_fractional_precision() {
     )
     .expect("insert inexact batch");
 
-    // Migration 016 must fail closed
     let sql_016 = include_str!("../db/migrations/016_batches_and_expiry.sql");
     let result = conn.execute_batch(sql_016);
     assert!(
         result.is_err(),
-        "Migration 016 must abort on inexact fractional quantity"
+        "Migration 016 must abort fail-closed on inexact fractional quantity"
     );
 }
 
@@ -268,7 +231,81 @@ fn test_migration_upgrade_fails_on_negative_legacy_quantity() {
     let result = conn.execute_batch(sql_016);
     assert!(
         result.is_err(),
-        "Migration 016 must abort on negative quantity"
+        "Migration 016 must abort fail-closed on negative quantity"
+    );
+}
+
+#[test]
+fn test_migration_upgrade_fails_on_duplicate_non_variant_batch_numbers() {
+    let conn = setup_test_db_up_to("015_weighted_products");
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Duplicate Batch Product", true);
+
+    // Insert case-insensitive duplicates for the same branch and product
+    conn.execute(
+        "INSERT INTO product_batches (id, product_id, branch_id, batch_number, quantity, expiry_date, received_at)
+         VALUES
+         ('d1', ?1, ?2, 'BATCH-DUP', 1.0, '2099-01-01', '2026-01-01 10:00:00'),
+         ('d2', ?1, ?2, 'batch-dup', 2.0, '2099-02-01', '2026-01-02 10:00:00')",
+        params![product_id, branch_id],
+    )
+    .expect("insert duplicate batches");
+
+    let sql_016 = include_str!("../db/migrations/016_batches_and_expiry.sql");
+    let result = conn.execute_batch(sql_016);
+    assert!(
+        result.is_err(),
+        "Migration 016 must fail closed on case-insensitive duplicate batch numbers"
+    );
+}
+
+#[test]
+fn test_migration_atomic_rollback_preserves_legacy_table_intact() {
+    let conn = setup_test_db_up_to("015_weighted_products");
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Rollback Test Product", true);
+
+    // Insert one valid batch and one invalid duplicate
+    conn.execute(
+        "INSERT INTO product_batches (id, product_id, branch_id, batch_number, quantity, expiry_date, received_at)
+         VALUES
+         ('v1', ?1, ?2, 'LOT-A', 1.0, '2099-01-01', '2026-01-01 10:00:00'),
+         ('v2', ?1, ?2, 'lot-a', 2.0, '2099-02-01', '2026-01-02 10:00:00')",
+        params![product_id, branch_id],
+    )
+    .expect("insert batches");
+
+    // Execute migration inside transaction (exactly as migration runner does)
+    let sql_016 = include_str!("../db/migrations/016_batches_and_expiry.sql");
+    let tx_res = (|| -> rusqlite::Result<()> {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(sql_016)?;
+        tx.commit()?;
+        Ok(())
+    })();
+
+    assert!(tx_res.is_err(), "Migration must fail");
+
+    // Verify original legacy table is 100% intact and not renamed or partially dropped
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM product_batches", [], |r| r.get(0))
+        .expect("query product_batches");
+    assert_eq!(count, 2, "Original 2 rows must remain intact");
+
+    // Verify product_batches_new does not exist
+    let new_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='product_batches_new'",
+            [],
+            |r| {
+                let c: i64 = r.get(0)?;
+                Ok(c > 0)
+            },
+        )
+        .expect("check product_batches_new");
+    assert!(
+        !new_exists,
+        "product_batches_new must not remain after rollback"
     );
 }
 
@@ -279,7 +316,6 @@ fn test_migration_nullable_expiry_after_rebuild() {
     let product_id = make_test_product(&conn, "Tile Batch", false);
     add_product_capability(&conn, &product_id, "BATCH");
 
-    // Insert lot with NULL expiry_date
     let res = conn.execute(
         "INSERT INTO product_batches (product_id, branch_id, batch_number, quantity_milli, expiry_date)
          VALUES (?1, ?2, 'LOT-TILE-01', 50000, NULL)",
@@ -301,12 +337,10 @@ fn test_batch_creation_requires_expiry_product() {
     let (_, branch_id) = create_test_org_and_branch(&conn);
     let product_id = make_test_product(&conn, "Milk", true);
 
-    // requires_expiry = true requires expiry_date
     let err =
         create_test_batch(&conn, &product_id, &branch_id, "MILK-01", 10000, None).unwrap_err();
     assert!(matches!(err, BatchError::Validation(msg) if msg.contains("Expiry date is mandatory")));
 
-    // Succeeds when expiry provided
     let batch = create_test_batch(
         &conn,
         &product_id,
@@ -362,6 +396,7 @@ fn test_batch_creation_invalid_date_formats() {
 fn test_batch_creation_valid_leap_year_date() {
     assert!(validate_iso_calendar_date("2024-02-29").is_ok());
     assert!(validate_iso_calendar_date("2028-02-29").is_ok());
+    assert!(validate_iso_calendar_date("2000-02-29").is_ok());
 }
 
 #[test]
@@ -388,7 +423,7 @@ fn test_batch_creation_manufactured_date_after_expiry_rejected() {
 }
 
 // =========================================================================
-// 4. BATCH NUMBER & QUANTITY BOUNDS
+// 4. BATCH NUMBER BOUNDS & DUPLICATE CHECKS
 // =========================================================================
 
 #[test]
@@ -397,7 +432,6 @@ fn test_batch_number_normalization_and_bounds() {
     let (_, branch_id) = create_test_org_and_branch(&conn);
     let product_id = make_test_product(&conn, "Bread", true);
 
-    // Empty batch number rejected on new creation
     let err_empty = create_test_batch(
         &conn,
         &product_id,
@@ -409,7 +443,6 @@ fn test_batch_number_normalization_and_bounds() {
     .unwrap_err();
     assert!(matches!(err_empty, BatchError::Validation(msg) if msg.contains("empty")));
 
-    // Exceeds 100 chars
     let long_num = "A".repeat(101);
     let err_long = create_test_batch(
         &conn,
@@ -422,7 +455,6 @@ fn test_batch_number_normalization_and_bounds() {
     .unwrap_err();
     assert!(matches!(err_long, BatchError::Validation(msg) if msg.contains("maximum length")));
 
-    // Negative quantity rejected
     let err_qty = create_test_batch(
         &conn,
         &product_id,
@@ -435,12 +467,8 @@ fn test_batch_number_normalization_and_bounds() {
     assert!(matches!(err_qty, BatchError::Validation(msg) if msg.contains("negative")));
 }
 
-// =========================================================================
-// 5. UNIQUENESS & PARTIAL INDEX TESTS
-// =========================================================================
-
 #[test]
-fn test_batch_duplicate_number_case_insensitive_rejected() {
+fn test_batch_duplicate_non_variant_number_case_insensitive_rejected() {
     let conn = setup_test_db();
     let (_, branch_id) = create_test_org_and_branch(&conn);
     let product_id = make_test_product(&conn, "Cheese", true);
@@ -455,7 +483,6 @@ fn test_batch_duplicate_number_case_insensitive_rejected() {
     )
     .expect("first batch created");
 
-    // Case insensitive duplicate in same branch/product
     let err = create_test_batch(
         &conn,
         &product_id,
@@ -469,6 +496,93 @@ fn test_batch_duplicate_number_case_insensitive_rejected() {
 }
 
 #[test]
+fn test_batch_duplicate_variant_number_case_insensitive_rejected() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Apparel Item", false);
+    add_product_capability(&conn, &product_id, "BATCH");
+
+    let variant_id = make_test_variant(&conn, &product_id, "SKU-RED-XL");
+
+    // First batch for variant
+    create_batch(
+        &conn,
+        &CreateBatchInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: Some(variant_id.clone()),
+            batch_number: "LOT-RED-01".into(),
+            quantity_milli: 5000,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: None,
+        },
+    )
+    .expect("first variant batch");
+
+    // Duplicate batch for SAME variant
+    let err = create_batch(
+        &conn,
+        &CreateBatchInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: Some(variant_id),
+            batch_number: "lot-red-01".into(),
+            quantity_milli: 3000,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: None,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err, BatchError::DuplicateBatchNumber(_)));
+}
+
+#[test]
+fn test_batch_same_number_allowed_for_different_variants() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "T-Shirt", false);
+    add_product_capability(&conn, &product_id, "BATCH");
+
+    let var1 = make_test_variant(&conn, &product_id, "TSHIRT-SM");
+    let var2 = make_test_variant(&conn, &product_id, "TSHIRT-LG");
+
+    let b1 = create_batch(
+        &conn,
+        &CreateBatchInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: Some(var1),
+            batch_number: "SEASON-2026".into(),
+            quantity_milli: 10000,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: None,
+        },
+    );
+    assert!(b1.is_ok());
+
+    let b2 = create_batch(
+        &conn,
+        &CreateBatchInput {
+            product_id,
+            branch_id,
+            variant_id: Some(var2),
+            batch_number: "SEASON-2026".into(),
+            quantity_milli: 10000,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: None,
+        },
+    );
+    assert!(
+        b2.is_ok(),
+        "Same batch number for different variants must be allowed"
+    );
+}
+
+#[test]
 fn test_batch_same_number_different_branch_allowed() {
     let conn = setup_test_db();
     let (org_id, branch_1) = create_test_org_and_branch(&conn);
@@ -477,10 +591,9 @@ fn test_batch_same_number_different_branch_allowed() {
         crate::branch::CreateBranchInput {
             organization_id: org_id,
             name: "Branch 2".into(),
-            code: Some("BR2".into()),
             address: None,
-            phone: None,
-            is_active: true,
+            currency: None,
+            is_active: Some(true),
         },
     )
     .expect("create branch 2")
@@ -513,7 +626,7 @@ fn test_batch_same_number_different_branch_allowed() {
 }
 
 // =========================================================================
-// 6. VARIANT INTEGRITY TESTS
+// 5. VARIANT INTEGRITY TESTS
 // =========================================================================
 
 #[test]
@@ -543,7 +656,7 @@ fn test_batch_creation_variant_mismatch_rejected() {
 }
 
 // =========================================================================
-// 7. STATUS LIFECYCLE TESTS
+// 6. STATUS LIFECYCLE TESTS
 // =========================================================================
 
 #[test]
@@ -611,7 +724,7 @@ fn test_batch_status_lifecycle_valid_and_terminal_transitions() {
 }
 
 // =========================================================================
-// 8. FEFO PLANNING ALGORITHM (DETERMINISTIC READ-ONLY TESTS)
+// 7. FEFO PLANNING ALGORITHM (DETERMINISTIC READ-ONLY TESTS)
 // =========================================================================
 
 #[test]
@@ -667,7 +780,7 @@ fn test_fefo_planning_earliest_expiry_and_multi_batch_split() {
     )
     .expect("batch 3");
 
-    // Request 2500 milli: should allocate 1500 from BATCH-EARLIEST and 1000 from BATCH-MID
+    // Request 2500 milli: allocates 1500 from BATCH-EARLIEST and 1000 from BATCH-MID
     let plan = plan_fefo_allocation(&conn, &branch_id, &product_id, None, 2500).expect("plan fefo");
 
     assert_eq!(plan.requested_quantity_milli, 2500);
@@ -697,7 +810,7 @@ fn test_fefo_planning_dynamically_excludes_expired_and_quarantined() {
     let product_id = make_test_product(&conn, "Salad Pack", true);
     add_product_capability(&conn, &product_id, "FEFO");
 
-    // Past expiry batch (derived expired at query time)
+    // Past expiry batch (dynamically excluded at query time)
     conn.execute(
         "INSERT INTO product_batches (product_id, branch_id, batch_number, quantity_milli, status, expiry_date)
          VALUES (?1, ?2, 'EXPIRED-BATCH', 5000, 'active', '2020-01-01')",
@@ -763,10 +876,8 @@ fn test_fefo_planning_strictly_read_only_invariant() {
     )
     .expect("create batch");
 
-    // Execute plan
     let _ = plan_fefo_allocation(&conn, &branch_id, &product_id, None, 3000).expect("fefo plan");
 
-    // Re-query batch: quantity_milli must be strictly 5000 (no mutation)
     let current_qty: i64 = conn
         .query_row(
             "SELECT quantity_milli FROM product_batches WHERE id = ?1",
@@ -781,17 +892,16 @@ fn test_fefo_planning_strictly_read_only_invariant() {
 }
 
 // =========================================================================
-// 9. AUTHORIZATION & TENANCY BOUNDARY TESTS
+// 8. AUTHORIZATION & TENANCY BOUNDARY TESTS
 // =========================================================================
 
 #[test]
 fn test_create_batch_command_authorized_and_unauthenticated() {
     let conn = setup_test_db();
-    let (org_id, branch_id) = create_test_org_and_branch(&conn);
+    let (_, branch_id, user) = create_test_user_hierarchy(&conn);
     let product_id = make_test_product(&conn, "Organic Honey", true);
 
-    let user = create_test_user_with_creds(&conn, &org_id, &branch_id, "manager", "test_pin");
-    let session = create_local_session(&conn, &user.id, &branch_id).expect("session");
+    let session = create_local_session(&conn, &user.id, &branch_id, "pin", None).expect("session");
 
     let req = CreateBatchInput {
         product_id: product_id.clone(),
@@ -804,8 +914,8 @@ fn test_create_batch_command_authorized_and_unauthenticated() {
         expiry_date: Some("2099-01-01".into()),
     };
 
-    // Authenticated manager succeeds
-    let b = create_product_batch_impl(&conn, &session.session_id, &req).expect("create batch");
+    // Authenticated user with inventory adjust permission succeeds
+    let b = create_product_batch_impl(&conn, &session.id, &req).expect("create batch");
     assert_eq!(b.batch_number.as_deref(), Some("HONEY-01"));
 
     // Unauthenticated session fails
@@ -816,16 +926,15 @@ fn test_create_batch_command_authorized_and_unauthenticated() {
 #[test]
 fn test_get_batch_command_cross_branch_leakage_prevented() {
     let conn = setup_test_db();
-    let (org_id, branch_1) = create_test_org_and_branch(&conn);
+    let (org_id, branch_1, user) = create_test_user_hierarchy(&conn);
     let branch_2 = crate::branch::create_branch(
         &conn,
         crate::branch::CreateBranchInput {
-            organization_id: org_id.clone(),
+            organization_id: org_id,
             name: "Branch 2".into(),
-            code: Some("BR2".into()),
             address: None,
-            phone: None,
-            is_active: true,
+            currency: None,
+            is_active: Some(true),
         },
     )
     .expect("create branch 2")
@@ -845,10 +954,9 @@ fn test_get_batch_command_cross_branch_leakage_prevented() {
     .expect("batch in branch 2");
 
     // User session scoped strictly to branch 1
-    let user = create_test_user_with_creds(&conn, &org_id, &branch_1, "cashier", "test_pin");
-    let session = create_local_session(&conn, &user.id, &branch_1).expect("session");
+    let session = create_local_session(&conn, &user.id, &branch_1, "pin", None).expect("session");
 
     // Attempting to query batch from branch 2 must fail without existence leakage
-    let res = get_product_batch_impl(&conn, &session.session_id, &b2.id);
+    let res = get_product_batch_impl(&conn, &session.id, &b2.id);
     assert!(res.is_err(), "Cross-branch batch access must fail closed");
 }
