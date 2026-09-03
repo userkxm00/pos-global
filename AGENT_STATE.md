@@ -7,15 +7,15 @@
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.07 — Batches, expiry dates & FEFO
-- Milestone Status: PR #75 OPEN / REMEDIATION AUDITED
+- Milestone Status: PR #75 OPEN / SONAR COGNITIVE COMPLEXITY REMEDIATED
 - Branch: `feature/f2-07-batches-expiry-fefo`
-- HEAD: `bb5f9faaecc81e5fd630ff14df9d024bfd9b02dc`
-- Remote HEAD: `bb5f9faaecc81e5fd630ff14df9d024bfd9b02dc` (`origin/feature/f2-07-batches-expiry-fefo`)
+- HEAD: `4426759fabb1e1242c7474ece9205924ec28fa98`
+- Remote HEAD: `4426759fabb1e1242c7474ece9205924ec28fa98` (`origin/feature/f2-07-batches-expiry-fefo`)
 - PR: #75 (https://github.com/userkxm00/pos-global/pull/75)
 - Working Tree: Clean (audited and verified)
-- Last Completed Action: Extracted capability helpers in batch/mod.rs to eliminate code duplication, passed all Rust/test checks, hardened migration 016 with fail-closed duplicate assertions
+- Last Completed Action: Refactored validate_batch_dates in batch/mod.rs into focused helpers normalize_and_validate_expiry and normalize_and_validate_mfg, reducing Cognitive Complexity from 20 to <= 15 (resolving SonarCloud S3776)
 - Current Blocker: None
-- Next Authorized Action: Push deduplication commit to origin and verify CI
+- Next Authorized Action: Push remediation to origin and verify SonarCloud and CI
 - Exact F2.07 Scope Implemented:
   - ADR-0009 created and accepted (`docs/adr/0009-f2-07-batch-expiry-fefo-architecture-semantics.md`)
   - Migration file `016_batches_and_expiry.sql` created rebuilding `product_batches` with nullable `expiry_date`, integer milli precision (`quantity_milli INTEGER NOT NULL CHECK (quantity_milli >= 0)`), legacy `quantity REAL` removed, partial unique indexes for case-insensitive batch numbers, and fail-closed pre-validation

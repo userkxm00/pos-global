@@ -364,58 +364,56 @@ fn validate_batch_quantities(
     Ok(())
 }
 
+fn normalize_and_validate_expiry(
+    conn: &Connection,
+    product_id: &str,
+    expiry_date: Option<&str>,
+) -> Result<Option<String>, BatchError> {
+    let trimmed = expiry_date.map(str::trim).filter(|s| !s.is_empty());
+    let expiry_required = is_expiry_required(conn, product_id)?;
+
+    match trimmed {
+        Some(exp) => {
+            validate_iso_calendar_date(exp)?;
+            Ok(Some(exp.to_string()))
+        }
+        None if expiry_required => Err(BatchError::Validation(
+            "Expiry date is mandatory for this product".into(),
+        )),
+        None => Ok(None),
+    }
+}
+
+fn normalize_and_validate_mfg(
+    manufactured_date: Option<&str>,
+    normalized_expiry: Option<&str>,
+) -> Result<Option<String>, BatchError> {
+    let Some(mfg) = manufactured_date.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+
+    validate_iso_calendar_date(mfg)?;
+
+    if let Some(exp) = normalized_expiry {
+        if mfg >= exp {
+            return Err(BatchError::Validation(format!(
+                "Manufactured date '{mfg}' must be strictly before expiry date '{exp}'"
+            )));
+        }
+    }
+
+    Ok(Some(mfg.to_string()))
+}
+
 fn validate_batch_dates(
     conn: &Connection,
     product_id: &str,
     manufactured_date: Option<&str>,
     expiry_date: Option<&str>,
 ) -> Result<(Option<String>, Option<String>), BatchError> {
-    let expiry_required = is_expiry_required(conn, product_id)?;
-    let normalized_expiry = match expiry_date {
-        Some(exp) => {
-            let exp = exp.trim();
-            if exp.is_empty() {
-                if expiry_required {
-                    return Err(BatchError::Validation(
-                        "Expiry date is mandatory for this product".into(),
-                    ));
-                }
-                None
-            } else {
-                validate_iso_calendar_date(exp)?;
-                Some(exp.to_string())
-            }
-        }
-        None => {
-            if expiry_required {
-                return Err(BatchError::Validation(
-                    "Expiry date is mandatory for this product".into(),
-                ));
-            }
-            None
-        }
-    };
-
-    let normalized_mfg = match manufactured_date {
-        Some(mfg) => {
-            let mfg = mfg.trim();
-            if mfg.is_empty() {
-                None
-            } else {
-                validate_iso_calendar_date(mfg)?;
-                if let Some(ref exp) = normalized_expiry {
-                    if mfg >= exp.as_str() {
-                        return Err(BatchError::Validation(format!(
-                            "Manufactured date '{mfg}' must be strictly before expiry date '{exp}'"
-                        )));
-                    }
-                }
-                Some(mfg.to_string())
-            }
-        }
-        None => None,
-    };
-
+    let normalized_expiry = normalize_and_validate_expiry(conn, product_id, expiry_date)?;
+    let normalized_mfg =
+        normalize_and_validate_mfg(manufactured_date, normalized_expiry.as_deref())?;
     Ok((normalized_mfg, normalized_expiry))
 }
 
