@@ -7,15 +7,15 @@
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.07 — Batches, expiry dates & FEFO
-- Milestone Status: IMPLEMENTED / READY FOR PUSH & PR
+- Milestone Status: PR #75 OPEN / PENDING REMOTE CI & CODE REVIEW
 - Branch: `feature/f2-07-batches-expiry-fefo`
-- HEAD: Pending commit
-- Remote HEAD: `51eae14e827adce51701db1c532c211163555c51` (`origin/main`)
-- PR: Pending creation
-- Working Tree: Verified against ADR-0009 contract
-- Last Completed Action: F2.07 domain, migration 016, commands, and tests implemented and validated locally
-- Current Blocker: None
-- Next Authorized Action: Commit and push feature branch to origin, open PR
+- HEAD: `bc11a51b345f657c2a4edc28cf3d62849c2899d2`
+- Remote HEAD: `bc11a51b345f657c2a4edc28cf3d62849c2899d2` (`origin/feature/f2-07-batches-expiry-fefo`)
+- PR: #75 (https://github.com/userkxm00/pos-global/pull/75)
+- Working Tree: Clean (on branch `feature/f2-07-batches-expiry-fefo`)
+- Last Completed Action: Pushed feature/f2-07-batches-expiry-fefo to origin, opened PR #75
+- Current Blocker: None (awaiting remote CI and code review)
+- Next Authorized Action: Awaiting user instruction to inspect remote CI and code review
 - Exact F2.07 Scope Implemented:
   - ADR-0009 created and accepted (`docs/adr/0009-f2-07-batch-expiry-fefo-architecture-semantics.md`)
   - Migration file `016_batches_and_expiry.sql` created rebuilding `product_batches` with nullable `expiry_date`, integer milli precision (`quantity_milli INTEGER NOT NULL CHECK (quantity_milli >= 0)`), legacy `quantity REAL` removed, partial unique indexes for case-insensitive batch numbers, and fail-closed pre-validation
