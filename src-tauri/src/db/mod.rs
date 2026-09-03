@@ -58,6 +58,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "014_product_variants_hardening",
         include_str!("migrations/014_product_variants_hardening.sql"),
     ),
+    (
+        "015_weighted_products",
+        include_str!("migrations/015_weighted_products.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {
@@ -210,6 +214,7 @@ mod tests {
             "manufacturers",
             "product_barcodes",
             "sku_sequences",
+            "product_weight_configs",
         ] {
             let exists: i64 = conn
                 .query_row(

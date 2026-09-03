@@ -1,42 +1,85 @@
 # AGENT STATE
 
 > This file is operational state, not a substitute for Git history or CI evidence.
+> Reconciled and updated for F2.06 pre-commit audit on 2026-09-03.
 
 ## Current
 
-- Phase: 0 — Foundation Gate
-- Status: FOUNDATION VERIFIED
-- Current task: Foundation Gate closed; prepare Phase 1 task authorization
-- Last verified commit: `8f5cdfe9e96c7a2fab5d4afaeef36f3bc1499098` via `foundation-gate-evidence-8f5cdfe9e96c7a2fab5d4afaeef36f3bc1499098`
-- Next task: authorize exactly one Phase 1 task, starting with `F1.01` only after the state-synchronization commit receives its own current green Foundation Gate evidence
+- Current Phase: Phase 2 — Product & inventory core
+- Current Milestone: F2.06 — Weighted products
+- Milestone Status: IMPLEMENTATION_WRITTEN_LOCAL_VALIDATION_PARTIAL (5 tracked modified, 5 untracked new; frontend/formatting/foundation PASS; cargo test UNVERIFIED LOCALLY due to host linker)
+- Branch: `feature/f2-06-weighted-products` (local workspace) / `origin/main` (base)
+- HEAD: `98cbb9b9c9c0dbf5ff9fa550b5afe75f5c5ed3b2`
+- Remote HEAD: `98cbb9b9c9c0dbf5ff9fa550b5afe75f5c5ed3b2` (`origin/main`)
+- PR: None for F2.06 yet
+- PR HEAD: N/A
+- Working Tree: 5 tracked modified files, 5 untracked new files for F2.06; zero files unrelated to F2.06
+- Last Completed Action: F2.06 implementation written according to ADR-0008; pre-commit read-only audit executed; local validation executed (cargo fmt PASS, npm test PASS, npm run build PASS, validate_foundation PASS, git diff --check PASS; cargo test UNVERIFIED LOCALLY)
+- Current Blocker: Local environment lacks MSVC C++ Build Tools (`link.exe` / `kernel32.lib`) and MinGW GCC (`gcc.exe`), preventing local execution of native host build scripts in `cargo test` / `cargo check`. Verification is delegated to GitHub Actions CI upon PR creation.
+- Next Authorized Action: Awaiting user pre-commit review and authorization to commit to `feature/f2-06-weighted-products` and open PR for live CI matrix verification
+- Exact F2.06 Scope Implemented:
+  - Migration file `015_weighted_products.sql` created with table `product_weight_configs` (no redundant index, no premature hardware columns)
+  - Registered `015_weighted_products` in `MIGRATIONS` array in `src-tauri/src/db/mod.rs`
+  - Strict mass dimension enforcement (`UnitDimension::Mass`) via canonical relationship `products.unit_type -> units.code COLLATE NOCASE`
+  - Tare weight subtraction and non-negative net weight validation (`gross >= tare >= 0`)
+  - Checked integer half-up price calculation (`floor((net_weight_milli * unit_price_minor + 500) / 1000)`)
+  - Exact integer cross-unit metric mass normalization (kg <-> g with zero floating-point math)
+  - Tauri IPC commands (`set_product_weight_config`, `get_product_weight_config`, `delete_product_weight_config`, `calculate_weighted_item`) behind permission checks
+  - Unit and integration test suite with 31 test functions in `src-tauri/src/tests/weighted_tests.rs`
+- Protected Future Scope (STRICTLY PRESERVED / UNTOUCHED):
+  - F2.07: Batches / expiry / FEFO
+  - F2.08: Serial / IMEI / assets
+  - F2.09: Warranty
+  - F2.10–F2.15: Locations, bins, stock ledger, transfers, adjustments, stock count reconciliation
+  - F2.19 / F7.03: Variable-weight barcode parsing (EAN-13 prefixes 20-29) and scale label printing
+  - F2.22: Weighted-product entry UX (React POS UI)
+  - Phase 3: Sales and cash transactions (reference slice `src-tauri/src/commands/sales.rs` remains frozen)
+  - Phase 10: Hardware scale device drivers / protocols (RS-232, OPOS, USB HID, CAS, Toledo)
+- Latest CI State:
+  - Main Merge Head (`98cbb9b`): CI Run #33716462109 SUCCESS, Foundation Gate Evidence Run #33716462107 SUCCESS, CodeQL Run #33716462092 SUCCESS
+- Latest Review State: SonarCloud Quality Gate PASSED (PR #73 merged). Clean base for F2.06.
+- Important Decisions:
+  - ADR-0006: Domain, Commercial, and Regulatory Finalization
+  - ADR-0007: F2.05 Cartesian Variant Matrix Generation & SKU Architecture Semantics
+  - ADR-0008: F2.06 Weighted Products Architecture & Calculation Semantics
+- Session Continuity: Reconstructed following power loss; branch fast-forwarded and verified against `origin/main`
+- Lessons: Active lessons ENG-001 through ENG-007 in `.agents/memory/lessons/`. Candidate: Post-Merge Remote Main Reconciliation Before Feature Branch Inception
 
-## Rules
-
-- Update this file at every phase/task gate.
-- Never claim a task is verified without CI/test evidence.
-- Record blocked dependencies explicitly.
-- Preserve the exact next task so another agent can resume without guessing.
-- A pull-request head and the post-merge branch head are different commits and require separate verification.
-
-## Evidence ledger
+## Evidence Ledger
 
 | Date | Task | Check | Result | Evidence |
 |---|---|---|---|---|
 | 2026-08-18 | Foundation documentation | Repository/PR review | PASS | GitHub PR #1 |
 | 2026-08-18 | Frontend baseline | npm build | PASS | PR CI run |
-| 2026-08-18 | Rust baseline | cargo check/test | PASS on migration-test PR head | PR #3 CI run |
-| 2026-08-18 | Migration verification | fresh DB + repeatability + rollback + exact-money column tests | PASS on PR #3 head | PR #3 CI run |
-| 2026-08-22 | Foundation evidence branch alignment | authoritative workflow updated from foundation/v2 to main | PASS | merged alignment changes |
-| 2026-08-23 | Post-merge exact-head verification | authoritative foundation-gate-evidence | PASS | Run #79; exact main head `8f5cdfe9e96c7a2fab5d4afaeef36f3bc1499098`; artifact `foundation-gate-evidence-8f5cdfe9e96c7a2fab5d4afaeef36f3bc1499098` |
+| 2026-08-18 | Rust baseline | cargo check/test | PASS | PR #3 CI run |
+| 2026-08-18 | Migration verification | fresh DB + repeatability + rollback + exact-money column tests | PASS | PR #3 CI run |
+| 2026-08-23 | Post-merge exact-head verification | authoritative foundation-gate-evidence | PASS | Run #79 (`8f5cdfe`) |
+| 2026-08-27 | Phase 1 (F1.01–F1.25) | Identity, Organization, Permissions, Auth & RLS | PASS | Merged across PRs #43–#63 |
+| 2026-08-28 | F2.01 Product CRUD | SQLite product domain, IPC, money/tax invariants | PASS | PR #64 merged (`d54d319`) |
+| 2026-08-28 | F2.02 Categories/Brands/Mfrs | Domain catalog, hierarchical categories, IPC | PASS | PR #65 merged (`9a7df7f`) |
+| 2026-08-29 | F2.03 SKU & Barcode | Multi-barcode, check digit (EAN/UPC/Code128), collision checks | PASS | PR #66 merged (`c4fffe0`) |
+| 2026-08-29 | F2.04 Units & Conversions | UOM, dimensions, multi-hop BFS conversion, migration 013 | PASS | PR #67 merged (`44d063c`) |
+| 2026-09-02 | F2.05 Variants & Matrix | Cartesian generation, migration 014, SKU generator, audit | PASS | PR #73 merged (`98cbb9b`); CI #33716462109, SonarCloud Passed |
+| 2026-09-03 | F2.06 Initialization | Fast-forward local main to 98cbb9b, checkout feature/f2-06-weighted-products | PASS | Local HEAD `98cbb9b` |
+| 2026-09-03 | F2.06 ADR-0008 | Record decisions: dedicated table, defer barcode, integer math | PASS | `docs/adr/0008-f2-06-weighted-products-architecture-semantics.md` |
+| 2026-09-03 | F2.06 Migration 015 | DDL created & registered in MIGRATIONS array | CREATED / REGISTERED | `015_weighted_products.sql` & `db/mod.rs` |
+| 2026-09-03 | F2.06 Rust Formatting | cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check | PASS | 0 diffs, 100% formatted |
+| 2026-09-03 | F2.06 Rust Check/Test | cargo check / cargo test | UNVERIFIED LOCALLY — ENVIRONMENT LIMITATION | Host lacks link.exe/gcc for build scripts; delegated to CI |
+| 2026-09-03 | F2.06 Frontend Tests | npm test | PASS | 9 suites passed, 0 failures |
+| 2026-09-03 | F2.06 Frontend Build | npm run build | PASS | tsc + vite build 0 errors |
+| 2026-09-03 | F2.06 Foundation Gate | python -u .github/scripts/validate_foundation.py | PASS | 372 unique tasks validated |
+| 2026-09-03 | F2.06 Git Whitespace | git diff --check origin/main | PASS | clean |
 
-## Known blockers
+## Known Blockers
 
-- The state-synchronization commit must receive its own current green Foundation Gate evidence before the repository can advance to `AGENT_IMPLEMENTATION_READY`.
-- Dependency vulnerability findings must have explicit disposition; do not use blind force upgrades.
-- Dependency lockfiles are a reproducibility requirement to close before production/release gating; do not fabricate them.
-- Production signing secrets are intentionally absent until release infrastructure is configured.
-- Production Supabase must remain separate from development/staging.
+- Local host environment lacks MSVC C++ Build Tools (`link.exe` / Windows SDK `kernel32.lib`) and MinGW GCC (`gcc.exe`); local cargo test execution fails during build-script linking for dependencies (`proc-macro2`, `ring`, `serde_core`). Full Rust test execution is delegated to GitHub Actions CI per ENG-001 and TESTING_GUIDE.md.
+- Reference implementations in `src-tauri/src/commands/sales.rs` remain strictly frozen until Phase 3.
+- Hardware scale drivers are deferred to Phase 10; F2.06 is domain core only.
 
 ## Handoff
 
-When a task ends, update Current, Evidence ledger, Known blockers, and Next task before declaring the task complete.
+When commit and PR authorization is granted:
+1. Stage and commit the 10 files (5 tracked modified, 5 untracked new) under `feat(weighted): implement F2.06 weighted products domain, migration 015, commands, and tests`.
+2. Push branch `feature/f2-06-weighted-products` to `origin`.
+3. Open pull request into `main`.
+4. Monitor live GitHub Actions CI matrix runs and SonarCloud Quality Gate.

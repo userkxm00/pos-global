@@ -21,6 +21,7 @@ mod tests;
 mod unit;
 mod user;
 mod variant;
+mod weighted;
 
 use tauri::Manager;
 
@@ -127,6 +128,10 @@ fn main() {
             commands::variant::get_variant_by_barcode,
             commands::variant::get_variant_by_sku,
             commands::variant::search_variants,
+            commands::weighted::set_product_weight_config,
+            commands::weighted::get_product_weight_config,
+            commands::weighted::delete_product_weight_config,
+            commands::weighted::calculate_weighted_item,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
