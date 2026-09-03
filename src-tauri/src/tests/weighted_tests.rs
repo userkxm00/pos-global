@@ -267,14 +267,14 @@ fn test_unsupported_mass_unit_rejection() {
     let p_oz = make_test_product(&conn, "Bulk Ounces", "weighted", Some("oz"), 150);
     let err_oz = validate_weighted_product_unit(&conn, &p_oz).unwrap_err();
     assert!(
-        matches!(err_oz, WeightedError::Validation(msg) if msg.contains("Unsupported mass unit")),
+        matches!(&err_oz, WeightedError::Validation(msg) if msg.contains("Unsupported mass unit")),
         "Expected Validation error for 'oz', got: {err_oz:?}"
     );
 
     let p_lb = make_test_product(&conn, "Bulk Pounds", "weighted", Some("lb"), 450);
     let err_lb = validate_weighted_product_unit(&conn, &p_lb).unwrap_err();
     assert!(
-        matches!(err_lb, WeightedError::Validation(msg) if msg.contains("Unsupported mass unit")),
+        matches!(&err_lb, WeightedError::Validation(msg) if msg.contains("Unsupported mass unit")),
         "Expected Validation error for 'lb', got: {err_lb:?}"
     );
 }

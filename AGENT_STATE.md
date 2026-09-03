@@ -7,14 +7,14 @@
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.06 — Weighted products
-- Milestone Status: PR_OPEN_CI_TRIAGE (PR #74 open; CodeRabbit normalized result weights, Greptile P1 unit catalog boundary, and unauth session assertion remediated)
+- Milestone Status: PR_OPEN_CI_TRIAGE (PR #74 open; test assertion borrow-of-moved-value fixed, awaiting review)
 - Branch: `feature/f2-06-weighted-products` (local workspace) / `origin/feature/f2-06-weighted-products` (remote)
-- HEAD: `a209272be7dfcb2453db9782cf9e4deb26b021a5`
-- Remote HEAD: `a209272be7dfcb2453db9782cf9e4deb26b021a5` (`origin/feature/f2-06-weighted-products`)
+- HEAD: `7c21292d8991c981424c95aed597b0bd57b837ce`
+- Remote HEAD: `7c21292d8991c981424c95aed597b0bd57b837ce` (`origin/feature/f2-06-weighted-products`)
 - PR: #74 (open, https://github.com/userkxm00/pos-global/pull/74)
-- PR HEAD: `a209272be7dfcb2453db9782cf9e4deb26b021a5`
-- Working Tree: Forensic remediation verified; awaiting commit authorization
-- Last Completed Action: Commit a209272 pushed; exact CI test failure analyzed (test harness assertions); CodeRabbit normalized result weights and Greptile mass boundary resolved; tests updated
+- PR HEAD: `7c21292d8991c981424c95aed597b0bd57b837ce`
+- Working Tree: Test assertion borrow fix verified; awaiting commit authorization
+- Last Completed Action: Commit 7c21292 pushed; CodeRabbit identified borrow-of-moved-value in test assertions; resolved via matching by reference (&err_oz, &err_lb)
 - Current Blocker: Local environment lacks MSVC C++ Build Tools (`link.exe` / `kernel32.lib`) and MinGW GCC (`gcc.exe`); authoritative cargo test execution runs in remote GitHub Actions CI.
 - Next Authorized Action: Awaiting review of the completed remediation
 - Exact F2.06 Scope Implemented:
