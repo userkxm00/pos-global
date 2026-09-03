@@ -8,8 +8,7 @@ use crate::commands::warranty::{
 use crate::product::{create_product, CreateProductInput};
 use crate::serial::{create_serial_instance, CreateSerialInput};
 use crate::tests::test_helpers::{
-    apply_migrations_up_to, create_test_org_and_branch, create_test_user_hierarchy,
-    create_test_user_with_creds, setup_test_db, setup_test_db_up_to,
+    apply_migrations_up_to, create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
 };
 use crate::user::session::create_local_session;
 use crate::warranty::*;
@@ -499,11 +498,35 @@ fn test_register_instance_warranty_validation_errors() {
 #[test]
 fn test_warranty_ipc_authorization_and_isolation() {
     let conn = setup_test_db();
-    let (org_a, branch_a, admin_a, cashier_a) = create_test_user_hierarchy(&conn);
+    let (_, branch_a) = create_test_org_and_branch(&conn);
     let (_, branch_b) = create_test_org_and_branch(&conn);
 
-    let session_admin = create_local_session(&conn, &admin_a).expect("admin session");
-    let session_cashier = create_local_session(&conn, &cashier_a).expect("cashier session");
+    let admin = create_test_user_with_creds(
+        &conn,
+        &branch_a,
+        "Warranty Manager",
+        Some("war_mgr"),
+        Some("pass123"),
+        Some("1234"),
+        "manager",
+    )
+    .expect("manager");
+
+    let cashier = create_test_user_with_creds(
+        &conn,
+        &branch_a,
+        "Warranty Cashier",
+        Some("war_cashier"),
+        Some("pass123"),
+        Some("1234"),
+        "cashier",
+    )
+    .expect("cashier");
+
+    let session_admin =
+        create_local_session(&conn, &admin.id, &branch_a, "pin", None).expect("admin session");
+    let session_cashier =
+        create_local_session(&conn, &cashier.id, &branch_a, "pin", None).expect("cashier session");
 
     let product_id = make_test_product(&conn, "Flagship Phone", true, Some(12));
     let serial_id = make_test_serial_instance(
@@ -586,8 +609,6 @@ fn test_warranty_ipc_authorization_and_isolation() {
         }
         _ => panic!("expected Active coverage"),
     }
-
-    let _ = org_a;
 }
 
 // =========================================================================
