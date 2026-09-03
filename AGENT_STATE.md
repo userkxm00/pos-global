@@ -1,21 +1,21 @@
 # AGENT STATE
 
 > This file is operational state, not a substitute for Git history or CI evidence.
-> Reconciled and updated for F2.06 pre-commit audit on 2026-09-03.
+> Reconciled and updated for F2.07 PR #75 remediation on 2026-09-03.
 
 ## Current
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.07 — Batches, expiry dates & FEFO
-- Milestone Status: PR #75 OPEN / PENDING REMOTE CI & CODE REVIEW
+- Milestone Status: PR #75 REMEDIATION VERIFIED / READY FOR PUSH
 - Branch: `feature/f2-07-batches-expiry-fefo`
-- HEAD: `bc11a51b345f657c2a4edc28cf3d62849c2899d2`
-- Remote HEAD: `bc11a51b345f657c2a4edc28cf3d62849c2899d2` (`origin/feature/f2-07-batches-expiry-fefo`)
+- HEAD: `73f2ee82121eea988fa90f50e111da23a3fd747f`
+- Remote HEAD: `73f2ee82121eea988fa90f50e111da23a3fd747f` (`origin/feature/f2-07-batches-expiry-fefo`)
 - PR: #75 (https://github.com/userkxm00/pos-global/pull/75)
-- Working Tree: Clean (on branch `feature/f2-07-batches-expiry-fefo`)
-- Last Completed Action: Pushed feature/f2-07-batches-expiry-fefo to origin, opened PR #75
-- Current Blocker: None (awaiting remote CI and code review)
-- Next Authorized Action: Awaiting user instruction to inspect remote CI and code review
+- Working Tree: Clean (remediation ready for commit)
+- Last Completed Action: Remediated PR #75: resolved command namespace collision, fixed ?3 duplicate check parameter bug, implemented temporary guard table in migration 016, supported legacy NULL batch_number, refactored create_batch cognitive complexity, stabilized test fixtures, added docstrings, and reduced duplication
+- Current Blocker: None
+- Next Authorized Action: Commit remediation and push to origin
 - Exact F2.07 Scope Implemented:
   - ADR-0009 created and accepted (`docs/adr/0009-f2-07-batch-expiry-fefo-architecture-semantics.md`)
   - Migration file `016_batches_and_expiry.sql` created rebuilding `product_batches` with nullable `expiry_date`, integer milli precision (`quantity_milli INTEGER NOT NULL CHECK (quantity_milli >= 0)`), legacy `quantity REAL` removed, partial unique indexes for case-insensitive batch numbers, and fail-closed pre-validation

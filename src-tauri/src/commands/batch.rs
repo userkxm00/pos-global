@@ -2,10 +2,7 @@
 // ADR-0009: Scoped authorization, branch isolation, and fail-closed security.
 
 use crate::auth::middleware::{require_scoped_permission, require_session, AuthorizeRequest};
-use crate::batch::{
-    create_batch, get_batch, list_batches, plan_fefo_allocation, update_batch_status,
-    CreateBatchInput, FefoAllocationPlan, ProductBatch, UpdateBatchStatusInput,
-};
+use crate::batch::{CreateBatchInput, FefoAllocationPlan, ProductBatch, UpdateBatchStatusInput};
 use crate::db::DbState;
 use crate::permission::Permission;
 use rusqlite::Connection;
@@ -15,6 +12,7 @@ use tauri::State;
 // DIRECTLY TESTABLE COMMAND IMPLEMENTATIONS
 // =========================================================================
 
+/// Creates a new product batch with scoped authorization check.
 pub fn create_product_batch_impl(
     conn: &Connection,
     session_id: &str,
@@ -29,9 +27,10 @@ pub fn create_product_batch_impl(
     )
     .map_err(|e| e.to_string())?;
 
-    create_batch(conn, request).map_err(|e| e.to_string())
+    crate::batch::create_batch(conn, request).map_err(|e| e.to_string())
 }
 
+/// Retrieves a single batch by ID with branch scope authorization.
 pub fn get_product_batch_impl(
     conn: &Connection,
     session_id: &str,
@@ -39,10 +38,10 @@ pub fn get_product_batch_impl(
 ) -> Result<Option<ProductBatch>, String> {
     let session = require_session(conn, session_id).map_err(|e| e.to_string())?;
 
-    let batch = get_batch(conn, batch_id).map_err(|e| e.to_string())?;
+    let batch = crate::batch::get_batch(conn, batch_id).map_err(|e| e.to_string())?;
 
     if let Some(ref b) = batch {
-        // Enforce branch tenancy scope boundary
+        // Enforce branch tenancy scope boundary to prevent cross-tenant/cross-branch leakage
         AuthorizeRequest::new(session_id)
             .with_branch_scope(&b.branch_id)
             .execute(conn)
@@ -50,13 +49,13 @@ pub fn get_product_batch_impl(
                 format!("Batch '{batch_id}' not found or inaccessible for this session")
             })?;
     } else {
-        // Validate session has access to catalog/branch
         let _ = session;
     }
 
     Ok(batch)
 }
 
+/// Lists all batches for a specific product and optional variant within a branch.
 pub fn list_product_batches_impl(
     conn: &Connection,
     session_id: &str,
@@ -69,15 +68,16 @@ pub fn list_product_batches_impl(
         .execute(conn)
         .map_err(|e| e.to_string())?;
 
-    list_batches(conn, branch_id, product_id, variant_id).map_err(|e| e.to_string())
+    crate::batch::list_batches(conn, branch_id, product_id, variant_id).map_err(|e| e.to_string())
 }
 
+/// Transitions a batch lifecycle status with branch-scoped inventory permission.
 pub fn update_batch_status_impl(
     conn: &Connection,
     session_id: &str,
     request: &UpdateBatchStatusInput,
 ) -> Result<ProductBatch, String> {
-    let existing = get_batch(conn, &request.batch_id)
+    let existing = crate::batch::get_batch(conn, &request.batch_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Batch '{}' not found", request.batch_id))?;
 
@@ -90,9 +90,10 @@ pub fn update_batch_status_impl(
     )
     .map_err(|e| e.to_string())?;
 
-    update_batch_status(conn, request).map_err(|e| e.to_string())
+    crate::batch::update_batch_status(conn, request).map_err(|e| e.to_string())
 }
 
+/// Calculates a deterministic FEFO order allocation plan without mutating database state.
 pub fn plan_fefo_allocation_impl(
     conn: &Connection,
     session_id: &str,
@@ -106,7 +107,7 @@ pub fn plan_fefo_allocation_impl(
         .execute(conn)
         .map_err(|e| e.to_string())?;
 
-    plan_fefo_allocation(
+    crate::batch::plan_fefo_allocation(
         conn,
         branch_id,
         product_id,
@@ -120,6 +121,7 @@ pub fn plan_fefo_allocation_impl(
 // TAURI IPC COMMAND WRAPPERS
 // =========================================================================
 
+/// Tauri IPC command: Creates a new product batch.
 #[tauri::command]
 pub async fn create_product_batch(
     state: State<'_, DbState>,
@@ -130,6 +132,7 @@ pub async fn create_product_batch(
     create_product_batch_impl(&conn, &session_id, &request)
 }
 
+/// Tauri IPC command: Retrieves a single product batch by ID.
 #[tauri::command]
 pub async fn get_product_batch(
     state: State<'_, DbState>,
@@ -140,6 +143,7 @@ pub async fn get_product_batch(
     get_product_batch_impl(&conn, &session_id, &batch_id)
 }
 
+/// Tauri IPC command: Lists product batches for a product and branch.
 #[tauri::command]
 pub async fn list_product_batches(
     state: State<'_, DbState>,
@@ -158,6 +162,7 @@ pub async fn list_product_batches(
     )
 }
 
+/// Tauri IPC command: Updates a batch's lifecycle status.
 #[tauri::command]
 pub async fn update_batch_status(
     state: State<'_, DbState>,
@@ -168,6 +173,7 @@ pub async fn update_batch_status(
     update_batch_status_impl(&conn, &session_id, &request)
 }
 
+/// Tauri IPC command: Calculates a deterministic read-only FEFO allocation plan.
 #[tauri::command]
 pub async fn plan_fefo_allocation(
     state: State<'_, DbState>,
