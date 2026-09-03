@@ -187,46 +187,57 @@ impl From<rusqlite::Error> for BatchError {
 
 /// Determines whether a product is eligible to track batches or lots.
 ///
+fn check_product_active_and_expiry(
+    conn: &Connection,
+    product_id: &str,
+) -> Result<bool, BatchError> {
+    let product_id = product_id.trim();
+    conn.query_row(
+        "SELECT requires_expiry FROM products WHERE id = ?1 AND is_active = 1",
+        params![product_id],
+        |row| {
+            let val: i32 = row.get(0)?;
+            Ok(val != 0)
+        },
+    )
+    .optional()?
+    .ok_or_else(|| BatchError::NotFound(format!("Product '{product_id}' not found or is inactive")))
+}
+
+fn has_active_product_capabilities(
+    conn: &Connection,
+    product_id: &str,
+    capability_codes: &[&str],
+) -> Result<bool, BatchError> {
+    let product_id = product_id.trim();
+    let mut stmt = conn.prepare(
+        "SELECT 1 FROM product_capabilities pc
+         JOIN capabilities c ON pc.capability_id = c.id
+         WHERE pc.product_id = ?1
+           AND c.code = ?2
+           AND pc.enabled = 1
+         LIMIT 1",
+    )?;
+
+    for code in capability_codes {
+        let has = stmt
+            .query_row(params![product_id, code], |_| Ok(true))
+            .optional()?
+            .unwrap_or(false);
+        if has {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// True if `products.requires_expiry = 1`, or if the product has an active
 /// `'BATCH'`, `'EXPIRY'`, or `'FEFO'` capability in `product_capabilities`.
 pub fn is_batch_tracked(conn: &Connection, product_id: &str) -> Result<bool, BatchError> {
-    let product_id = product_id.trim();
-    let req_exp: Option<bool> = conn
-        .query_row(
-            "SELECT requires_expiry FROM products WHERE id = ?1 AND is_active = 1",
-            params![product_id],
-            |row| {
-                let val: i32 = row.get(0)?;
-                Ok(val != 0)
-            },
-        )
-        .optional()?;
-
-    let Some(req_exp) = req_exp else {
-        return Err(BatchError::NotFound(format!(
-            "Product '{product_id}' not found or is inactive"
-        )));
-    };
-
-    if req_exp {
+    if check_product_active_and_expiry(conn, product_id)? {
         return Ok(true);
     }
-
-    let has_cap: bool = conn
-        .query_row(
-            "SELECT 1 FROM product_capabilities pc
-             JOIN capabilities c ON pc.capability_id = c.id
-             WHERE pc.product_id = ?1
-               AND c.code IN ('BATCH', 'EXPIRY', 'FEFO')
-               AND pc.enabled = 1
-             LIMIT 1",
-            params![product_id],
-            |_| Ok(true),
-        )
-        .optional()?
-        .unwrap_or(false);
-
-    Ok(has_cap)
+    has_active_product_capabilities(conn, product_id, &["BATCH", "EXPIRY", "FEFO"])
 }
 
 /// Determines whether a product requires an expiration date upon batch creation.
@@ -234,80 +245,18 @@ pub fn is_batch_tracked(conn: &Connection, product_id: &str) -> Result<bool, Bat
 /// True if `products.requires_expiry = 1` or if an active `'EXPIRY'` or `'FEFO'`
 /// capability is configured for the product.
 pub fn is_expiry_required(conn: &Connection, product_id: &str) -> Result<bool, BatchError> {
-    let product_id = product_id.trim();
-    let req_exp: Option<bool> = conn
-        .query_row(
-            "SELECT requires_expiry FROM products WHERE id = ?1 AND is_active = 1",
-            params![product_id],
-            |row| {
-                let val: i32 = row.get(0)?;
-                Ok(val != 0)
-            },
-        )
-        .optional()?;
-
-    let Some(req_exp) = req_exp else {
-        return Err(BatchError::NotFound(format!(
-            "Product '{product_id}' not found or is inactive"
-        )));
-    };
-
-    if req_exp {
+    if check_product_active_and_expiry(conn, product_id)? {
         return Ok(true);
     }
-
-    let has_cap: bool = conn
-        .query_row(
-            "SELECT 1 FROM product_capabilities pc
-             JOIN capabilities c ON pc.capability_id = c.id
-             WHERE pc.product_id = ?1
-               AND c.code IN ('EXPIRY', 'FEFO')
-               AND pc.enabled = 1
-             LIMIT 1",
-            params![product_id],
-            |_| Ok(true),
-        )
-        .optional()?
-        .unwrap_or(false);
-
-    Ok(has_cap)
+    has_active_product_capabilities(conn, product_id, &["EXPIRY", "FEFO"])
 }
 
 /// Determines whether FEFO allocation planning is enabled for a product.
 ///
 /// Strictly controlled by the active `'FEFO'` capability in `product_capabilities`.
 pub fn is_fefo_enabled(conn: &Connection, product_id: &str) -> Result<bool, BatchError> {
-    let product_id = product_id.trim();
-    let exists: bool = conn
-        .query_row(
-            "SELECT 1 FROM products WHERE id = ?1 AND is_active = 1",
-            params![product_id],
-            |_| Ok(true),
-        )
-        .optional()?
-        .unwrap_or(false);
-
-    if !exists {
-        return Err(BatchError::NotFound(format!(
-            "Product '{product_id}' not found or is inactive"
-        )));
-    }
-
-    let has_fefo: bool = conn
-        .query_row(
-            "SELECT 1 FROM product_capabilities pc
-             JOIN capabilities c ON pc.capability_id = c.id
-             WHERE pc.product_id = ?1
-               AND c.code = 'FEFO'
-               AND pc.enabled = 1
-             LIMIT 1",
-            params![product_id],
-            |_| Ok(true),
-        )
-        .optional()?
-        .unwrap_or(false);
-
-    Ok(has_fefo)
+    let _ = check_product_active_and_expiry(conn, product_id)?;
+    has_active_product_capabilities(conn, product_id, &["FEFO"])
 }
 
 // =========================================================================
