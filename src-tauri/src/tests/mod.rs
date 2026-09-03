@@ -6,6 +6,8 @@ mod auth_middleware_tests;
 mod auth_tests;
 #[path = "barcode_tests.rs"]
 mod barcode_tests;
+#[path = "batch_tests.rs"]
+mod batch_tests;
 #[path = "branch_tests.rs"]
 mod branch_tests;
 #[path = "brand_tests.rs"]

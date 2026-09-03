@@ -5,6 +5,7 @@
 
 mod auth;
 mod barcode;
+mod batch;
 mod branch;
 mod brand;
 mod category;
@@ -132,6 +133,11 @@ fn main() {
             commands::weighted::get_product_weight_config,
             commands::weighted::delete_product_weight_config,
             commands::weighted::calculate_weighted_item,
+            commands::batch::create_product_batch,
+            commands::batch::get_product_batch,
+            commands::batch::list_product_batches,
+            commands::batch::update_batch_status,
+            commands::batch::plan_fefo_allocation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
