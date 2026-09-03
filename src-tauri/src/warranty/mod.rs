@@ -8,17 +8,24 @@ use serde::{Deserialize, Serialize};
 // ERROR TYPES
 // =========================================================================
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum WarrantyError {
-    #[error("Validation error: {0}")]
     Validation(String),
-
-    #[error("Date parse error: {0}")]
     DateParse(String),
-
-    #[error("Database error: {0}")]
     Database(String),
 }
+
+impl std::fmt::Display for WarrantyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WarrantyError::Validation(msg) => write!(f, "Validation error: {msg}"),
+            WarrantyError::DateParse(msg) => write!(f, "Date parse error: {msg}"),
+            WarrantyError::Database(msg) => write!(f, "Database error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for WarrantyError {}
 
 impl From<rusqlite::Error> for WarrantyError {
     fn from(err: rusqlite::Error) -> Self {
