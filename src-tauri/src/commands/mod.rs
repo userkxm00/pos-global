@@ -15,6 +15,7 @@ pub mod register;
 pub mod sales;
 pub mod unit;
 pub mod variant;
+pub mod weighted;
 
 use crate::auth::middleware::{require_scoped_permission, AuthorizeRequest};
 use crate::permission::Permission;
