@@ -6,42 +6,44 @@
 ## Current
 
 - Current Phase: Phase 2 — Product & inventory core
-- Current Milestone: F2.06 — Weighted products
-- Milestone Status: PR_OPEN_CI_TRIAGE (PR #74 open; test assertion borrow-of-moved-value fixed, awaiting review)
-- Branch: `feature/f2-06-weighted-products` (local workspace) / `origin/feature/f2-06-weighted-products` (remote)
-- HEAD: `7c21292d8991c981424c95aed597b0bd57b837ce`
-- Remote HEAD: `7c21292d8991c981424c95aed597b0bd57b837ce` (`origin/feature/f2-06-weighted-products`)
-- PR: #74 (open, https://github.com/userkxm00/pos-global/pull/74)
-- PR HEAD: `7c21292d8991c981424c95aed597b0bd57b837ce`
-- Working Tree: Test assertion borrow fix verified; awaiting commit authorization
-- Last Completed Action: Commit 7c21292 pushed; CodeRabbit identified borrow-of-moved-value in test assertions; resolved via matching by reference (&err_oz, &err_lb)
-- Current Blocker: Local environment lacks MSVC C++ Build Tools (`link.exe` / `kernel32.lib`) and MinGW GCC (`gcc.exe`); authoritative cargo test execution runs in remote GitHub Actions CI.
-- Next Authorized Action: Awaiting review of the completed remediation
-- Exact F2.06 Scope Implemented:
-  - Migration file `015_weighted_products.sql` created with table `product_weight_configs` (no redundant index, no premature hardware columns)
-  - Registered `015_weighted_products` in `MIGRATIONS` array in `src-tauri/src/db/mod.rs`
-  - Strict mass dimension enforcement (`UnitDimension::Mass`) via canonical relationship `products.unit_type -> units.code COLLATE NOCASE`
-  - Tare weight subtraction and non-negative net weight validation (`gross >= tare >= 0`)
-  - Checked integer half-up price calculation (`floor((net_weight_milli * unit_price_minor + 500) / 1000)`)
-  - Exact integer cross-unit metric mass normalization (kg <-> g with zero floating-point math)
-  - Tauri IPC commands (`set_product_weight_config`, `get_product_weight_config`, `delete_product_weight_config`, `calculate_weighted_item`) behind permission checks
-  - Unit and integration test suite with 31 test functions in `src-tauri/src/tests/weighted_tests.rs`
+- Current Milestone: F2.07 — Batches, expiry dates & FEFO
+- Milestone Status: IMPLEMENTED / READY FOR PUSH & PR
+- Branch: `feature/f2-07-batches-expiry-fefo`
+- HEAD: Pending commit
+- Remote HEAD: `51eae14e827adce51701db1c532c211163555c51` (`origin/main`)
+- PR: Pending creation
+- Working Tree: Verified against ADR-0009 contract
+- Last Completed Action: F2.07 domain, migration 016, commands, and tests implemented and validated locally
+- Current Blocker: None
+- Next Authorized Action: Commit and push feature branch to origin, open PR
+- Exact F2.07 Scope Implemented:
+  - ADR-0009 created and accepted (`docs/adr/0009-f2-07-batch-expiry-fefo-architecture-semantics.md`)
+  - Migration file `016_batches_and_expiry.sql` created rebuilding `product_batches` with nullable `expiry_date`, integer milli precision (`quantity_milli INTEGER NOT NULL CHECK (quantity_milli >= 0)`), legacy `quantity REAL` removed, partial unique indexes for case-insensitive batch numbers, and fail-closed pre-validation
+  - Registered `016_batches_and_expiry` in `MIGRATIONS` array in `src-tauri/src/db/mod.rs`
+  - Domain engine in `src-tauri/src/batch/mod.rs` implementing orthogonal capability checks (`is_batch_tracked`, `is_expiry_required`, `is_fefo_enabled`), calendar date validation with leap year handling, lifecycle status transitions with terminal depleted/recalled states, and deterministic read-only FEFO planning (`plan_fefo_allocation`)
+  - Tauri IPC commands in `src-tauri/src/commands/batch.rs` (`create_product_batch`, `get_product_batch`, `list_product_batches`, `update_batch_status`, `plan_fefo_allocation`) with branch/tenant scope enforcement
+  - Comprehensive unit/integration/migration test suite with 25 test functions in `src-tauri/src/tests/batch_tests.rs`
 - Protected Future Scope (STRICTLY PRESERVED / UNTOUCHED):
-  - F2.07: Batches / expiry / FEFO
   - F2.08: Serial / IMEI / assets
   - F2.09: Warranty
   - F2.10–F2.15: Locations, bins, stock ledger, transfers, adjustments, stock count reconciliation
   - F2.19 / F7.03: Variable-weight barcode parsing (EAN-13 prefixes 20-29) and scale label printing
-  - F2.22: Weighted-product entry UX (React POS UI)
+  - F2.23: Batch / Expiry / FEFO UI (React frontend)
   - Phase 3: Sales and cash transactions (reference slice `src-tauri/src/commands/sales.rs` remains frozen)
-  - Phase 10: Hardware scale device drivers / protocols (RS-232, OPOS, USB HID, CAS, Toledo)
-- Latest CI State:
-  - Main Merge Head (`98cbb9b`): CI Run #33716462109 SUCCESS, Foundation Gate Evidence Run #33716462107 SUCCESS, CodeQL Run #33716462092 SUCCESS
-- Latest Review State: SonarCloud Quality Gate PASSED (PR #73 merged). Clean base for F2.06.
+  - Phase 4: Purchasing, receiving (GRN), and supplier batch association
+  - Phase 10: Hardware scale device drivers / protocols
+- Latest Validation State:
+  - `cargo fmt --check`: PASSED
+  - `npm test`: PASSED
+  - `npm run build`: PASSED
+  - `validate_foundation.py`: PASS (372 unique backlog task IDs verified)
+  - `git diff --check origin/main`: PASSED
+  - Note: Windows MSVC linker unavailable locally; authoritative Rust compilation/tests deferred to GitHub Actions
 - Important Decisions:
   - ADR-0006: Domain, Commercial, and Regulatory Finalization
   - ADR-0007: F2.05 Cartesian Variant Matrix Generation & SKU Architecture Semantics
   - ADR-0008: F2.06 Weighted Products Architecture & Calculation Semantics
+  - ADR-0009: F2.07 Batches, Expiry Dates & FEFO Architecture & Semantics
 - Session Continuity: Reconstructed following power loss; branch fast-forwarded and verified against `origin/main`
 - Lessons: Active lessons ENG-001 through ENG-007 in `.agents/memory/lessons/`. Candidate: Post-Merge Remote Main Reconciliation Before Feature Branch Inception
 
@@ -69,6 +71,7 @@
 | 2026-09-03 | F2.06 Frontend Build | npm run build | PASS | tsc + vite build 0 errors |
 | 2026-09-03 | F2.06 Foundation Gate | python -u .github/scripts/validate_foundation.py | PASS | 372 unique tasks validated |
 | 2026-09-03 | F2.06 Git Whitespace | git diff --check origin/main | PASS | clean |
+| 2026-09-03 | F2.06 Weighted Products | PR #74 merged into main; merge commit 51eae14 | PASS | PR #74 merged; 35 tests passing on main |
 
 ## Known Blockers
 
