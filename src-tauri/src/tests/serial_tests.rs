@@ -133,14 +133,7 @@ fn test_migration_017_upgrade_preserves_legacy_data() {
     apply_migrations_up_to(&conn, "017_serial_imei_assets");
 
     // Verify legacy row preserved and trimmed
-    let row: (
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-    ) = conn
+    let row: (String, String, String, String, Option<String>, String) = conn
         .query_row(
             "SELECT id, serial_number, status, sold_in_sale_id, warranty_expires_at, created_at
              FROM serial_numbers WHERE id = 'legacy-id-001'",
@@ -1726,4 +1719,64 @@ fn test_map_sqlite_collision_error_coverage() {
     )
     .unwrap_err();
     assert!(matches!(dup_tag, SerialError::DuplicateAssetTag(_)));
+}
+
+#[test]
+fn test_create_serial_instance_canonical_id_generation() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Canonical ID Product", true);
+
+    let inst = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id,
+            branch_id,
+            variant_id: None,
+            serial_number: Some("CANONICAL-ID-SN-001".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: Some(1500),
+        },
+    )
+    .expect("create serialized instance");
+
+    // 1. ID is returned and non-empty
+    assert!(!inst.id.is_empty(), "Generated ID must not be empty");
+
+    // 2. ID conforms to canonical 32 lowercase hex characters (from lower(hex(randomblob(16))))
+    assert_eq!(
+        inst.id.len(),
+        32,
+        "Canonical SQLite generated ID must be 32 characters"
+    );
+    assert!(
+        inst.id
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()),
+        "Canonical ID must be lowercase hex"
+    );
+
+    // 3. Row exists in database with matching ID
+    let persisted_id: String = conn
+        .query_row(
+            "SELECT id FROM serial_numbers WHERE id = ?1",
+            params![inst.id],
+            |r| r.get(0),
+        )
+        .expect("query persisted row");
+    assert_eq!(
+        persisted_id, inst.id,
+        "Returned ID must exactly match persisted ID in database"
+    );
+
+    // 4. Persistence verification: row fields match returned instance
+    let persisted_sn: Option<String> = conn
+        .query_row(
+            "SELECT serial_number FROM serial_numbers WHERE id = ?1",
+            params![inst.id],
+            |r| r.get(0),
+        )
+        .expect("query persisted serial");
+    assert_eq!(persisted_sn.as_deref(), Some("CANONICAL-ID-SN-001"));
 }

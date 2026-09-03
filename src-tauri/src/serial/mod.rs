@@ -246,13 +246,16 @@ pub fn validate_asset_tag(tag: &str) -> Result<String, SerialError> {
     Ok(trimmed.to_string())
 }
 
+/// Type alias for normalized triple identifiers: `(serial_number, imei, asset_tag)`.
+pub type NormalizedIdentifiers = (Option<String>, Option<String>, Option<String>);
+
 /// Validates the triple-identifier invariant: at least one identifier must be provided,
 /// and every provided identifier must be non-empty and well-formed.
 pub fn validate_identifiers(
     serial: Option<&str>,
     imei: Option<&str>,
     asset_tag: Option<&str>,
-) -> Result<(Option<String>, Option<String>, Option<String>), SerialError> {
+) -> Result<NormalizedIdentifiers, SerialError> {
     let norm_serial = match serial {
         Some(s) if !s.trim().is_empty() => Some(validate_serial_number(s)?),
         _ => None,
@@ -567,21 +570,18 @@ pub fn create_serial_instance(
         norm_asset_tag.as_deref(),
     )?;
 
-    let id = uuid::Uuid::new_v4().to_string();
-
     let sql = format!(
         "INSERT INTO serial_numbers (
-            id, product_id, branch_id, variant_id,
+            product_id, branch_id, variant_id,
             serial_number, imei, asset_tag, cost_price_minor,
             status, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'in_stock', datetime('now'), datetime('now'))
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'in_stock', datetime('now'), datetime('now'))
         RETURNING {SERIAL_COLUMNS}"
     );
 
     conn.query_row(
         &sql,
         params![
-            id,
             input.product_id,
             input.branch_id,
             input.variant_id,

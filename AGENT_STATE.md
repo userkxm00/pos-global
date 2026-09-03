@@ -7,20 +7,17 @@
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.08 — Serial / IMEI / Assets
-- Milestone Status: PR #76 REMEDIATION / COMMITTED & PUSHING
+- Milestone Status: PR #76 REMEDIATION PASS 2 / CANONICAL ID GENERATION
 - Branch: `feature/f2-08-serial-imei-assets`
 - Remote PR: PR #76 (`https://github.com/userkxm00/pos-global/pull/76`)
-- Last Completed Action: Remediated all 8 findings on PR #76:
-  1. Rust compilation: replaced missing `thiserror` dependency with standard library Display/Error/From implementations
-  2. Greptile P1: Unicode character count (`chars().count() <= 100`) for `serial_number` and `asset_tag`
-  3. CodeRabbit Security: authentication & permission checks precede resource loading in `update_serial_status_impl` to eliminate existence leakage
-  4. CodeRabbit Data Integrity: verified SQLite UNIQUE constraint error before mapping, covering both index names and column-qualified messages
-  5. CodeRabbit Critical: corrected `created_at` non-null tuple type mismatch in `test_migration_017_upgrade_preserves_legacy_data`
-  6. CodeRabbit Clippy: implemented `std::str::FromStr for SerialStatus`
-  7. SonarCloud High: refactored Migration 017 status whitelist check to eliminate duplicate literal
-  8. SonarCloud Low: replaced closure in `list_serial_instances` with `AsRef::as_ref`
+- Last Completed Action: Completed Pass 2 remediation on PR #76:
+  1. ID Generation: replaced Rust UUID generation with canonical SQLite `DEFAULT (lower(hex(randomblob(16))))` via RETURNING
+  2. Clippy type complexity: factored `NormalizedIdentifiers` type alias in `src-tauri/src/serial/mod.rs`
+  3. Regression test: added `test_create_serial_instance_canonical_id_generation` verifying 32 lowercase hex ID from database
+  4. Test type fix: corrected non-null `created_at` tuple typing in `test_migration_017_upgrade_preserves_legacy_data`
+  5. All earlier fixes preserved: Unicode character count (`chars().count() <= 100`), auth-first order, collision mapping, `FromStr for SerialStatus`, Sonar maintainability fixes
 - Current Blocker: None
-- Next Authorized Action: Commit, push to `feature/f2-08-serial-imei-assets`, monitor remote CI and SonarCloud checks on PR #76 to green state, and stop.
+- Next Authorized Action: Commit, push to `feature/f2-08-serial-imei-assets`, monitor remote CI and reviews on PR #76 to green state, and stop.
 - Exact F2.08 Scope Implemented:
   - ADR-0010 accepted (`docs/adr/0010-f2-08-serial-imei-assets-architecture-semantics.md`)
   - Migration file `017_serial_imei_assets.sql` created rebuilding `serial_numbers` with nullable `serial_number`, `imei`, and `asset_tag`, check constraint asserting at least one identifier, integer minor precision `cost_price_minor`, partial unique indexes (global NOCASE serial, global IMEI, branch-scoped NOCASE asset tag), and fail-closed pre-validation
