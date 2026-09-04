@@ -126,6 +126,21 @@ fn test_create_location_success_and_sanitization() {
     assert_eq!(loc.location_type, Some("Storage Bay".to_string()));
     assert!(loc.is_active);
     assert!(loc.parent_id.is_none());
+
+    // Verify direct get_location and list_locations domain queries
+    assert_eq!(
+        get_location(&conn, &loc.id).unwrap().unwrap().code,
+        "ZONE-A"
+    );
+    let loc_list = list_locations(
+        &conn,
+        &LocationFilter {
+            branch_id: branch_id.clone(),
+            ..Default::default()
+        },
+    )
+    .expect("list_locations succeeds");
+    assert_eq!(loc_list.len(), 1);
 }
 
 #[test]
@@ -643,6 +658,18 @@ fn test_bin_crud_and_code_uniqueness_per_location() {
 
     let reactivated = reactivate_bin(&conn, &bin1.id).expect("bin reactivated");
     assert!(reactivated.is_active);
+
+    // Verify direct get_bin and list_bins domain queries
+    assert_eq!(get_bin(&conn, &bin1.id).unwrap().unwrap().code, "A-01-NEW");
+    let bin_list = list_bins(
+        &conn,
+        &BinFilter {
+            location_id: Some(loc_1.id.clone()),
+            ..Default::default()
+        },
+    )
+    .expect("list_bins succeeds");
+    assert_eq!(bin_list.len(), 1);
 }
 
 // =========================================================================
@@ -728,7 +755,7 @@ fn test_ipc_commands_settings_manage_authorization() {
     // 6. Mutation permission-first check: unauthorized user without SettingsManage is rejected before DB lookup
     let cashier_probe_err = update_location_impl(
         &conn,
-        &cashier_a,
+        &cashier_session,
         UpdateLocationInput {
             id: "non-existent-probe-id".to_string(),
             name: Some("Probe".to_string()),
@@ -740,6 +767,31 @@ fn test_ipc_commands_settings_manage_authorization() {
     )
     .unwrap_err();
     assert!(cashier_probe_err.contains("Permission denied"));
+
+    // 7. list_locations_impl and get_location_tree_impl
+    let loc_list = list_locations_impl(
+        &conn,
+        &manager_session,
+        LocationFilter {
+            branch_id: branch_a.clone(),
+            ..Default::default()
+        },
+    )
+    .expect("list locations succeeds");
+    assert!(!loc_list.is_empty());
+
+    let tree = get_location_tree_impl(&conn, &manager_session, &branch_a, Some(true))
+        .expect("get location tree succeeds");
+    assert!(!tree.is_empty());
+
+    // 8. deactivate_location_impl and reactivate_location_impl
+    let deact_loc = deactivate_location_impl(&conn, &admin_session, &loc_admin.id)
+        .expect("deactivate location succeeds");
+    assert!(!deact_loc.is_active);
+
+    let react_loc = reactivate_location_impl(&conn, &admin_session, &loc_admin.id)
+        .expect("reactivate location succeeds");
+    assert!(react_loc.is_active);
 }
 
 #[test]
@@ -811,6 +863,28 @@ fn test_ipc_bin_authorization_and_anti_existence_leakage() {
     .expect("scoped bin list succeeds");
     assert_eq!(scoped_bins.len(), 1);
     assert_eq!(scoped_bins[0].id, bin_a.id);
+
+    // update_bin_impl, deactivate_bin_impl, reactivate_bin_impl
+    let updated_bin = update_bin_impl(
+        &conn,
+        &manager_a,
+        UpdateBinInput {
+            id: bin_a.id.clone(),
+            name: Some("Renamed Bin".to_string()),
+            code: None,
+            is_active: None,
+        },
+    )
+    .expect("update bin succeeds");
+    assert_eq!(updated_bin.name, "Renamed Bin");
+
+    let deact_bin =
+        deactivate_bin_impl(&conn, &manager_a, &bin_a.id).expect("deactivate bin succeeds");
+    assert!(!deact_bin.is_active);
+
+    let react_bin =
+        reactivate_bin_impl(&conn, &manager_a, &bin_a.id).expect("reactivate bin succeeds");
+    assert!(react_bin.is_active);
 }
 
 #[test]
