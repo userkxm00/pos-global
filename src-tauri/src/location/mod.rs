@@ -460,7 +460,7 @@ pub fn list_locations(
 
 fn resolve_update_location_type(
     input_type: Option<Option<String>>,
-    existing_type: Option<String>,
+    existing_type: Option<&str>,
 ) -> Result<Option<String>, LocationError> {
     match input_type {
         Some(Some(ref lt)) if !lt.trim().is_empty() => {
@@ -469,7 +469,7 @@ fn resolve_update_location_type(
             Ok(Some(lt_trimmed.to_string()))
         }
         Some(Some(_)) | Some(None) => Ok(None),
-        None => Ok(existing_type),
+        None => Ok(existing_type.map(ToString::to_string)),
     }
 }
 
@@ -537,16 +537,17 @@ pub fn update_location(
         .ok_or_else(|| LocationError::NotFound(format!("Location '{}' not found", input.id)))?;
 
     let name = match input.name {
-        Some(n) => validate_and_trim_str(&n, "name")?,
-        None => existing.name,
+        Some(ref n) => validate_and_trim_str(n, "name")?,
+        None => existing.name.clone(),
     };
 
     let code = match input.code {
-        Some(c) => validate_and_trim_str(&c, "code")?,
-        None => existing.code,
+        Some(ref c) => validate_and_trim_str(c, "code")?,
+        None => existing.code.clone(),
     };
 
-    let location_type = resolve_update_location_type(input.location_type, existing.location_type)?;
+    let location_type =
+        resolve_update_location_type(input.location_type, existing.location_type.as_deref())?;
 
     let parent_revalidated = input.parent_id.is_some();
     let parent_id = resolve_update_parent_id(conn, &existing, input.parent_id)?;
