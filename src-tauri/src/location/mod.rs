@@ -244,17 +244,14 @@ pub fn validate_parent_hierarchy(
         let mut steps = 0;
 
         while steps < MAX_DEFENSIVE_STEPS {
-            let next_parent: Option<String> = conn
-                .query_row(
-                    "SELECT parent_id FROM locations WHERE id = ?1",
-                    [&current],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(|e| LocationError::Database(e.to_string()))?;
+            let parent_result: Result<Option<String>, _> = conn.query_row(
+                "SELECT parent_id FROM locations WHERE id = ?1",
+                [&current],
+                |row| row.get(0),
+            );
 
-            match next_parent {
-                Some(Some(ancestor_id)) => {
+            match parent_result {
+                Ok(Some(ancestor_id)) => {
                     if ancestor_id == id {
                         return Err(LocationError::CycleDetected(format!(
                             "Location '{id}' cannot be parented under its own descendant '{target_parent_id}'"
@@ -263,10 +260,15 @@ pub fn validate_parent_hierarchy(
                     current = ancestor_id;
                     steps += 1;
                 }
-                Some(None) | None => {
-                    // Reached root or unreferenced node; no cycle
+                Ok(None) => {
+                    // Reached root; no cycle
                     return Ok(());
                 }
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    // Ancestor doesn't exist
+                    break;
+                }
+                Err(e) => return Err(LocationError::Database(e.to_string())),
             }
         }
 
@@ -355,7 +357,7 @@ pub fn create_location(
         _ => None,
     };
 
-    let id = lower_hex_uuid();
+    let id = uuid::Uuid::new_v4().to_string();
 
     conn.execute(
         "INSERT INTO locations (id, branch_id, parent_id, name, code, location_type, is_active, created_at, updated_at)
@@ -649,7 +651,7 @@ pub fn create_bin(conn: &Connection, input: CreateBinInput) -> Result<Bin, Locat
         }
     }
 
-    let id = lower_hex_uuid();
+    let id = uuid::Uuid::new_v4().to_string();
 
     conn.execute(
         "INSERT INTO bins (id, location_id, name, code, is_active, created_at, updated_at)
@@ -844,26 +846,4 @@ fn row_to_bin(row: &rusqlite::Row<'_>) -> rusqlite::Result<Bin> {
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
     })
-}
-
-fn lower_hex_uuid() -> String {
-    use ring::rand::{SecureRandom, SystemRandom};
-    let rng = SystemRandom::new();
-    let mut bytes = [0u8; 16];
-    if rng.fill(&mut bytes).is_ok() {
-        bytes
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<Vec<_>>()
-            .join("")
-    } else {
-        // Deterministic fallback if system random fails
-        format!(
-            "{:032x}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        )
-    }
 }
