@@ -80,4 +80,6 @@ Remediated review findings:
 - Enforced permission-first check on all location/bin mutation commands prior to DB queries.
 - Added tri-state serde deserialization for `parent_id` and `location_type` in `UpdateLocationInput`.
 - Enforced active parent validation when generic `update_location` reactivates a child location.
+- Enforced database-level same-branch hierarchy isolation in Migration 019 via composite foreign key `(parent_id, branch_id) REFERENCES locations(id, branch_id) ON DELETE RESTRICT` supported by unique index `idx_locations_id_branch_id`.
+- Added database-level regression test `test_database_composite_foreign_key_same_branch_constraint` verifying SQLite constraints directly reject cross-branch parents, accept same-branch parents, allow NULL root parent_id, and restrict reparent/delete violations.
 Awaiting validation, push, and PR CI/review gates reconciliation.

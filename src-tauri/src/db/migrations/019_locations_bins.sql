@@ -6,14 +6,19 @@
 CREATE TABLE locations (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
     branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
-    parent_id TEXT REFERENCES locations(id) ON DELETE RESTRICT,
+    parent_id TEXT,
     name TEXT NOT NULL,
     code TEXT NOT NULL,
     location_type TEXT,
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (parent_id, branch_id) REFERENCES locations(id, branch_id) ON DELETE RESTRICT
 );
+
+-- Unique index required by SQLite to support the composite foreign key (parent_id, branch_id)
+CREATE UNIQUE INDEX idx_locations_id_branch_id
+    ON locations(id, branch_id);
 
 -- Compound case-insensitive uniqueness scoped to branch
 CREATE UNIQUE INDEX idx_locations_branch_code
@@ -25,6 +30,9 @@ CREATE INDEX idx_locations_branch_id
 
 CREATE INDEX idx_locations_parent_id
     ON locations(parent_id);
+
+CREATE INDEX idx_locations_parent_branch
+    ON locations(parent_id, branch_id);
 
 -- 2. Bins table: addressable physical pick/put slots belonging to a location
 CREATE TABLE bins (

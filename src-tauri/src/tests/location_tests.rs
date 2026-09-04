@@ -98,6 +98,164 @@ fn test_migration_019_fresh_application_and_idempotency() {
     crate::db::init_database(&conn).expect("init_database must be idempotent");
 }
 
+#[test]
+fn test_database_composite_foreign_key_same_branch_constraint() {
+    let conn = setup_test_db();
+    let (org_id, branch_a) = create_test_org_and_branch(&conn);
+    let branch_b = create_second_branch(&conn, &org_id);
+
+    // 1. Root location in branch A with parent_id = NULL -> accepted by DB
+    conn.execute(
+        "INSERT INTO locations (id, branch_id, parent_id, name, code, is_active)
+         VALUES ('loc_a_root', ?1, NULL, 'Root A', 'ROOT-A', 1)",
+        [&branch_a],
+    )
+    .expect("root location with parent_id NULL must be accepted");
+
+    // Root location in branch B with parent_id = NULL -> accepted by DB
+    conn.execute(
+        "INSERT INTO locations (id, branch_id, parent_id, name, code, is_active)
+         VALUES ('loc_b_root', ?1, NULL, 'Root B', 'ROOT-B', 1)",
+        [&branch_b],
+    )
+    .expect("root location in branch B with parent_id NULL must be accepted");
+
+    // 2. Same-branch child in branch A referencing parent 'loc_a_root' -> accepted by DB
+    conn.execute(
+        "INSERT INTO locations (id, branch_id, parent_id, name, code, is_active)
+         VALUES ('loc_a_child1', ?1, 'loc_a_root', 'Child A1', 'CHILD-A1', 1)",
+        [&branch_a],
+    )
+    .expect("same-branch parent must be accepted by database composite foreign key");
+
+    // 3. Cross-branch parent: Attempting to insert child in branch B referencing parent in branch A
+    // Raw SQL insert bypassing domain validation MUST be rejected by SQLite FOREIGN KEY constraint
+    let cross_branch_err = conn
+        .execute(
+            "INSERT INTO locations (id, branch_id, parent_id, name, code, is_active)
+             VALUES ('loc_b_child_invalid', ?1, 'loc_a_root', 'Invalid Child', 'INV-1', 1)",
+            [&branch_b],
+        )
+        .unwrap_err();
+
+    match cross_branch_err {
+        rusqlite::Error::SqliteFailure(err, msg) => {
+            assert_eq!(err.code, rusqlite::ErrorCode::ConstraintViolation);
+            let msg_str = msg.unwrap_or_default();
+            assert!(
+                msg_str.contains("FOREIGN KEY constraint failed"),
+                "Expected foreign key constraint violation, got: {msg_str}"
+            );
+        }
+        other => panic!("Expected SqliteFailure constraint violation, got: {other:?}"),
+    }
+
+    // 4. Reparenting / update tests via raw SQL:
+    // 4a. Update same-branch child to reference another valid same-branch parent
+    conn.execute(
+        "INSERT INTO locations (id, branch_id, parent_id, name, code, is_active)
+         VALUES ('loc_a_parent2', ?1, NULL, 'Parent A2', 'PARENT-A2', 1)",
+        [&branch_a],
+    )
+    .expect("insert second root");
+
+    conn.execute(
+        "UPDATE locations SET parent_id = 'loc_a_parent2' WHERE id = 'loc_a_child1'",
+        [],
+    )
+    .expect("reparenting to same-branch parent must be accepted");
+
+    // 4b. Update child to reference a cross-branch parent ('loc_b_root') -> MUST fail DB constraint
+    let cross_branch_update_err = conn
+        .execute(
+            "UPDATE locations SET parent_id = 'loc_b_root' WHERE id = 'loc_a_child1'",
+            [],
+        )
+        .unwrap_err();
+
+    match cross_branch_update_err {
+        rusqlite::Error::SqliteFailure(err, msg) => {
+            assert_eq!(err.code, rusqlite::ErrorCode::ConstraintViolation);
+            let msg_str = msg.unwrap_or_default();
+            assert!(
+                msg_str.contains("FOREIGN KEY constraint failed"),
+                "Expected foreign key constraint violation on reparent, got: {msg_str}"
+            );
+        }
+        other => panic!("Expected SqliteFailure on cross-branch update, got: {other:?}"),
+    }
+
+    // 4c. Update child parent_id to NULL (becoming root) -> accepted
+    conn.execute(
+        "UPDATE locations SET parent_id = NULL WHERE id = 'loc_a_child1'",
+        [],
+    )
+    .expect("clearing parent_id to NULL must be accepted");
+
+    // 4d. Verify ON DELETE RESTRICT on composite parent relationship
+    // Set child parent back to loc_a_root
+    conn.execute(
+        "UPDATE locations SET parent_id = 'loc_a_root' WHERE id = 'loc_a_child1'",
+        [],
+    )
+    .expect("re-attach child to loc_a_root");
+
+    // Attempting to delete parent while child exists must fail with FOREIGN KEY constraint
+    let delete_parent_err = conn
+        .execute("DELETE FROM locations WHERE id = 'loc_a_root'", [])
+        .unwrap_err();
+    match delete_parent_err {
+        rusqlite::Error::SqliteFailure(err, msg) => {
+            assert_eq!(err.code, rusqlite::ErrorCode::ConstraintViolation);
+            let msg_str = msg.unwrap_or_default();
+            assert!(
+                msg_str.contains("FOREIGN KEY constraint failed"),
+                "Expected foreign key constraint violation on delete parent, got: {msg_str}"
+            );
+        }
+        other => panic!("Expected SqliteFailure on delete parent, got: {other:?}"),
+    }
+
+    // 4e. Updating child's branch_id to mismatch parent's branch -> rejected by composite FK
+    let update_branch_mismatch_err = conn
+        .execute(
+            "UPDATE locations SET branch_id = ?1 WHERE id = 'loc_a_child1'",
+            [&branch_b],
+        )
+        .unwrap_err();
+    match update_branch_mismatch_err {
+        rusqlite::Error::SqliteFailure(err, msg) => {
+            assert_eq!(err.code, rusqlite::ErrorCode::ConstraintViolation);
+            let msg_str = msg.unwrap_or_default();
+            assert!(
+                msg_str.contains("FOREIGN KEY constraint failed"),
+                "Expected foreign key constraint violation on branch update, got: {msg_str}"
+            );
+        }
+        other => panic!("Expected SqliteFailure on branch mismatch update, got: {other:?}"),
+    }
+
+    // 4f. Verify existing branch_id foreign key constraint is NOT weakened
+    let invalid_branch_err = conn
+        .execute(
+            "INSERT INTO locations (id, branch_id, parent_id, name, code, is_active)
+             VALUES ('loc_nonexistent_branch', 'branch_does_not_exist', NULL, 'Ghost', 'GHOST', 1)",
+            [],
+        )
+        .unwrap_err();
+    match invalid_branch_err {
+        rusqlite::Error::SqliteFailure(err, msg) => {
+            assert_eq!(err.code, rusqlite::ErrorCode::ConstraintViolation);
+            let msg_str = msg.unwrap_or_default();
+            assert!(
+                msg_str.contains("FOREIGN KEY constraint failed"),
+                "Expected foreign key constraint violation on branch_id, got: {msg_str}"
+            );
+        }
+        other => panic!("Expected SqliteFailure on invalid branch_id, got: {other:?}"),
+    }
+}
+
 // =========================================================================
 // 2. LOCATION DOMAIN & VALIDATION TESTS
 // =========================================================================

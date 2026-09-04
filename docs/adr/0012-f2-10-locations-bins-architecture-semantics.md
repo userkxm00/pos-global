@@ -152,11 +152,11 @@ The system explicitly rejects modeling bins as rows in `locations` with `locatio
 
 ## 6. Hierarchy Semantics
 
-The `locations` table supports an optional recursive parent-child hierarchy via `parent_id TEXT NULL REFERENCES locations(id) ON DELETE RESTRICT`.
+The `locations` table supports an optional recursive parent-child hierarchy via composite foreign key `FOREIGN KEY (parent_id, branch_id) REFERENCES locations(id, branch_id) ON DELETE RESTRICT`.
 
 1. **Root Locations:** A location with `parent_id IS NULL` is a root-level storage zone within that branch (e.g., `Main Warehouse`, `Store Floor`).
 2. **Child Locations:** A location with a non-null `parent_id` is a sub-zone of the specified parent (e.g., `Aisle 1` child of `Main Warehouse`).
-3. **Same-Branch Invariant:** A child location MUST belong to the exact same `branch_id` as its parent. The domain service and database foreign keys must guarantee that `parent.branch_id == child.branch_id`.
+3. **Same-Branch Invariant:** A child location MUST belong to the exact same `branch_id` as its parent. This invariant is enforced both at the database layer via composite foreign key `(parent_id, branch_id) REFERENCES locations(id, branch_id)` (supported by unique index `idx_locations_id_branch_id`), and at the domain service layer.
 4. **No Arbitrary Business Depth:** The business domain imposes NO artificial depth limit (such as a maximum depth of 5). Organizations may structure their physical spaces as shallow or as deep as their facility requires.
 5. **Terminal Bins:** Bins do NOT support recursive hierarchy. All bins are immediate children of a location.
 
@@ -271,10 +271,11 @@ Milestone `F2.10` is strictly restricted to **master data and physical topograph
 
 ### Approved Scope of Migration 019
 Migration 019 shall create only the tables, indexes, and constraints necessary for location and bin master data:
-1. `CREATE TABLE locations (...)` with foreign keys to `branches(id)` and `locations(id)`.
+1. `CREATE TABLE locations (...)` with foreign key to `branches(id)` and composite foreign key `(parent_id, branch_id) REFERENCES locations(id, branch_id) ON DELETE RESTRICT`.
 2. `CREATE TABLE bins (...)` with foreign key to `locations(id)`.
-3. Case-insensitive unique indexes on `locations(branch_id, code COLLATE NOCASE)` and `bins(location_id, code COLLATE NOCASE)`.
-4. Foreign key lookup indexes on `locations(parent_id)` and `bins(location_id)`.
+3. Unique index `idx_locations_id_branch_id` on `locations(id, branch_id)` supporting composite foreign key referential integrity.
+4. Case-insensitive unique indexes on `locations(branch_id, code COLLATE NOCASE)` and `bins(location_id, code COLLATE NOCASE)`.
+5. Foreign key lookup indexes on `locations(parent_id, branch_id)` and `bins(location_id)`.
 
 ### Strict Deferral of Serial and Batch Linkage (Decision D2)
 - **Migration 019 MUST NOT alter `serial_numbers` or `product_batches`.**
