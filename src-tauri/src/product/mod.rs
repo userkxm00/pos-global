@@ -427,6 +427,8 @@ pub fn create_product(
     let cost_price_minor = validate_cost_price_minor(input.cost_price_minor)?;
     let barcode = validate_barcode(input.barcode.as_deref());
     let product_type = validate_product_type(input.product_type.as_deref())?;
+    crate::warranty::validate_warranty_months(input.warranty_months)
+        .map_err(|e| ProductError::Validation(e.to_string()))?;
     let sku = validate_and_check_sku(conn, input.sku.as_deref(), None)?;
 
     check_barcode_conflict(conn, barcode.as_deref(), None)?;
@@ -511,6 +513,9 @@ pub fn update_product(
             input.id
         )));
     }
+
+    crate::warranty::validate_warranty_months(input.warranty_months)
+        .map_err(|e| ProductError::Validation(e.to_string()))?;
 
     let sku = if input.is_active {
         validate_and_check_sku(conn, input.sku.as_deref(), Some(&input.id))?

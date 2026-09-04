@@ -47,5 +47,7 @@ mod unit_tests;
 mod user_tests;
 #[path = "variant_tests.rs"]
 mod variant_tests;
+#[path = "warranty_tests.rs"]
+mod warranty_tests;
 #[path = "weighted_tests.rs"]
 mod weighted_tests;

@@ -17,6 +17,7 @@ pub mod sales;
 pub mod serial;
 pub mod unit;
 pub mod variant;
+pub mod warranty;
 pub mod weighted;
 
 use crate::auth::middleware::{require_scoped_permission, AuthorizeRequest};
