@@ -156,32 +156,65 @@ pub fn parse_canonical_date(s: &str) -> Result<(i32, u32, u32), WarrantyError> {
 }
 
 /// Normalizes an incoming date or timestamp string to canonical `YYYY-MM-DD`.
-/// If caller supplies an ISO 8601 timestamp (e.g. `2026-09-03T12:00:00Z` or `2026-09-03 14:00:00`),
-/// the calendar date prefix is extracted and validated.
+/// If caller supplies an ISO 8601 timestamp (e.g. `2026-09-03T00:30:00+02:00` or `2026-09-03 14:00:00`),
+/// it is converted to the canonical UTC calendar date. Malformed suffixes and invalid dates are rejected.
 pub fn normalize_to_canonical_date(input: &str) -> Result<String, WarrantyError> {
     let trimmed = input.trim();
-    if trimmed.len() < 10 {
-        return Err(WarrantyError::DateParse(format!(
-            "Input date '{}' is too short; expected at least 10 characters 'YYYY-MM-DD'",
-            trimmed
-        )));
+    if trimmed.is_empty() {
+        return Err(WarrantyError::DateParse(
+            "Input date cannot be empty".to_string(),
+        ));
     }
 
-    let date_part = &trimmed[0..10];
-    let (year, month, day) = parse_canonical_date(date_part)?;
+    // Fast path: exact canonical date 'YYYY-MM-DD'
+    if trimmed.len() == 10 {
+        let (y, m, d) = parse_canonical_date(trimmed)?;
+        return Ok(format!("{:04}-{:02}-{:02}", y, m, d));
+    }
 
-    // If longer than 10 characters, ensure the delimiter is valid for an ISO timestamp
-    if trimmed.len() > 10 {
-        let delimiter = trimmed.as_bytes()[10];
-        if delimiter != b'T' && delimiter != b' ' {
+    // Try parsing as ISO 8601 / RFC 3339 timestamp with explicit timezone offset
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        let utc_date = dt.with_timezone(&chrono::Utc).date_naive();
+        let (y, m, d) = (
+            chrono::Datelike::year(&utc_date),
+            chrono::Datelike::month(&utc_date),
+            chrono::Datelike::day(&utc_date),
+        );
+        if !(1970..=9999).contains(&y) {
             return Err(WarrantyError::DateParse(format!(
-                "Malformed timestamp delimiter in '{}'; expected 'T' or space after YYYY-MM-DD",
-                trimmed
+                "Normalized UTC year {y} out of valid range (1970-9999)"
             )));
+        }
+        return Ok(format!("{:04}-{:02}-{:02}", y, m, d));
+    }
+
+    // Try parsing as UTC naive ISO datetime formats
+    let formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+    ];
+    for fmt in formats {
+        if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(trimmed, fmt) {
+            let (y, m, d) = (
+                chrono::Datelike::year(&ndt),
+                chrono::Datelike::month(&ndt),
+                chrono::Datelike::day(&ndt),
+            );
+            if !(1970..=9999).contains(&y) {
+                return Err(WarrantyError::DateParse(format!(
+                    "Normalized year {y} out of valid range (1970-9999)"
+                )));
+            }
+            return Ok(format!("{:04}-{:02}-{:02}", y, m, d));
         }
     }
 
-    Ok(format!("{:04}-{:02}-{:02}", year, month, day))
+    Err(WarrantyError::DateParse(format!(
+        "Invalid date/timestamp format in '{}'; expected 'YYYY-MM-DD' or valid ISO 8601 timestamp",
+        trimmed
+    )))
 }
 
 /// Converts a valid Gregorian calendar date to days relative to 1970-01-01 (Civil Days Algorithm).
@@ -227,9 +260,15 @@ pub fn calculate_warranty_expiration(
 
     let (start_y, start_m, start_d) = parse_canonical_date(start_date)?;
 
-    let zero_based_m = (start_m - 1) + duration_months;
-    let target_y = start_y + (zero_based_m / 12) as i32;
-    let target_m = (zero_based_m % 12) + 1;
+    let total_months = (start_m as u64 - 1) + duration_months as u64;
+    let target_y = start_y as i64 + (total_months / 12) as i64;
+    if !(1970..=9999).contains(&target_y) {
+        return Err(WarrantyError::Validation(format!(
+            "Calculated warranty expiration year {target_y} is outside the supported range (1970-9999)"
+        )));
+    }
+    let target_m = ((total_months % 12) + 1) as u32;
+    let target_y = target_y as i32;
 
     let max_days = days_in_month(target_y, target_m);
     let target_d = start_d.min(max_days);

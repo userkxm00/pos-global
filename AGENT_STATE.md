@@ -1,28 +1,26 @@
 # AGENT STATE
 
 > This file is operational state, not a substitute for Git history or CI evidence.
-> Reconciled and updated for F2.07 PR #75 remediation on 2026-09-03.
+> Reconciled and updated for F2.09 PR #77 review remediation on 2026-09-04.
 
 ## Current
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.09 — Warranty
-- Milestone Status: F2.09 IMPLEMENTED LOCALLY (Branch `feature/f2-09-warranty`)
+- Milestone Status: F2.09 PR #77 REVIEW REMEDIATION (Branch `feature/f2-09-warranty`)
 - Branch: `feature/f2-09-warranty`
-- Branch Status: Implemented and locally validated; ready for commit and PR
+- Branch Status: PR #77 open; review remediation implemented and locally validated
 - Latest Merged PR: PR #76 (`https://github.com/userkxm00/pos-global/pull/76`)
 - Authoritative Merge Commit SHA: `341b54b17ddee4c86355c0ace72fefbe3064560a`
 - Authoritative origin/main SHA: `341b54b17ddee4c86355c0ace72fefbe3064560a`
-- Last Completed Action: Completed F2.09 domain, migration 018, commands, and tests:
-  1. Authored and hardened ADR-0011 (`docs/adr/0011-f2-09-warranty-architecture-semantics.md`).
-  2. Created Migration `018_warranty.sql` with partial index on `serial_numbers(warranty_expires_at)`.
-  3. Registered `018_warranty` in `MIGRATIONS` array in `src-tauri/src/db/mod.rs`.
-  4. Implemented warranty domain engine in `src-tauri/src/warranty/mod.rs` with canonical `YYYY-MM-DD` date model, exact month-end clamping, and coverage evaluation.
-  5. Implemented warranty IPC commands in `src-tauri/src/commands/warranty.rs` registered in `main.rs`.
-  6. Implemented comprehensive test suite in `src-tauri/src/tests/warranty_tests.rs`.
-  7. Validated: `cargo fmt --check` (PASS), `npm test` (PASS), `npm run build` (PASS), `validate_foundation.py` (PASS), `git diff --check` (PASS).
+- Last Completed Action: Remediated PR #77 review findings across timestamp normalization, negative warranty duration validation, date bounds check, and test coverage:
+  1. Updated `src-tauri/src/warranty/mod.rs` to normalize ISO 8601/RFC 3339 timestamps with timezone offsets to canonical UTC dates and reject malformed suffixes without panicking.
+  2. Added checked month arithmetic to `calculate_warranty_expiration` rejecting target years outside `1970..=9999`.
+  3. Integrated `validate_warranty_months` into `create_product` and `update_product` in `src-tauri/src/product/mod.rs`.
+  4. Added dedicated unit tests in `src-tauri/src/tests/warranty_tests.rs` covering timestamp timezone normalization, malformed suffixes, negative duration rejection, and out-of-bounds year calculations.
+  5. Validated locally: `cargo fmt --check` (PASS), `npm test` (PASS), `npm run build` (PASS), `validate_foundation.py` (PASS), `git diff --check` (PASS).
 - Current Blocker: None
-- Next Authorized Action: Commit, push to `feature/f2-09-warranty`, create pull request into `main`, and monitor CI/reviews.
+- Next Authorized Action: Commit and push review remediation to `feature/f2-09-warranty` (PR #77) and verify CI.
 - Exact F2.09 Scope Implemented:
   - ADR-0011 accepted (`docs/adr/0011-f2-09-warranty-architecture-semantics.md`)
   - Migration `018_warranty.sql` registered in `MIGRATIONS` array in `src-tauri/src/db/mod.rs`
@@ -78,6 +76,6 @@
 
 ## Handoff
 
-F2.08 (Serial / IMEI / Assets) is fully completed and merged into main.
-Main branch is clean, up to date with `origin/main` at `341b54b17ddee4c86355c0ace72fefbe3064560a`, with all 11 exact-head CI check runs green.
-Next authoritative milestone is F2.09 (Warranty). Implementation has NOT been started. Awaiting user authorization.
+F2.08 (Serial / IMEI / Assets) is fully completed and merged into main (`341b54b17ddee4c86355c0ace72fefbe3064560a`).
+F2.09 (Warranty) is implemented on branch `feature/f2-09-warranty` and submitted via PR #77 (`https://github.com/userkxm00/pos-global/pull/77`) with all CI checks green.
+Awaiting reviewer reconciliation and explicit user authorization to merge. DO NOT MERGE until authorized.

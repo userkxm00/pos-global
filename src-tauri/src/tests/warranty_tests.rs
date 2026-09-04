@@ -89,6 +89,28 @@ fn test_product_warranty_months_validation() {
 
     let err = validate_warranty_months(Some(-1)).unwrap_err();
     assert!(err.to_string().contains("cannot be negative"));
+
+    // Verify create_product rejects negative warranty_months
+    let conn = setup_test_db();
+    let res = create_product(
+        &conn,
+        CreateProductInput {
+            name: "Negative Warranty Product".to_string(),
+            description: None,
+            category_id: None,
+            sku: None,
+            barcode: None,
+            product_type: Some("simple".to_string()),
+            base_price_minor: 1000,
+            cost_price_minor: None,
+            unit_type: None,
+            requires_expiry: None,
+            requires_serial: None,
+            warranty_months: Some(-3),
+            custom_attributes: None,
+        },
+    );
+    assert!(res.is_err());
 }
 
 // =========================================================================
@@ -166,6 +188,18 @@ fn test_normalize_to_canonical_date() {
     // Malformed timestamp delimiter
     assert!(normalize_to_canonical_date("2026-09-03X12:00:00").is_err());
 
+    // Timestamp with positive timezone offset normalized to UTC date
+    assert_eq!(
+        normalize_to_canonical_date("2026-09-03T00:30:00+02:00").unwrap(),
+        "2026-09-02"
+    );
+
+    // Malformed suffix rejected
+    assert!(normalize_to_canonical_date("2026-09-03Tgarbage").is_err());
+
+    // Multibyte characters at boundary handled gracefully without panic
+    assert!(normalize_to_canonical_date("2026-09-03🚀extra").is_err());
+
     // Too short
     assert!(normalize_to_canonical_date("2026-09").is_err());
 }
@@ -214,6 +248,10 @@ fn test_calculate_warranty_expiration_cases() {
 
     // Zero duration rejected
     assert!(calculate_warranty_expiration("2026-01-15", 0).is_err());
+
+    // Out of range year (overflow past 9999) rejected
+    let oob_err = calculate_warranty_expiration("9999-12-01", 2).unwrap_err();
+    assert!(oob_err.to_string().contains("outside the supported range"));
 }
 
 // =========================================================================

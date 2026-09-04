@@ -1,7 +1,7 @@
 # ADR-0011 — F2.09 Warranty Architecture & Semantics
 
-Status: Accepted  
-Date: 2026-09-03  
+Status: Accepted
+Date: 2026-09-03
 
 ---
 
