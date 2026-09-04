@@ -28,9 +28,6 @@ CREATE UNIQUE INDEX idx_locations_branch_code
 CREATE INDEX idx_locations_branch_id
     ON locations(branch_id);
 
-CREATE INDEX idx_locations_parent_id
-    ON locations(parent_id);
-
 CREATE INDEX idx_locations_parent_branch
     ON locations(parent_id, branch_id);
 

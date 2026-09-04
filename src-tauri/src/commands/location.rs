@@ -82,7 +82,12 @@ pub fn update_location_impl(
 
     let existing = crate::location::get_location(conn, &request.id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Location '{}' not found", request.id))?;
+        .ok_or_else(|| {
+            format!(
+                "Location '{}' not found or inaccessible for this session",
+                request.id
+            )
+        })?;
 
     require_scoped_permission(
         conn,
@@ -91,7 +96,12 @@ pub fn update_location_impl(
         None,
         Some(&existing.branch_id),
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|_| {
+        format!(
+            "Location '{}' not found or inaccessible for this session",
+            request.id
+        )
+    })?;
 
     crate::location::update_location(conn, request).map_err(|e| e.to_string())
 }
@@ -106,7 +116,7 @@ pub fn deactivate_location_impl(
 
     let existing = crate::location::get_location(conn, id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Location '{id}' not found"))?;
+        .ok_or_else(|| format!("Location '{id}' not found or inaccessible for this session"))?;
 
     require_scoped_permission(
         conn,
@@ -115,7 +125,7 @@ pub fn deactivate_location_impl(
         None,
         Some(&existing.branch_id),
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|_| format!("Location '{id}' not found or inaccessible for this session"))?;
 
     crate::location::deactivate_location(conn, id).map_err(|e| e.to_string())
 }
@@ -130,7 +140,7 @@ pub fn reactivate_location_impl(
 
     let existing = crate::location::get_location(conn, id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Location '{id}' not found"))?;
+        .ok_or_else(|| format!("Location '{id}' not found or inaccessible for this session"))?;
 
     require_scoped_permission(
         conn,
@@ -139,7 +149,7 @@ pub fn reactivate_location_impl(
         None,
         Some(&existing.branch_id),
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|_| format!("Location '{id}' not found or inaccessible for this session"))?;
 
     crate::location::reactivate_location(conn, id).map_err(|e| e.to_string())
 }
@@ -174,7 +184,12 @@ pub fn create_bin_impl(
 
     let parent_loc = crate::location::get_location(conn, &request.location_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Location '{}' not found", request.location_id))?;
+        .ok_or_else(|| {
+            format!(
+                "Location '{}' not found or inaccessible for this session",
+                request.location_id
+            )
+        })?;
 
     require_scoped_permission(
         conn,
@@ -183,7 +198,12 @@ pub fn create_bin_impl(
         None,
         Some(&parent_loc.branch_id),
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|_| {
+        format!(
+            "Location '{}' not found or inaccessible for this session",
+            request.location_id
+        )
+    })?;
 
     crate::location::create_bin(conn, request).map_err(|e| e.to_string())
 }
@@ -264,7 +284,12 @@ pub fn update_bin_impl(
 
     let branch_id = get_bin_branch_id(conn, &request.id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Bin '{}' not found", request.id))?;
+        .ok_or_else(|| {
+            format!(
+                "Bin '{}' not found or inaccessible for this session",
+                request.id
+            )
+        })?;
 
     require_scoped_permission(
         conn,
@@ -273,7 +298,12 @@ pub fn update_bin_impl(
         None,
         Some(&branch_id),
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|_| {
+        format!(
+            "Bin '{}' not found or inaccessible for this session",
+            request.id
+        )
+    })?;
 
     crate::location::update_bin(conn, request).map_err(|e| e.to_string())
 }
@@ -284,7 +314,7 @@ pub fn deactivate_bin_impl(conn: &Connection, session_id: &str, id: &str) -> Res
 
     let branch_id = get_bin_branch_id(conn, id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Bin '{id}' not found"))?;
+        .ok_or_else(|| format!("Bin '{id}' not found or inaccessible for this session"))?;
 
     require_scoped_permission(
         conn,
@@ -293,7 +323,7 @@ pub fn deactivate_bin_impl(conn: &Connection, session_id: &str, id: &str) -> Res
         None,
         Some(&branch_id),
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|_| format!("Bin '{id}' not found or inaccessible for this session"))?;
 
     crate::location::deactivate_bin(conn, id).map_err(|e| e.to_string())
 }
@@ -304,7 +334,7 @@ pub fn reactivate_bin_impl(conn: &Connection, session_id: &str, id: &str) -> Res
 
     let branch_id = get_bin_branch_id(conn, id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Bin '{id}' not found"))?;
+        .ok_or_else(|| format!("Bin '{id}' not found or inaccessible for this session"))?;
 
     require_scoped_permission(
         conn,
@@ -313,7 +343,7 @@ pub fn reactivate_bin_impl(conn: &Connection, session_id: &str, id: &str) -> Res
         None,
         Some(&branch_id),
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|_| format!("Bin '{id}' not found or inaccessible for this session"))?;
 
     crate::location::reactivate_bin(conn, id).map_err(|e| e.to_string())
 }

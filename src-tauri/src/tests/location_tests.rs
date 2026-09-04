@@ -890,7 +890,7 @@ fn test_ipc_commands_settings_manage_authorization() {
     .expect("admin can create location");
     assert_eq!(loc_admin.parent_id, Some(loc_mgr.id.clone()));
 
-    // 4. Cross-branch admin cannot mutate branch A location
+    // 4. Cross-branch admin cannot mutate branch A location: returns unified anti-existence error
     let cross_err = update_location_impl(
         &conn,
         &other_branch_admin,
@@ -904,7 +904,7 @@ fn test_ipc_commands_settings_manage_authorization() {
         },
     )
     .unwrap_err();
-    assert!(cross_err.contains("Scope mismatch"));
+    assert!(cross_err.contains("not found or inaccessible for this session"));
 
     // 5. Anti-existence leakage: accessing cross-branch location returns Ok(None) (indistinguishable from not found)
     let leak_res = get_location_impl(&conn, &other_branch_admin, &loc_mgr.id).unwrap();
@@ -1130,4 +1130,434 @@ fn test_update_location_input_tri_state_serde_deserialization() {
     let input_val: UpdateLocationInput = serde_json::from_str(json_val).unwrap();
     assert_eq!(input_val.parent_id, Some(Some("loc_parent".to_string())));
     assert_eq!(input_val.location_type, Some(Some("zone".to_string())));
+}
+
+#[test]
+fn test_ipc_mutations_unified_anti_existence_leakage() {
+    let conn = setup_test_db();
+    let (org_id, branch_a) = create_test_org_and_branch(&conn);
+    let branch_b = create_second_branch(&conn, &org_id);
+
+    let admin_a = create_auth_session(&conn, &branch_a, "admin");
+    let admin_b = create_auth_session(&conn, &branch_b, "admin");
+
+    // Provision a location and bin in branch A
+    let loc_a = create_location(
+        &conn,
+        CreateLocationInput {
+            branch_id: branch_a.clone(),
+            parent_id: None,
+            name: "Secret Zone A".to_string(),
+            code: "SEC-A".to_string(),
+            location_type: None,
+        },
+    )
+    .expect("loc a created");
+
+    let bin_a = create_bin(
+        &conn,
+        CreateBinInput {
+            location_id: loc_a.id.clone(),
+            name: "Secret Bin A".to_string(),
+            code: "SBIN-A".to_string(),
+        },
+    )
+    .expect("bin a created");
+
+    let unknown_loc_id = "non-existent-loc-id";
+    let unknown_bin_id = "non-existent-bin-id";
+
+    // 1. update_location_impl: cross-branch vs unknown ID return identical error
+    let err_update_cross = update_location_impl(
+        &conn,
+        &admin_b,
+        UpdateLocationInput {
+            id: loc_a.id.clone(),
+            name: Some("Hack".into()),
+            code: None,
+            parent_id: None,
+            location_type: None,
+            is_active: None,
+        },
+    )
+    .unwrap_err();
+    let err_update_unknown = update_location_impl(
+        &conn,
+        &admin_b,
+        UpdateLocationInput {
+            id: unknown_loc_id.to_string(),
+            name: Some("Hack".into()),
+            code: None,
+            parent_id: None,
+            location_type: None,
+            is_active: None,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err_update_cross,
+        format!(
+            "Location '{}' not found or inaccessible for this session",
+            loc_a.id
+        )
+    );
+    assert_eq!(
+        err_update_unknown,
+        format!("Location '{unknown_loc_id}' not found or inaccessible for this session")
+    );
+
+    // 2. deactivate_location_impl
+    let err_deact_cross = deactivate_location_impl(&conn, &admin_b, &loc_a.id).unwrap_err();
+    let err_deact_unknown = deactivate_location_impl(&conn, &admin_b, unknown_loc_id).unwrap_err();
+    assert_eq!(
+        err_deact_cross,
+        format!(
+            "Location '{}' not found or inaccessible for this session",
+            loc_a.id
+        )
+    );
+    assert_eq!(
+        err_deact_unknown,
+        format!("Location '{unknown_loc_id}' not found or inaccessible for this session")
+    );
+
+    // 3. reactivate_location_impl
+    let err_react_cross = reactivate_location_impl(&conn, &admin_b, &loc_a.id).unwrap_err();
+    let err_react_unknown = reactivate_location_impl(&conn, &admin_b, unknown_loc_id).unwrap_err();
+    assert_eq!(
+        err_react_cross,
+        format!(
+            "Location '{}' not found or inaccessible for this session",
+            loc_a.id
+        )
+    );
+    assert_eq!(
+        err_react_unknown,
+        format!("Location '{unknown_loc_id}' not found or inaccessible for this session")
+    );
+
+    // 4. create_bin_impl: cross-branch location_id vs unknown location_id
+    let err_create_bin_cross = create_bin_impl(
+        &conn,
+        &admin_b,
+        CreateBinInput {
+            location_id: loc_a.id.clone(),
+            name: "Bin".into(),
+            code: "B-CROSS".into(),
+        },
+    )
+    .unwrap_err();
+    let err_create_bin_unknown = create_bin_impl(
+        &conn,
+        &admin_b,
+        CreateBinInput {
+            location_id: unknown_loc_id.to_string(),
+            name: "Bin".into(),
+            code: "B-UNK".into(),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err_create_bin_cross,
+        format!(
+            "Location '{}' not found or inaccessible for this session",
+            loc_a.id
+        )
+    );
+    assert_eq!(
+        err_create_bin_unknown,
+        format!("Location '{unknown_loc_id}' not found or inaccessible for this session")
+    );
+
+    // 5. update_bin_impl: cross-branch bin vs unknown bin
+    let err_update_bin_cross = update_bin_impl(
+        &conn,
+        &admin_b,
+        UpdateBinInput {
+            id: bin_a.id.clone(),
+            name: Some("Hack".into()),
+            code: None,
+            is_active: None,
+        },
+    )
+    .unwrap_err();
+    let err_update_bin_unknown = update_bin_impl(
+        &conn,
+        &admin_b,
+        UpdateBinInput {
+            id: unknown_bin_id.to_string(),
+            name: Some("Hack".into()),
+            code: None,
+            is_active: None,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err_update_bin_cross,
+        format!(
+            "Bin '{}' not found or inaccessible for this session",
+            bin_a.id
+        )
+    );
+    assert_eq!(
+        err_update_bin_unknown,
+        format!("Bin '{unknown_bin_id}' not found or inaccessible for this session")
+    );
+
+    // 6. deactivate_bin_impl
+    let err_deact_bin_cross = deactivate_bin_impl(&conn, &admin_b, &bin_a.id).unwrap_err();
+    let err_deact_bin_unknown = deactivate_bin_impl(&conn, &admin_b, unknown_bin_id).unwrap_err();
+    assert_eq!(
+        err_deact_bin_cross,
+        format!(
+            "Bin '{}' not found or inaccessible for this session",
+            bin_a.id
+        )
+    );
+    assert_eq!(
+        err_deact_bin_unknown,
+        format!("Bin '{unknown_bin_id}' not found or inaccessible for this session")
+    );
+
+    // 7. reactivate_bin_impl
+    let err_react_bin_cross = reactivate_bin_impl(&conn, &admin_b, &bin_a.id).unwrap_err();
+    let err_react_bin_unknown = reactivate_bin_impl(&conn, &admin_b, unknown_bin_id).unwrap_err();
+    assert_eq!(
+        err_react_bin_cross,
+        format!(
+            "Bin '{}' not found or inaccessible for this session",
+            bin_a.id
+        )
+    );
+    assert_eq!(
+        err_react_bin_unknown,
+        format!("Bin '{unknown_bin_id}' not found or inaccessible for this session")
+    );
+
+    // Verify authorized operations by admin_a still succeed
+    let updated_loc = update_location_impl(
+        &conn,
+        &admin_a,
+        UpdateLocationInput {
+            id: loc_a.id.clone(),
+            name: Some("Updated Zone A".into()),
+            code: None,
+            parent_id: None,
+            location_type: None,
+            is_active: None,
+        },
+    )
+    .expect("authorized update location succeeds");
+    assert_eq!(updated_loc.name, "Updated Zone A");
+}
+
+#[test]
+fn test_like_wildcard_escaping_in_locations_and_bins() {
+    let conn = setup_test_db();
+    let (_org_id, branch_id) = create_test_org_and_branch(&conn);
+
+    // Insert locations with metacharacters in name/code
+    create_location(
+        &conn,
+        CreateLocationInput {
+            branch_id: branch_id.clone(),
+            parent_id: None,
+            name: "Aisle_1".to_string(),
+            code: "A_1".to_string(),
+            location_type: None,
+        },
+    )
+    .unwrap();
+
+    create_location(
+        &conn,
+        CreateLocationInput {
+            branch_id: branch_id.clone(),
+            parent_id: None,
+            name: "AisleX1".to_string(),
+            code: "AX1".to_string(),
+            location_type: None,
+        },
+    )
+    .unwrap();
+
+    create_location(
+        &conn,
+        CreateLocationInput {
+            branch_id: branch_id.clone(),
+            parent_id: None,
+            name: "Zone%100".to_string(),
+            code: "Z%1".to_string(),
+            location_type: None,
+        },
+    )
+    .unwrap();
+
+    create_location(
+        &conn,
+        CreateLocationInput {
+            branch_id: branch_id.clone(),
+            parent_id: None,
+            name: "Zone100".to_string(),
+            code: "Z1".to_string(),
+            location_type: None,
+        },
+    )
+    .unwrap();
+
+    let loc_slash = create_location(
+        &conn,
+        CreateLocationInput {
+            branch_id: branch_id.clone(),
+            parent_id: None,
+            name: "Bay\\Row".to_string(),
+            code: "B\\R".to_string(),
+            location_type: None,
+        },
+    )
+    .unwrap();
+
+    // Query with literal underscore: should match "Aisle_1" (both name and code) but NOT "AisleX1"
+    let res_under = list_locations(
+        &conn,
+        &LocationFilter {
+            branch_id: branch_id.clone(),
+            query: Some("_1".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(res_under.len(), 1);
+    assert_eq!(res_under[0].name, "Aisle_1");
+
+    // Query with literal percent: should match "Zone%100" but NOT "Zone100"
+    let res_pct = list_locations(
+        &conn,
+        &LocationFilter {
+            branch_id: branch_id.clone(),
+            query: Some("%1".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(res_pct.len(), 1);
+    assert_eq!(res_pct[0].name, "Zone%100");
+
+    // Query with literal backslash: should match "Bay\\Row"
+    let res_slash = list_locations(
+        &conn,
+        &LocationFilter {
+            branch_id: branch_id.clone(),
+            query: Some("\\".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(res_slash.len(), 1);
+    assert_eq!(res_slash[0].name, "Bay\\Row");
+
+    // Normal text query: matches both Zone%100 and Zone100
+    let res_normal = list_locations(
+        &conn,
+        &LocationFilter {
+            branch_id: branch_id.clone(),
+            query: Some("Zone".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(res_normal.len(), 2);
+
+    // Test the same for bins
+    create_bin(
+        &conn,
+        CreateBinInput {
+            location_id: loc_slash.id.clone(),
+            name: "Slot_A".to_string(),
+            code: "S_A".to_string(),
+        },
+    )
+    .unwrap();
+
+    create_bin(
+        &conn,
+        CreateBinInput {
+            location_id: loc_slash.id.clone(),
+            name: "SlotXA".to_string(),
+            code: "SXA".to_string(),
+        },
+    )
+    .unwrap();
+
+    create_bin(
+        &conn,
+        CreateBinInput {
+            location_id: loc_slash.id.clone(),
+            name: "Slot%99".to_string(),
+            code: "S%99".to_string(),
+        },
+    )
+    .unwrap();
+
+    create_bin(
+        &conn,
+        CreateBinInput {
+            location_id: loc_slash.id.clone(),
+            name: "Slot99".to_string(),
+            code: "S99".to_string(),
+        },
+    )
+    .unwrap();
+
+    create_bin(
+        &conn,
+        CreateBinInput {
+            location_id: loc_slash.id.clone(),
+            name: "Slot\\Deep".to_string(),
+            code: "S\\D".to_string(),
+        },
+    )
+    .unwrap();
+
+    // Query bins with literal underscore
+    let bins_under = list_bins(
+        &conn,
+        &BinFilter {
+            location_id: Some(loc_slash.id.clone()),
+            branch_id: None,
+            is_active: None,
+            query: Some("_A".to_string()),
+        },
+    )
+    .unwrap();
+    assert_eq!(bins_under.len(), 1);
+    assert_eq!(bins_under[0].name, "Slot_A");
+
+    // Query bins with literal percent
+    let bins_pct = list_bins(
+        &conn,
+        &BinFilter {
+            location_id: Some(loc_slash.id.clone()),
+            branch_id: None,
+            is_active: None,
+            query: Some("%99".to_string()),
+        },
+    )
+    .unwrap();
+    assert_eq!(bins_pct.len(), 1);
+    assert_eq!(bins_pct[0].name, "Slot%99");
+
+    // Query bins with literal backslash
+    let bins_slash = list_bins(
+        &conn,
+        &BinFilter {
+            location_id: Some(loc_slash.id.clone()),
+            branch_id: None,
+            is_active: None,
+            query: Some("\\".to_string()),
+        },
+    )
+    .unwrap();
+    assert_eq!(bins_slash.len(), 1);
+    assert_eq!(bins_slash[0].name, "Slot\\Deep");
 }

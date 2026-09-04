@@ -435,10 +435,12 @@ pub fn list_locations(
     if let Some(ref q) = filter.query {
         let trimmed_q = q.trim();
         if !trimmed_q.is_empty() {
-            let pattern = format!("%{trimmed_q}%");
+            let pattern = format!("%{}%", crate::db::escape_like_pattern(trimmed_q));
             params_vec.push(Box::new(pattern));
             let idx = params_vec.len();
-            sql.push_str(&format!(" AND (name LIKE ?{idx} OR code LIKE ?{idx})"));
+            sql.push_str(&format!(
+                " AND (name LIKE ?{idx} ESCAPE '\\' OR code LIKE ?{idx} ESCAPE '\\')"
+            ));
         }
     }
 
@@ -793,10 +795,12 @@ pub fn list_bins(conn: &Connection, filter: &BinFilter) -> Result<Vec<Bin>, Loca
     if let Some(ref q) = filter.query {
         let trimmed_q = q.trim();
         if !trimmed_q.is_empty() {
-            let pattern = format!("%{trimmed_q}%");
+            let pattern = format!("%{}%", crate::db::escape_like_pattern(trimmed_q));
             params_vec.push(Box::new(pattern));
             let idx = params_vec.len();
-            clauses.push(format!("(b.name LIKE ?{idx} OR b.code LIKE ?{idx})"));
+            clauses.push(format!(
+                "(b.name LIKE ?{idx} ESCAPE '\\' OR b.code LIKE ?{idx} ESCAPE '\\')"
+            ));
         }
     }
 

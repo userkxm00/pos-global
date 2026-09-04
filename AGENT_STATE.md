@@ -7,15 +7,15 @@
 
 - Current Phase: Phase 2 — Product & inventory core
 - Current Milestone: F2.10 — Locations / Bins
-- Milestone Status: F2.10 IN PROGRESS
+- Milestone Status: F2.10 IN PROGRESS (PR #78 Open)
 - Branch: `feature/f2-10-locations-bins`
-- Branch Status: Implementation complete, awaiting validation, push, and PR creation
+- Branch Status: PR #78 open (`https://github.com/userkxm00/pos-global/pull/78`), implementation complete, undergoing remote CI and review gate reconciliation
 - Latest Merged PR: PR #77 (`https://github.com/userkxm00/pos-global/pull/77`)
 - Authoritative Merge Commit SHA: `05b9fed42fa1a30d97a7f1f6c08d19f1a515d917`
 - Authoritative origin/main SHA: `05b9fed42fa1a30d97a7f1f6c08d19f1a515d917`
-- Last Completed Action: Implemented F2.10 Locations & Bins: Migration 019 (`019_locations_bins.sql`), location domain model (`src-tauri/src/location/mod.rs`), IPC command handlers (`src-tauri/src/commands/location.rs`), module registrations in `main.rs`, `commands/mod.rs`, `db/mod.rs`, and comprehensive test suite (`src-tauri/src/tests/location_tests.rs`).
+- Last Completed Action: Remediated review findings on PR #78 for mutation anti-existence leakage, SQLite LIKE wildcard escaping, cognitive complexity refactoring, and composite foreign key enforcement.
 - Current Blocker: None
-- Next Authorized Action: Run local validation, commit, push, create PR, and await CI/review gates.
+- Next Authorized Action: Await final remote review gates and user merge authorization; do not merge PR #78 autonomously.
 - Exact F2.09 Scope Merged:
   - ADR-0011 accepted (`docs/adr/0011-f2-09-warranty-architecture-semantics.md`)
   - Migration `018_warranty.sql` registered in `MIGRATIONS` array in `src-tauri/src/db/mod.rs`
@@ -73,13 +73,17 @@
 
 ## Handoff
 
-F2.10 (Locations / Bins) is in progress on branch `feature/f2-10-locations-bins`. PR #78 opened.
+F2.10 (Locations / Bins) implementation is complete on branch `feature/f2-10-locations-bins` with PR #78 open (`https://github.com/userkxm00/pos-global/pull/78`).
 Remediated review findings:
 - Enforced branch scope requirement on `list_bins_impl` to prevent unscoped cross-branch bin enumeration.
 - Enforced airtight anti-existence leakage on `get_location_impl` and `get_bin_impl` returning `Ok(None)`.
+- Enforced unified anti-existence leakage on all 7 branch-scoped mutation commands (`update_location_impl`, `deactivate_location_impl`, `reactivate_location_impl`, `create_bin_impl`, `update_bin_impl`, `deactivate_bin_impl`, `reactivate_bin_impl`) returning `not found or inaccessible for this session`.
+- Escaped SQLite LIKE wildcards (`%`, `_`, `\`) in `list_locations` and `list_bins` via `crate::db::escape_like_pattern` with `ESCAPE '\\'`.
 - Enforced permission-first check on all location/bin mutation commands prior to DB queries.
 - Added tri-state serde deserialization for `parent_id` and `location_type` in `UpdateLocationInput`.
 - Enforced active parent validation when generic `update_location` reactivates a child location.
 - Enforced database-level same-branch hierarchy isolation in Migration 019 via composite foreign key `(parent_id, branch_id) REFERENCES locations(id, branch_id) ON DELETE RESTRICT` supported by unique index `idx_locations_id_branch_id`.
-- Added database-level regression test `test_database_composite_foreign_key_same_branch_constraint` verifying SQLite constraints directly reject cross-branch parents, accept same-branch parents, allow NULL root parent_id, and restrict reparent/delete violations.
+- Removed redundant `idx_locations_parent_id` index in favor of covering `idx_locations_parent_branch`.
+- Reduced cognitive complexity in `validate_parent_hierarchy` (3 <= 15) and `update_location` (3 <= 15) and applied idiomatic `AsRef::as_ref`.
+- Added database-level regression test `test_database_composite_foreign_key_same_branch_constraint` and IPC anti-leakage regression tests.
 Awaiting validation, push, and PR CI/review gates reconciliation.
