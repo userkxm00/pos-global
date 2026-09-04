@@ -204,6 +204,80 @@ pub fn normalize_optional_str(val: Option<&str>) -> Option<String> {
 // HIERARCHY & CYCLE VALIDATION
 // =========================================================================
 
+struct ParentContext {
+    branch_id: String,
+    is_active: bool,
+}
+
+fn load_parent_context(
+    conn: &Connection,
+    target_parent_id: &str,
+) -> Result<ParentContext, LocationError> {
+    let parent_row = conn
+        .query_row(
+            "SELECT branch_id, is_active FROM locations WHERE id = ?1",
+            [target_parent_id],
+            |row| {
+                Ok(ParentContext {
+                    branch_id: row.get(0)?,
+                    is_active: row.get::<_, i64>(1)? == 1,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| LocationError::Database(e.to_string()))?;
+
+    parent_row.ok_or_else(|| {
+        LocationError::NotFound(format!("Parent location '{target_parent_id}' not found"))
+    })
+}
+
+fn validate_no_cycle(
+    conn: &Connection,
+    location_id: &str,
+    target_parent_id: &str,
+) -> Result<(), LocationError> {
+    if location_id == target_parent_id {
+        return Err(LocationError::SelfParenting(
+            "Location cannot be its own parent".into(),
+        ));
+    }
+
+    let mut current = target_parent_id.to_string();
+    let mut steps = 0;
+
+    while steps < MAX_DEFENSIVE_STEPS {
+        let parent_result: Result<Option<String>, _> = conn.query_row(
+            "SELECT parent_id FROM locations WHERE id = ?1",
+            [&current],
+            |row| row.get(0),
+        );
+
+        match parent_result {
+            Ok(Some(ancestor_id)) => {
+                if ancestor_id == location_id {
+                    return Err(LocationError::CycleDetected(format!(
+                        "Location '{location_id}' cannot be parented under its own descendant '{target_parent_id}'"
+                    )));
+                }
+                current = ancestor_id;
+                steps += 1;
+            }
+            Ok(None) => return Ok(()),
+            Err(rusqlite::Error::QueryReturnedNoRows) => break,
+            Err(e) => return Err(LocationError::Database(e.to_string())),
+        }
+    }
+
+    if steps >= MAX_DEFENSIVE_STEPS {
+        return Err(LocationError::TraversalSafetyError(format!(
+            "Defensive traversal limit of {MAX_DEFENSIVE_STEPS} steps exceeded during cycle check"
+        )));
+    }
+
+    Ok(())
+}
+
 /// Validates parent location existence, same-branch invariant, active status,
 /// and verifies that assigning this parent does not introduce a self-parenting or transitive cycle.
 pub fn validate_parent_hierarchy(
@@ -212,84 +286,23 @@ pub fn validate_parent_hierarchy(
     location_id: Option<&str>,
     target_parent_id: &str,
 ) -> Result<(), LocationError> {
-    // 1. Parent must exist
-    let parent_row: Option<(String, bool)> = conn
-        .query_row(
-            "SELECT branch_id, is_active FROM locations WHERE id = ?1",
-            [target_parent_id],
-            |row| Ok((row.get(0)?, row.get::<_, i64>(1)? == 1)),
-        )
-        .optional()
-        .map_err(|e| LocationError::Database(e.to_string()))?;
+    let parent = load_parent_context(conn, target_parent_id)?;
 
-    let (parent_branch_id, parent_is_active) = match parent_row {
-        Some(row) => row,
-        None => {
-            return Err(LocationError::NotFound(format!(
-                "Parent location '{target_parent_id}' not found"
-            )));
-        }
-    };
-
-    // 2. Same-branch invariant (domain/transactional guarantee)
-    if parent_branch_id != child_branch_id {
+    if parent.branch_id != child_branch_id {
         return Err(LocationError::CrossBranchParent(format!(
-            "Parent location '{target_parent_id}' belongs to branch '{parent_branch_id}', but child belongs to '{child_branch_id}'"
+            "Parent location '{target_parent_id}' belongs to branch '{}', but child belongs to '{child_branch_id}'",
+            parent.branch_id
         )));
     }
 
-    // 3. Inactive parent check
-    if !parent_is_active {
+    if !parent.is_active {
         return Err(LocationError::InactiveParent(format!(
             "Cannot set parent to inactive location '{target_parent_id}'"
         )));
     }
 
-    // 4. Cycle prevention (when updating an existing location)
     if let Some(id) = location_id {
-        if id == target_parent_id {
-            return Err(LocationError::SelfParenting(
-                "Location cannot be its own parent".into(),
-            ));
-        }
-
-        let mut current = target_parent_id.to_string();
-        let mut steps = 0;
-
-        while steps < MAX_DEFENSIVE_STEPS {
-            let parent_result: Result<Option<String>, _> = conn.query_row(
-                "SELECT parent_id FROM locations WHERE id = ?1",
-                [&current],
-                |row| row.get(0),
-            );
-
-            match parent_result {
-                Ok(Some(ancestor_id)) => {
-                    if ancestor_id == id {
-                        return Err(LocationError::CycleDetected(format!(
-                            "Location '{id}' cannot be parented under its own descendant '{target_parent_id}'"
-                        )));
-                    }
-                    current = ancestor_id;
-                    steps += 1;
-                }
-                Ok(None) => {
-                    // Reached root; no cycle
-                    return Ok(());
-                }
-                Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    // Ancestor doesn't exist
-                    break;
-                }
-                Err(e) => return Err(LocationError::Database(e.to_string())),
-            }
-        }
-
-        if steps >= MAX_DEFENSIVE_STEPS {
-            return Err(LocationError::TraversalSafetyError(format!(
-                "Defensive traversal limit of {MAX_DEFENSIVE_STEPS} steps exceeded during cycle check"
-            )));
-        }
+        validate_no_cycle(conn, id, target_parent_id)?;
     }
 
     Ok(())
@@ -431,7 +444,7 @@ pub fn list_locations(
 
     sql.push_str(" ORDER BY name COLLATE NOCASE ASC");
 
-    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|e| LocationError::Database(e.to_string()))?;
@@ -443,6 +456,76 @@ pub fn list_locations(
         .map_err(|e| LocationError::Database(e.to_string()))?;
 
     Ok(locations)
+}
+
+fn resolve_update_location_type(
+    input_type: Option<Option<String>>,
+    existing_type: Option<String>,
+) -> Result<Option<String>, LocationError> {
+    match input_type {
+        Some(Some(ref lt)) if !lt.trim().is_empty() => {
+            let lt_trimmed = lt.trim();
+            validate_and_trim_str(lt_trimmed, "location_type")?;
+            Ok(Some(lt_trimmed.to_string()))
+        }
+        Some(Some(_)) | Some(None) => Ok(None),
+        None => Ok(existing_type),
+    }
+}
+
+fn resolve_update_parent_id(
+    conn: &Connection,
+    existing: &Location,
+    input_parent: Option<Option<String>>,
+) -> Result<Option<String>, LocationError> {
+    match input_parent {
+        Some(Some(ref pid)) if !pid.trim().is_empty() => {
+            let pid_trimmed = pid.trim();
+            validate_parent_hierarchy(conn, &existing.branch_id, Some(&existing.id), pid_trimmed)?;
+            Ok(Some(pid_trimmed.to_string()))
+        }
+        Some(Some(_)) | Some(None) => Ok(None), // Explicitly unsetting parent -> root
+        None => Ok(existing.parent_id.clone()),
+    }
+}
+
+fn validate_location_reactivation_parent(
+    conn: &Connection,
+    location_id: &str,
+    parent_id: Option<&str>,
+) -> Result<(), LocationError> {
+    if let Some(pid) = parent_id {
+        let parent_active: Option<bool> = conn
+            .query_row(
+                "SELECT is_active = 1 FROM locations WHERE id = ?1",
+                [pid],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| LocationError::Database(e.to_string()))?;
+
+        if let Some(false) = parent_active {
+            return Err(LocationError::InactiveParent(format!(
+                "Cannot reactivate location '{location_id}': its parent location '{pid}' is inactive"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_location_lifecycle_transition(
+    conn: &Connection,
+    existing: &Location,
+    new_active: bool,
+    parent_id: Option<&str>,
+    parent_revalidated: bool,
+) -> Result<(), LocationError> {
+    if !new_active && existing.is_active {
+        validate_can_deactivate_location(conn, &existing.id)?;
+    } else if new_active && !existing.is_active && !parent_revalidated {
+        validate_location_reactivation_parent(conn, &existing.id, parent_id)?;
+    }
+    Ok(())
 }
 
 /// Updates an existing location. Explicitly updates `updated_at = datetime('now')`.
@@ -463,52 +546,20 @@ pub fn update_location(
         None => existing.code,
     };
 
-    let location_type = match input.location_type {
-        Some(Some(ref lt)) if !lt.trim().is_empty() => {
-            let lt_trimmed = lt.trim();
-            validate_and_trim_str(lt_trimmed, "location_type")?;
-            Some(lt_trimmed.to_string())
-        }
-        Some(Some(_)) | Some(None) => None,
-        None => existing.location_type,
-    };
+    let location_type = resolve_update_location_type(input.location_type, existing.location_type)?;
 
-    let parent_id = match input.parent_id {
-        Some(Some(ref pid)) if !pid.trim().is_empty() => {
-            let pid_trimmed = pid.trim();
-            validate_parent_hierarchy(conn, &existing.branch_id, Some(&existing.id), pid_trimmed)?;
-            Some(pid_trimmed.to_string())
-        }
-        Some(Some(_)) | Some(None) => None, // Explicitly unsetting parent -> root
-        None => existing.parent_id,
-    };
+    let parent_revalidated = input.parent_id.is_some();
+    let parent_id = resolve_update_parent_id(conn, &existing, input.parent_id)?;
 
     let is_active = match input.is_active {
         Some(active) => {
-            if !active && existing.is_active {
-                validate_can_deactivate_location(conn, &existing.id)?;
-            } else if active && !existing.is_active {
-                // If reactivating and parent was not re-validated above, ensure parent is active
-                if input.parent_id.is_none() {
-                    if let Some(ref pid) = parent_id {
-                        let parent_active: Option<bool> = conn
-                            .query_row(
-                                "SELECT is_active FROM locations WHERE id = ?1",
-                                [pid],
-                                |row| Ok(row.get::<_, i64>(0)? == 1),
-                            )
-                            .optional()
-                            .map_err(|e| LocationError::Database(e.to_string()))?;
-
-                        if let Some(false) = parent_active {
-                            return Err(LocationError::InactiveParent(format!(
-                                "Cannot reactivate location '{}': its parent location '{pid}' is inactive",
-                                existing.id
-                            )));
-                        }
-                    }
-                }
-            }
+            validate_location_lifecycle_transition(
+                conn,
+                &existing,
+                active,
+                parent_id.as_deref(),
+                parent_revalidated,
+            )?;
             active
         }
         None => existing.is_active,
@@ -552,22 +603,7 @@ pub fn reactivate_location(conn: &Connection, id: &str) -> Result<Location, Loca
     let existing = get_location(conn, id)?
         .ok_or_else(|| LocationError::NotFound(format!("Location '{id}' not found")))?;
 
-    if let Some(ref pid) = existing.parent_id {
-        let parent_active: Option<bool> = conn
-            .query_row(
-                "SELECT is_active = 1 FROM locations WHERE id = ?1",
-                [pid],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| LocationError::Database(e.to_string()))?;
-
-        if let Some(false) = parent_active {
-            return Err(LocationError::InactiveParent(format!(
-                "Cannot reactivate location '{id}': its parent location '{pid}' is inactive"
-            )));
-        }
-    }
+    validate_location_reactivation_parent(conn, id, existing.parent_id.as_deref())?;
 
     update_location(
         conn,
@@ -770,7 +806,7 @@ pub fn list_bins(conn: &Connection, filter: &BinFilter) -> Result<Vec<Bin>, Loca
 
     sql.push_str(" ORDER BY b.code COLLATE NOCASE ASC");
 
-    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|e| LocationError::Database(e.to_string()))?;
