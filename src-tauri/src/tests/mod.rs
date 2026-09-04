@@ -16,6 +16,8 @@ mod brand_tests;
 mod category_tests;
 #[path = "cloud_schema_tests.rs"]
 mod cloud_schema_tests;
+#[path = "location_tests.rs"]
+mod location_tests;
 #[path = "manufacturer_tests.rs"]
 mod manufacturer_tests;
 

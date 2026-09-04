@@ -9,6 +9,7 @@ pub mod brand;
 pub mod category;
 pub mod inventory;
 pub mod licence;
+pub mod location;
 pub mod manufacturer;
 pub mod organization;
 pub mod product;
