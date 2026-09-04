@@ -3,9 +3,19 @@
 // ADR-0012: Discrete Two-Entity Model, Permission::SettingsManage, Same-Branch Invariant, Cycle Prevention.
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 pub const MAX_DEFENSIVE_STEPS: usize = 50;
+
+/// Custom deserializer to distinguish between omitted (`None`), explicit JSON null (`Some(None)`),
+/// and explicit value (`Some(Some(T))`).
+fn deserialize_optional_field<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
+}
 
 // =========================================================================
 // ERROR TYPES
@@ -123,8 +133,11 @@ pub struct UpdateLocationInput {
     pub id: String,
     pub name: Option<String>,
     pub code: Option<String>,
-    /// `None` leaves parent untouched. `Some(None)` unsets parent (becomes root). `Some(Some(id))` sets new parent.
+    /// Tri-state: `None` (omitted) leaves parent untouched. `Some(None)` (explicit null or empty) unsets parent (becomes root). `Some(Some(id))` sets new parent.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub parent_id: Option<Option<String>>,
+    /// Tri-state: `None` (omitted) leaves type untouched. `Some(None)` (explicit null) clears type. `Some(Some(type))` sets new type.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub location_type: Option<Option<String>>,
     pub is_active: Option<bool>,
 }
@@ -451,7 +464,12 @@ pub fn update_location(
     };
 
     let location_type = match input.location_type {
-        Some(opt) => normalize_optional_str(opt.as_deref()),
+        Some(Some(ref lt)) if !lt.trim().is_empty() => {
+            let lt_trimmed = lt.trim();
+            validate_and_trim_str(lt_trimmed, "location_type")?;
+            Some(lt_trimmed.to_string())
+        }
+        Some(Some(_)) | Some(None) => None,
         None => existing.location_type,
     };
 
@@ -469,6 +487,27 @@ pub fn update_location(
         Some(active) => {
             if !active && existing.is_active {
                 validate_can_deactivate_location(conn, &existing.id)?;
+            } else if active && !existing.is_active {
+                // If reactivating and parent was not re-validated above, ensure parent is active
+                if input.parent_id.is_none() {
+                    if let Some(ref pid) = parent_id {
+                        let parent_active: Option<bool> = conn
+                            .query_row(
+                                "SELECT is_active FROM locations WHERE id = ?1",
+                                [pid],
+                                |row| Ok(row.get::<_, i64>(0)? == 1),
+                            )
+                            .optional()
+                            .map_err(|e| LocationError::Database(e.to_string()))?;
+
+                        if let Some(false) = parent_active {
+                            return Err(LocationError::InactiveParent(format!(
+                                "Cannot reactivate location '{}': its parent location '{pid}' is inactive",
+                                existing.id
+                            )));
+                        }
+                    }
+                }
             }
             active
         }

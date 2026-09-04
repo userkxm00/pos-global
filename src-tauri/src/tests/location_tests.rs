@@ -721,9 +721,25 @@ fn test_ipc_commands_settings_manage_authorization() {
     .unwrap_err();
     assert!(cross_err.contains("Scope mismatch"));
 
-    // 5. Anti-existence leakage: accessing cross-branch location returns not found / inaccessible
-    let leak_err = get_location_impl(&conn, &other_branch_admin, &loc_mgr.id).unwrap_err();
-    assert!(leak_err.contains("not found or inaccessible"));
+    // 5. Anti-existence leakage: accessing cross-branch location returns Ok(None) (indistinguishable from not found)
+    let leak_res = get_location_impl(&conn, &other_branch_admin, &loc_mgr.id).unwrap();
+    assert!(leak_res.is_none());
+
+    // 6. Mutation permission-first check: unauthorized user without SettingsManage is rejected before DB lookup
+    let cashier_probe_err = update_location_impl(
+        &conn,
+        &cashier_a,
+        UpdateLocationInput {
+            id: "non-existent-probe-id".to_string(),
+            name: Some("Probe".to_string()),
+            code: None,
+            parent_id: None,
+            location_type: None,
+            is_active: None,
+        },
+    )
+    .unwrap_err();
+    assert!(cashier_probe_err.contains("Permission denied"));
 }
 
 #[test]
@@ -739,7 +755,7 @@ fn test_ipc_bin_authorization_and_anti_existence_leakage() {
     let loc_a = create_location(
         &conn,
         CreateLocationInput {
-            branch_id: branch_a,
+            branch_id: branch_a.clone(),
             parent_id: None,
             name: "Storage Zone".to_string(),
             code: "SZ-01".to_string(),
@@ -773,7 +789,113 @@ fn test_ipc_bin_authorization_and_anti_existence_leakage() {
     )
     .expect("bin created by manager");
 
-    // Admin B attempting to read bin in Branch A gets anti-leakage error
-    let leak_bin_err = get_bin_impl(&conn, &admin_b, &bin_a.id).unwrap_err();
-    assert!(leak_bin_err.contains("not found or inaccessible"));
+    // Admin B attempting to read bin in Branch A gets Ok(None) (airtight anti-leakage)
+    let leak_bin_res = get_bin_impl(&conn, &admin_b, &bin_a.id).unwrap();
+    assert!(leak_bin_res.is_none());
+
+    // Empty filter on list_bins_impl fails closed
+    let empty_filter_err = list_bins_impl(&conn, &manager_a, BinFilter::default()).unwrap_err();
+    assert!(empty_filter_err.contains("A branch_id or location_id filter is required"));
+
+    // Correctly scoped filter returns bins
+    let scoped_bins = list_bins_impl(
+        &conn,
+        &manager_a,
+        BinFilter {
+            location_id: Some(loc_a.id.clone()),
+            branch_id: None,
+            is_active: None,
+            query: None,
+        },
+    )
+    .expect("scoped bin list succeeds");
+    assert_eq!(scoped_bins.len(), 1);
+    assert_eq!(scoped_bins[0].id, bin_a.id);
+}
+
+#[test]
+fn test_update_location_reactivation_fails_when_parent_is_inactive() {
+    let conn = setup_test_db();
+    let (_org_id, branch_id) = create_test_org_and_branch(&conn);
+
+    let parent = create_location(
+        &conn,
+        CreateLocationInput {
+            branch_id: branch_id.clone(),
+            parent_id: None,
+            name: "Parent Zone".to_string(),
+            code: "P-ZONE-ACT".to_string(),
+            location_type: None,
+        },
+    )
+    .expect("parent created");
+
+    let child = create_location(
+        &conn,
+        CreateLocationInput {
+            branch_id: branch_id.clone(),
+            parent_id: Some(parent.id.clone()),
+            name: "Child Aisle".to_string(),
+            code: "C-AISLE-ACT".to_string(),
+            location_type: None,
+        },
+    )
+    .expect("child created");
+
+    // Deactivate child first, then deactivate parent
+    deactivate_location(&conn, &child.id).expect("child deactivated");
+    deactivate_location(&conn, &parent.id).expect("parent deactivated");
+
+    // Attempting to reactivate child via generic update_location while parent is inactive must fail with InactiveParent
+    let err = update_location(
+        &conn,
+        UpdateLocationInput {
+            id: child.id.clone(),
+            name: None,
+            code: None,
+            parent_id: None,
+            location_type: None,
+            is_active: Some(true),
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, LocationError::InactiveParent(_)));
+
+    // Reactivating parent first allows child reactivation
+    reactivate_location(&conn, &parent.id).expect("parent reactivated");
+    let reactivated_child = update_location(
+        &conn,
+        UpdateLocationInput {
+            id: child.id.clone(),
+            name: None,
+            code: None,
+            parent_id: None,
+            location_type: None,
+            is_active: Some(true),
+        },
+    )
+    .expect("child reactivated via update_location");
+    assert!(reactivated_child.is_active);
+}
+
+#[test]
+fn test_update_location_input_tri_state_serde_deserialization() {
+    // 1. Omitted fields -> None (preserve existing)
+    let json_omitted = r#"{"id": "loc_1"}"#;
+    let input_omitted: UpdateLocationInput = serde_json::from_str(json_omitted).unwrap();
+    assert_eq!(input_omitted.parent_id, None);
+    assert_eq!(input_omitted.location_type, None);
+
+    // 2. Explicit null -> Some(None) (clear field to NULL)
+    let json_null = r#"{"id": "loc_1", "parent_id": null, "location_type": null}"#;
+    let input_null: UpdateLocationInput = serde_json::from_str(json_null).unwrap();
+    assert_eq!(input_null.parent_id, Some(None));
+    assert_eq!(input_null.location_type, Some(None));
+
+    // 3. Explicit value -> Some(Some(val)) (set new value)
+    let json_val = r#"{"id": "loc_1", "parent_id": "loc_parent", "location_type": "zone"}"#;
+    let input_val: UpdateLocationInput = serde_json::from_str(json_val).unwrap();
+    assert_eq!(input_val.parent_id, Some(Some("loc_parent".to_string())));
+    assert_eq!(input_val.location_type, Some(Some("zone".to_string())));
 }

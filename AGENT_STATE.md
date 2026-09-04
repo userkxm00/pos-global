@@ -73,6 +73,11 @@
 
 ## Handoff
 
-F2.09 (Warranty) is fully completed and merged into main (`05b9fed42fa1a30d97a7f1f6c08d19f1a515d917`).
-All PR review findings remediated, CI validated (11/11 checks green), and worktree synchronized.
-Next milestone: F2.10 (Locations / Bins) - NOT STARTED. Awaiting user authorization.
+F2.10 (Locations / Bins) is in progress on branch `feature/f2-10-locations-bins`. PR #78 opened.
+Remediated review findings:
+- Enforced branch scope requirement on `list_bins_impl` to prevent unscoped cross-branch bin enumeration.
+- Enforced airtight anti-existence leakage on `get_location_impl` and `get_bin_impl` returning `Ok(None)`.
+- Enforced permission-first check on all location/bin mutation commands prior to DB queries.
+- Added tri-state serde deserialization for `parent_id` and `location_type` in `UpdateLocationInput`.
+- Enforced active parent validation when generic `update_location` reactivates a child location.
+Awaiting validation, push, and PR CI/review gates reconciliation.

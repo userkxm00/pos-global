@@ -1,7 +1,9 @@
 // F2.10 — Location and Bin IPC Command Handlers
 // ADR-0012: Scoped authorization via Permission::SettingsManage, branch isolation, and fail-closed security.
 
-use crate::auth::middleware::{require_scoped_permission, require_session, AuthorizeRequest};
+use crate::auth::middleware::{
+    require_permission, require_scoped_permission, require_session, AuthorizeRequest,
+};
 use crate::db::DbState;
 use crate::location::{
     get_bin_branch_id, Bin, BinFilter, CreateBinInput, CreateLocationInput, Location,
@@ -44,10 +46,13 @@ pub fn get_location_impl(
     let location = crate::location::get_location(conn, id).map_err(|e| e.to_string())?;
 
     if let Some(ref loc) = location {
-        AuthorizeRequest::new(session_id)
+        if AuthorizeRequest::new(session_id)
             .with_branch_scope(&loc.branch_id)
             .execute(conn)
-            .map_err(|_| format!("Location '{id}' not found or inaccessible for this session"))?;
+            .is_err()
+        {
+            return Ok(None);
+        }
     }
 
     Ok(location)
@@ -73,6 +78,8 @@ pub fn update_location_impl(
     session_id: &str,
     request: UpdateLocationInput,
 ) -> Result<Location, String> {
+    require_permission(conn, session_id, Permission::SettingsManage).map_err(|e| e.to_string())?;
+
     let existing = crate::location::get_location(conn, &request.id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Location '{}' not found", request.id))?;
@@ -95,6 +102,8 @@ pub fn deactivate_location_impl(
     session_id: &str,
     id: &str,
 ) -> Result<Location, String> {
+    require_permission(conn, session_id, Permission::SettingsManage).map_err(|e| e.to_string())?;
+
     let existing = crate::location::get_location(conn, id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Location '{id}' not found"))?;
@@ -117,6 +126,8 @@ pub fn reactivate_location_impl(
     session_id: &str,
     id: &str,
 ) -> Result<Location, String> {
+    require_permission(conn, session_id, Permission::SettingsManage).map_err(|e| e.to_string())?;
+
     let existing = crate::location::get_location(conn, id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Location '{id}' not found"))?;
@@ -159,6 +170,8 @@ pub fn create_bin_impl(
     session_id: &str,
     request: CreateBinInput,
 ) -> Result<Bin, String> {
+    require_permission(conn, session_id, Permission::SettingsManage).map_err(|e| e.to_string())?;
+
     let parent_loc = crate::location::get_location(conn, &request.location_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Location '{}' not found", request.location_id))?;
@@ -182,14 +195,18 @@ pub fn get_bin_impl(conn: &Connection, session_id: &str, id: &str) -> Result<Opt
     let bin = crate::location::get_bin(conn, id).map_err(|e| e.to_string())?;
 
     if bin.is_some() {
-        let branch_id = get_bin_branch_id(conn, id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("Bin '{id}' not found or inaccessible for this session"))?;
+        let branch_id = match get_bin_branch_id(conn, id).map_err(|e| e.to_string())? {
+            Some(b) => b,
+            None => return Ok(None),
+        };
 
-        AuthorizeRequest::new(session_id)
+        if AuthorizeRequest::new(session_id)
             .with_branch_scope(&branch_id)
             .execute(conn)
-            .map_err(|_| format!("Bin '{id}' not found or inaccessible for this session"))?;
+            .is_err()
+        {
+            return Ok(None);
+        }
     }
 
     Ok(bin)
@@ -203,12 +220,7 @@ pub fn list_bins_impl(
 ) -> Result<Vec<Bin>, String> {
     require_session(conn, session_id).map_err(|e| e.to_string())?;
 
-    if let Some(ref branch_id) = filter.branch_id {
-        AuthorizeRequest::new(session_id)
-            .with_branch_scope(branch_id)
-            .execute(conn)
-            .map_err(|e| e.to_string())?;
-    } else if let Some(ref loc_id) = filter.location_id {
+    if let Some(ref loc_id) = filter.location_id {
         let parent = crate::location::get_location(conn, loc_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| {
@@ -221,6 +233,22 @@ pub fn list_bins_impl(
             .map_err(|_| {
                 format!("Location '{loc_id}' not found or inaccessible for this session")
             })?;
+
+        if let Some(ref branch_id) = filter.branch_id {
+            if branch_id != &parent.branch_id {
+                return Err(format!(
+                    "Filter branch_id '{branch_id}' does not match location branch_id '{}'",
+                    parent.branch_id
+                ));
+            }
+        }
+    } else if let Some(ref branch_id) = filter.branch_id {
+        AuthorizeRequest::new(session_id)
+            .with_branch_scope(branch_id)
+            .execute(conn)
+            .map_err(|e| e.to_string())?;
+    } else {
+        return Err("A branch_id or location_id filter is required".to_string());
     }
 
     crate::location::list_bins(conn, &filter).map_err(|e| e.to_string())
@@ -232,6 +260,8 @@ pub fn update_bin_impl(
     session_id: &str,
     request: UpdateBinInput,
 ) -> Result<Bin, String> {
+    require_permission(conn, session_id, Permission::SettingsManage).map_err(|e| e.to_string())?;
+
     let branch_id = get_bin_branch_id(conn, &request.id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Bin '{}' not found", request.id))?;
@@ -250,6 +280,8 @@ pub fn update_bin_impl(
 
 /// Deactivates a bin with SettingsManage scoped permission check.
 pub fn deactivate_bin_impl(conn: &Connection, session_id: &str, id: &str) -> Result<Bin, String> {
+    require_permission(conn, session_id, Permission::SettingsManage).map_err(|e| e.to_string())?;
+
     let branch_id = get_bin_branch_id(conn, id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Bin '{id}' not found"))?;
@@ -268,6 +300,8 @@ pub fn deactivate_bin_impl(conn: &Connection, session_id: &str, id: &str) -> Res
 
 /// Reactivates an inactive bin with SettingsManage scoped permission check.
 pub fn reactivate_bin_impl(conn: &Connection, session_id: &str, id: &str) -> Result<Bin, String> {
+    require_permission(conn, session_id, Permission::SettingsManage).map_err(|e| e.to_string())?;
+
     let branch_id = get_bin_branch_id(conn, id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Bin '{id}' not found"))?;

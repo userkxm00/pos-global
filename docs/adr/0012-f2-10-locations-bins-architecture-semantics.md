@@ -1,7 +1,7 @@
 # ADR-0012 — F2.10 Locations / Bins Architecture & Semantics
 
-Status: Accepted — User Approved  
-Date: 2026-09-04  
+Status: Accepted — User Approved
+Date: 2026-09-04
 
 ---
 
