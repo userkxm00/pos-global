@@ -268,7 +268,8 @@ fn validate_request_basic(req: &PostMovementRequest) -> Result<(), StockLedgerEr
         MovementReason::OpeningBalance => {
             if req.quantity_delta_milli <= 0 {
                 return Err(StockLedgerError::Validation(
-                    "opening_balance movement requires strictly positive quantity_delta_milli".into(),
+                    "opening_balance movement requires strictly positive quantity_delta_milli"
+                        .into(),
                 ));
             }
         }
@@ -295,7 +296,8 @@ fn validate_request_basic(req: &PostMovementRequest) -> Result<(), StockLedgerEr
 
     if req.serial_id.is_some() && req.quantity_delta_milli.abs() != 1000 {
         return Err(StockLedgerError::SerialInvalidQuantity(
-            "Serialized stock movements must have quantity_delta_milli equal to +1000 or -1000".into(),
+            "Serialized stock movements must have quantity_delta_milli equal to +1000 or -1000"
+                .into(),
         ));
     }
 
@@ -318,8 +320,9 @@ fn check_idempotency(
     if let Some((result_json, stored_hash)) = existing {
         if stored_hash.as_deref() == Some(canonical_hash) {
             if let Some(json_str) = result_json {
-                let cached: StockMovementResult = serde_json::from_str(&json_str)
-                    .map_err(|e| StockLedgerError::Database(format!("Corrupted cached result JSON: {e}")))?;
+                let cached: StockMovementResult = serde_json::from_str(&json_str).map_err(|e| {
+                    StockLedgerError::Database(format!("Corrupted cached result JSON: {e}"))
+                })?;
                 return Ok(Some(cached));
             }
         } else {
@@ -346,8 +349,16 @@ fn validate_branch_and_location(
         .optional()?;
 
     match branch_active {
-        None => return Err(StockLedgerError::Validation(format!("Branch '{branch_id}' not found"))),
-        Some(0) => return Err(StockLedgerError::Validation(format!("Branch '{branch_id}' is inactive"))),
+        None => {
+            return Err(StockLedgerError::Validation(format!(
+                "Branch '{branch_id}' not found"
+            )))
+        }
+        Some(0) => {
+            return Err(StockLedgerError::Validation(format!(
+                "Branch '{branch_id}' is inactive"
+            )))
+        }
         Some(_) => {}
     }
 
@@ -360,14 +371,20 @@ fn validate_branch_and_location(
         .optional()?;
 
     match loc_info {
-        None => return Err(StockLedgerError::LocationNotFound(format!("Location '{location_id}' not found"))),
+        None => {
+            return Err(StockLedgerError::LocationNotFound(format!(
+                "Location '{location_id}' not found"
+            )))
+        }
         Some((loc_branch, _)) if loc_branch != branch_id => {
             return Err(StockLedgerError::LocationBranchMismatch(format!(
                 "Location '{location_id}' belongs to branch '{loc_branch}', not '{branch_id}'"
             )))
         }
         Some((_, 0)) => {
-            return Err(StockLedgerError::LocationInactive(format!("Location '{location_id}' is inactive")))
+            return Err(StockLedgerError::LocationInactive(format!(
+                "Location '{location_id}' is inactive"
+            )))
         }
         Some(_) => {}
     }
@@ -382,14 +399,20 @@ fn validate_branch_and_location(
             .optional()?;
 
         match bin_info {
-            None => return Err(StockLedgerError::BinNotFound(format!("Bin '{bin}' not found"))),
+            None => {
+                return Err(StockLedgerError::BinNotFound(format!(
+                    "Bin '{bin}' not found"
+                )))
+            }
             Some((bin_loc, _)) if bin_loc != location_id => {
                 return Err(StockLedgerError::BinLocationMismatch(format!(
                     "Bin '{bin}' belongs to location '{bin_loc}', not '{location_id}'"
                 )))
             }
             Some((_, 0)) => {
-                return Err(StockLedgerError::BinInactive(format!("Bin '{bin}' is inactive")))
+                return Err(StockLedgerError::BinInactive(format!(
+                    "Bin '{bin}' is inactive"
+                )))
             }
             Some(_) => {}
         }
@@ -412,8 +435,16 @@ fn validate_product_and_variant(
         .optional()?;
 
     match prod_active {
-        None => return Err(StockLedgerError::ProductNotFound(format!("Product '{product_id}' not found"))),
-        Some(0) => return Err(StockLedgerError::Validation(format!("Product '{product_id}' is inactive"))),
+        None => {
+            return Err(StockLedgerError::ProductNotFound(format!(
+                "Product '{product_id}' not found"
+            )))
+        }
+        Some(0) => {
+            return Err(StockLedgerError::Validation(format!(
+                "Product '{product_id}' is inactive"
+            )))
+        }
         Some(_) => {}
     }
 
@@ -427,7 +458,11 @@ fn validate_product_and_variant(
             .optional()?;
 
         match var_prod_id {
-            None => return Err(StockLedgerError::VariantMismatch(format!("Variant '{var_id}' not found"))),
+            None => {
+                return Err(StockLedgerError::VariantMismatch(format!(
+                    "Variant '{var_id}' not found"
+                )))
+            }
             Some(var_prod) if var_prod != product_id => {
                 return Err(StockLedgerError::VariantMismatch(format!(
                     "Variant '{var_id}' belongs to product '{var_prod}', not '{product_id}'"
@@ -460,7 +495,9 @@ fn validate_batch_lot(
         .optional()?;
 
     match batch_info {
-        None => Err(StockLedgerError::BatchMismatch(format!("Batch '{b_id}' not found"))),
+        None => Err(StockLedgerError::BatchMismatch(format!(
+            "Batch '{b_id}' not found"
+        ))),
         Some((batch_prod, batch_branch, status, qty_milli)) => {
             if batch_prod != product_id {
                 return Err(StockLedgerError::BatchMismatch(format!(
@@ -508,7 +545,9 @@ fn validate_serial_asset(
         .optional()?;
 
     match serial_info {
-        None => Err(StockLedgerError::SerialMismatch(format!("Serial '{s_id}' not found"))),
+        None => Err(StockLedgerError::SerialMismatch(format!(
+            "Serial '{s_id}' not found"
+        ))),
         Some((serial_prod, serial_branch, status, s_loc)) => {
             if serial_prod != product_id {
                 return Err(StockLedgerError::SerialMismatch(format!(
@@ -566,9 +605,9 @@ fn mutate_aggregate_inventory(
         None => (None, 0),
     };
 
-    let agg_after = agg_before
-        .checked_add(delta)
-        .ok_or_else(|| StockLedgerError::Validation("Arithmetic overflow calculating aggregate stock".into()))?;
+    let agg_after = agg_before.checked_add(delta).ok_or_else(|| {
+        StockLedgerError::Validation("Arithmetic overflow calculating aggregate stock".into())
+    })?;
 
     if agg_after < 0 {
         return Err(StockLedgerError::NegativeStockBlocked(format!(
@@ -608,7 +647,14 @@ fn mutate_spatial_inventory(
             "SELECT id, quantity_milli FROM location_inventory
              WHERE branch_id = ?1 AND location_id = ?2 AND bin_id IS ?3
                AND product_id = ?4 AND variant_id IS ?5 AND batch_id IS ?6",
-            params![branch_id, location_id, bin_id, product_id, variant_id, batch_id],
+            params![
+                branch_id,
+                location_id,
+                bin_id,
+                product_id,
+                variant_id,
+                batch_id
+            ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
@@ -618,9 +664,9 @@ fn mutate_spatial_inventory(
         None => (None, 0),
     };
 
-    let slot_after = slot_before
-        .checked_add(delta)
-        .ok_or_else(|| StockLedgerError::Validation("Arithmetic overflow calculating slot stock".into()))?;
+    let slot_after = slot_before.checked_add(delta).ok_or_else(|| {
+        StockLedgerError::Validation("Arithmetic overflow calculating slot stock".into())
+    })?;
 
     if slot_after < 0 {
         return Err(StockLedgerError::NegativeStockBlocked(format!(
@@ -709,11 +755,31 @@ fn append_movement_record(
 ) -> Result<(String, String), StockLedgerError> {
     let movement_id = Uuid::new_v4().to_string();
     let reason_str = req.reason.as_str();
-    let user_id = req.user_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let bin_id = req.bin_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let var_id = req.variant_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let batch_id = req.batch_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let serial_id = req.serial_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let user_id = req
+        .user_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let bin_id = req
+        .bin_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let var_id = req
+        .variant_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let batch_id = req
+        .batch_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let serial_id = req
+        .serial_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
     conn.execute(
         "INSERT INTO stock_movements (
@@ -807,22 +873,73 @@ impl StockLedgerService {
         let branch_id = req.branch_id.trim();
         let product_id = req.product_id.trim();
         let location_id = req.location_id.trim();
-        let variant_id = req.variant_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        let bin_id = req.bin_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        let batch_id = req.batch_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        let serial_id = req.serial_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let variant_id = req
+            .variant_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let bin_id = req
+            .bin_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let batch_id = req
+            .batch_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let serial_id = req
+            .serial_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
 
         // 4. Validate relational references
         validate_branch_and_location(&tx, branch_id, location_id, bin_id)?;
         validate_product_and_variant(&tx, product_id, variant_id)?;
-        let current_batch_qty = validate_batch_lot(&tx, batch_id, product_id, branch_id, req.quantity_delta_milli)?;
-        validate_serial_asset(&tx, serial_id, product_id, branch_id, location_id, req.quantity_delta_milli)?;
+        let current_batch_qty = validate_batch_lot(
+            &tx,
+            batch_id,
+            product_id,
+            branch_id,
+            req.quantity_delta_milli,
+        )?;
+        validate_serial_asset(
+            &tx,
+            serial_id,
+            product_id,
+            branch_id,
+            location_id,
+            req.quantity_delta_milli,
+        )?;
 
         // 5. Mutate balances atomically
-        let (agg_before, agg_after) = mutate_aggregate_inventory(&tx, branch_id, product_id, variant_id, req.quantity_delta_milli)?;
-        let (slot_before, slot_after) = mutate_spatial_inventory(&tx, branch_id, location_id, bin_id, product_id, variant_id, batch_id, req.quantity_delta_milli)?;
+        let (agg_before, agg_after) = mutate_aggregate_inventory(
+            &tx,
+            branch_id,
+            product_id,
+            variant_id,
+            req.quantity_delta_milli,
+        )?;
+        let (slot_before, slot_after) = mutate_spatial_inventory(
+            &tx,
+            branch_id,
+            location_id,
+            bin_id,
+            product_id,
+            variant_id,
+            batch_id,
+            req.quantity_delta_milli,
+        )?;
         mutate_batch_inventory(&tx, batch_id, current_batch_qty, req.quantity_delta_milli)?;
-        mutate_serial_inventory(&tx, serial_id, location_id, bin_id, req.quantity_delta_milli, req.reason)?;
+        mutate_serial_inventory(
+            &tx,
+            serial_id,
+            location_id,
+            bin_id,
+            req.quantity_delta_milli,
+            req.reason,
+        )?;
 
         // 6. Append immutable stock movement
         let (movement_id, created_at) = append_movement_record(&tx, req, agg_before, agg_after)?;
@@ -960,7 +1077,14 @@ impl StockLedgerService {
                 "SELECT quantity_milli FROM location_inventory
                  WHERE branch_id = ?1 AND location_id = ?2 AND bin_id IS ?3
                    AND product_id = ?4 AND variant_id IS ?5 AND batch_id IS ?6",
-                params![branch_id, location_id, bin_id, product_id, variant_id, batch_id],
+                params![
+                    branch_id,
+                    location_id,
+                    bin_id,
+                    product_id,
+                    variant_id,
+                    batch_id
+                ],
                 |row| row.get(0),
             )
             .optional()?

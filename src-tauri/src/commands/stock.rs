@@ -97,7 +97,13 @@ pub fn get_stock_summary(
     variant_id: Option<String>,
 ) -> Result<StockSummaryRecord, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    get_stock_summary_impl(&conn, &session_id, &branch_id, &product_id, variant_id.as_deref())
+    get_stock_summary_impl(
+        &conn,
+        &session_id,
+        &branch_id,
+        &product_id,
+        variant_id.as_deref(),
+    )
 }
 
 pub fn get_product_spatial_balances_impl(
@@ -137,8 +143,7 @@ pub fn get_batch_summary_impl(
         .execute(conn)
         .map_err(|e| e.to_string())?;
 
-    StockLedgerService::get_batch_summary(conn, branch_id, batch_id)
-        .map_err(|e| e.to_string())
+    StockLedgerService::get_batch_summary(conn, branch_id, batch_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
