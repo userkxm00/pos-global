@@ -199,7 +199,15 @@ A new F2.11 opening balance adds equal quantity to aggregate and spatial state s
      - `location_inventory.quantity_milli += 1000`
      - `stock_movements(serial_id = S, location_id = LOC, bin_id = BIN, delta_milli = 1000)`
    - No operation outside `StockLedgerService` may introduce or mutate a serial into `in_stock` with unallocated (`NULL`) or unverified location coordinates, guaranteeing that every `in_stock` serialized unit is backed by physical location inventory and immutable movement history.
-   - While pre-020 legacy serials retain their historical NULL location coordinates until reconciled in future milestones, all post-020 serials transitioning to `in_stock` must strictly possess valid location coordinates via `StockLedgerService`. Direct transitions to `in_stock` via `update_serial_status` are prohibited.
+   - Direct status updates via `update_serial_status` are prohibited from both entering `in_stock` and directly exiting `in_stock`. Outbound stock-affecting operations must execute through their owning stock workflows.
+   - Pre-020 legacy serials retain their historical NULL location coordinates until reconciled in future milestones.
+
+4. **Serial Deduction & Adjustment Reversibility Semantics:**
+   - When a serialized unit is deducted from stock ($\Delta_{\text{milli}} = -1000$):
+     - `MovementReason::Damage`: Maps serial to `defective` and clears coordinates (`location_id = NULL, bin_id = NULL`).
+     - `MovementReason::Loss`: Maps serial to `disposed` and clears coordinates (`location_id = NULL, bin_id = NULL`). Status `disposed` is a permanent terminal state; it cannot be revivified.
+     - `MovementReason::Adjustment`: Maps serial to `reserved` and clears coordinates (`location_id = NULL, bin_id = NULL`). Here, `reserved` serves as the canonical reversible non-stock holding state.
+   - A subsequent positive adjustment (`MovementReason::Adjustment` with $\Delta_{\text{milli}} = +1000$) specifying valid `location_id` and optional `bin_id` successfully revives a `reserved` serial back to `in_stock`, reinstating physical coordinates and incrementing spatial and aggregate balances with a new immutable movement record.
 
 ---
 
@@ -268,14 +276,16 @@ $$\text{request\_hash} = \text{SHA-256}(\text{branch\_id} \mid \text{product\_id
 
 The append-only ledger `stock_movements` provides four distinct audit streams, strictly preserving the boundary between legacy pre-020 baselines and post-020 spatial tracking:
 
-1. **Attributed Spatial History (100% Reconstructable from Movements):**
-   Because `location_inventory` is instantiated empty in Migration 020 and mutated solely through `StockLedgerService`, all spatial slot balances are strictly reconstructable from spatial movement rows:
-   $$\text{location\_inventory.quantity\_milli}(L, B) = \sum_{\substack{\text{location\_id} = L \\ \text{bin\_id} = B}} \text{quantity\_delta\_milli}$$
+1. **Attributed Spatial History (100% Reconstructable from Post-020 Movements):**
+   Because `location_inventory` is instantiated empty in Migration 020 and mutated solely through `StockLedgerService`, all spatial slot balances are strictly reconstructable across the full `location_inventory` grain using null-safe equality:
+   $$\text{location\_inventory.quantity\_milli}(br, loc, bin, prod, var, bat) = \sum_{\substack{\text{branch\_id} = br \\ \text{location\_id} = loc \\ \text{bin\_id IS } bin \\ \text{product\_id} = prod \\ \text{variant\_id IS } var \\ \text{batch\_id IS } bat}} \text{quantity\_delta\_milli}$$
+   This grain strictly isolates branches, locations, bins, products, variants, and batches, ensuring distinct entity grains are never aggregated into the same spatial total.
 
-2. **Aggregate Branch History:**
-   Reflects the pre-020 legacy unallocated baseline plus all recorded movement deltas for that branch and product:
-   $$\text{inventory.quantity\_milli} = \text{legacy\_unallocated\_baseline} + \sum_{\text{movements}} \text{quantity\_delta\_milli}$$
-   (For products initialized post-020 via `opening_balance`, `legacy_unallocated_baseline = 0`, making aggregate inventory fully derived from movements).
+2. **Aggregate Branch History (Pre-020 Cutoff Separation):**
+   Reflects the pre-020 legacy unallocated baseline snapshot at Migration 020 cutoff timestamp $T_{\text{cutoff}}$ plus all post-020 recorded movement deltas for that branch, product, and variant:
+   $$\text{inventory.quantity\_milli}(br, prod, var) = \text{legacy\_unallocated\_baseline}(br, prod, var) + \sum_{\substack{\text{branch\_id} = br \\ \text{product\_id} = prod \\ \text{variant\_id IS } var \\ \text{created\_at} \ge T_{\text{cutoff}}}} \text{quantity\_delta\_milli}$$
+   Pre-020 movement history contributes exclusively to the initial snapshot `legacy_unallocated_baseline`. Post-020 movement history contributes strictly via movement deltas occurring after the cutoff. This prevents double-counting pre-020 movements on top of the legacy baseline.
+   (For products initialized post-020 via `opening_balance`, `legacy_unallocated_baseline = 0`, making aggregate inventory fully derived from post-020 movements).
 
 3. **Legacy Unattributed History:**
    Historical movement rows with `location_id IS NULL` (including pre-convergence sales from `sales.rs`) remain permanently unattributed to physical locations. They document historical volume changes without retroactive spatial attribution.

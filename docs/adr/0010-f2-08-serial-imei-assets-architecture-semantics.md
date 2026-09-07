@@ -148,10 +148,16 @@ F2.08 adheres strictly to the quantity and ledger boundary established across Ph
    - F2.08 is the instance identity, validation, and lifecycle registry only.
 
 ### 5.1 Reconciliation with F2.11 Stock Ledger Boundary (Post-F2.11 Amendment)
-- **Instance Registration (`create_serial_instance`):** Instantiates an asset record in the `reserved` status with `location_id = NULL` and `bin_id = NULL`. In F2.08, this represents registered asset identity prior to stock-on-hand induction.
+- **Authority Boundary (F2.08 vs F2.11):**
+  - **F2.08:** Owns serialized identity, identifier uniqueness/Luhn validation, and non-stock lifecycle registration.
+  - **F2.11:** Owns stock ownership transitions, physical coordinates, and double-entry ledger attribution.
+- **Instance Registration (`create_serial_instance`):** Instantiates an asset record in the `reserved` status with `location_id = NULL` and `bin_id = NULL`. In F2.08, this represents registered asset identity prior to stock-on-hand induction. Serial registration alone does not and cannot create stock ownership, mutate inventory balances, or bypass spatial ledger attribution.
 - **Stock Ownership and On-Hand Intake (`StockLedgerService::post_movement`):** Transitioning a registered serialized unit to `in_stock` ownership on-hand requires posting an authenticated stock movement (reason: `opening_balance` or `adjustment` with $\Delta = +1000$ and mandatory `location_id`). F2.11 is the exclusive write authority that atomically assigns physical coordinates (`location_id`, `bin_id`), sets `status = 'in_stock'`, increments aggregate and spatial inventory balances, and records the immutable ledger entry.
-- **Direct Status Transition Prohibited:** `update_serial_status` strictly prohibits direct transitions to `in_stock`. Physical on-hand stock induction must execute through `StockLedgerService::post_movement` to guarantee that all `in_stock` instances are backed by location attribution and ledger entries.
-- **Firewall Preserved:** Serial registration alone does not and cannot create stock ownership, mutate inventory balances, or bypass spatial ledger attribution.
+- **Direct Status Transitions Prohibited (`InStock` Entry and Exit):**
+  - Direct transition to `in_stock` via `update_serial_status` is strictly prohibited. Serial stock intake must execute through `StockLedgerService::post_movement`.
+  - Direct transitions *from* `in_stock` via `update_serial_status` are also strictly prohibited. `update_serial_status()` must not directly remove, deduct, or reclassify stock-owned `in_stock` serials without ledger mutation.
+  - Stock-affecting outbound transitions (such as customer checkout in Phase 3 / F3.03, inter-branch transfers in F2.12, or stock write-offs in F2.11/F2.13) must execute through their owning stock authority workflows, ensuring balance synchronization and immutable audit entries.
+- **Pre-020 Legacy Exception Preserved:** Historical serial records created prior to Migration 020 with `status = 'in_stock'` and `location_id IS NULL` / `bin_id IS NULL` remain valid historical unallocated records. The post-020 invariant applies strictly to post-020 stock ownership and intake workflows.
 
 ---
 
@@ -159,14 +165,14 @@ F2.08 adheres strictly to the quantity and ledger boundary established across Ph
 
 A tracked instance maintains an explicit operational status:
 - Allowed statuses:
-  - `in_stock`: Available at the branch for normal operations (backed by physical location attribution).
-  - `reserved`: Held for a pending customer order, quote, or registered instance awaiting stock intake.
+  - `in_stock`: Available at the branch for normal operations (backed by physical location attribution in post-020 records).
+  - `reserved`: Held for a pending customer order, quote, or registered instance awaiting stock intake (also used as the reversible non-stock holding state for negative adjustments).
   - `sold`: Dispatched/sold to a customer (historical reference to `sold_in_sale_id`).
   - `transferred`: Transferred to another branch or location.
   - `defective`: Flagged as damaged, defective, or awaiting repair.
   - `recalled`: Subject to manufacturer or safety recall (terminal state).
   - `disposed`: Written off, scrapped, or decommissioned (terminal state).
-- Status updates must be validated through the domain engine (`update_serial_status`), enforcing valid transition paths and preventing mutations on terminal records.
+- Status updates must be validated through the domain engine (`update_serial_status`), enforcing valid transition paths, preventing mutations on terminal records, and strictly rejecting direct entry into or exit from `in_stock` (which is exclusively governed by stock authority workflows).
 
 ---
 

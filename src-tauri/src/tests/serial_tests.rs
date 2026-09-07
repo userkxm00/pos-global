@@ -5,8 +5,10 @@ use crate::commands::serial::{
     create_serial_instance_impl, get_serial_instance_impl, list_serial_instances_impl,
     lookup_serial_instance_impl, update_serial_status_impl,
 };
+use crate::location::{create_bin, create_location, CreateBinInput, CreateLocationInput};
 use crate::product::{create_product, CreateProductInput};
 use crate::serial::*;
+use crate::stock::{MovementReason, PostMovementRequest, StockLedgerService};
 use crate::tests::test_helpers::{
     apply_migrations_up_to, create_test_org_and_branch, create_test_user_hierarchy,
     create_test_user_with_creds, setup_test_db, setup_test_db_up_to,
@@ -1834,4 +1836,311 @@ fn test_create_serial_instance_canonical_id_generation() {
         )
         .expect("query persisted serial");
     assert_eq!(persisted_sn.as_deref(), Some("CANONICAL-ID-SN-001"));
+}
+
+// =========================================================================
+// 12. FINDING A & LEGACY IN_STOCK OUTBOUND REJECTION TESTS
+// =========================================================================
+
+#[test]
+fn test_instock_direct_outbound_transitions_rejected() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Serialized High-End Server", true);
+
+    // Setup physical location and bin
+    let loc = create_location(
+        &conn,
+        CreateLocationInput {
+            branch_id: branch_id.clone(),
+            parent_id: None,
+            name: "Server Rack Room".into(),
+            code: "LOC-RACK-01".into(),
+            location_type: None,
+        },
+    )
+    .expect("create location");
+
+    let bin = create_bin(
+        &conn,
+        CreateBinInput {
+            location_id: loc.id.clone(),
+            name: "Shelf A1".into(),
+            code: "BIN-SHELF-A1".into(),
+        },
+    )
+    .expect("create bin");
+
+    // 1. Register serial in Reserved status (F2.08)
+    let inst = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some("SRV-NODE-001".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: Some(250000),
+        },
+    )
+    .expect("create serial instance");
+    assert_eq!(inst.status, SerialStatus::Reserved);
+
+    // 2. Induct into stock via StockLedgerService (F2.11)
+    let intake_req = PostMovementRequest {
+        idempotency_key: "k_srv_intake_001".into(),
+        branch_id: branch_id.clone(),
+        product_id: product_id.clone(),
+        variant_id: None,
+        location_id: loc.id.clone(),
+        bin_id: Some(bin.id.clone()),
+        batch_id: None,
+        serial_id: Some(inst.id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: Some("Opening balance for server node".into()),
+    };
+    let mut mut_conn = conn;
+    let intake_res =
+        StockLedgerService::post_movement(&mut mut_conn, &intake_req).expect("intake movement");
+    assert_eq!(intake_res.serial_id, Some(inst.id.clone()));
+    assert_eq!(intake_res.quantity_after_milli, 1000);
+
+    // Baseline verification
+    let (status_before, loc_before, bin_before): (String, Option<String>, Option<String>) =
+        mut_conn
+            .query_row(
+                "SELECT status, location_id, bin_id FROM serial_numbers WHERE id = ?1",
+                params![inst.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("query serial baseline");
+    assert_eq!(status_before, "in_stock");
+    assert_eq!(loc_before, Some(loc.id.clone()));
+    assert_eq!(bin_before, Some(bin.id.clone()));
+
+    let inv_before: i64 = mut_conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE product_id = ?1",
+            params![product_id],
+            |r| r.get(0),
+        )
+        .expect("query inventory baseline");
+    assert_eq!(inv_before, 1000);
+
+    let loc_inv_before: i64 = mut_conn
+        .query_row(
+            "SELECT quantity_milli FROM location_inventory WHERE product_id = ?1",
+            params![product_id],
+            |r| r.get(0),
+        )
+        .expect("query location_inventory baseline");
+    assert_eq!(loc_inv_before, 1000);
+
+    let movements_count_before: i64 = mut_conn
+        .query_row(
+            "SELECT count(*) FROM stock_movements WHERE product_id = ?1",
+            params![product_id],
+            |r| r.get(0),
+        )
+        .expect("query movements baseline");
+    assert_eq!(movements_count_before, 1);
+
+    let idemp_count_before: i64 = mut_conn
+        .query_row("SELECT count(*) FROM idempotency_keys", [], |r| r.get(0))
+        .expect("query idempotency baseline");
+    assert_eq!(idemp_count_before, 1);
+
+    // 3. Test every outbound transition from InStock:
+    // - InStock -> Sold
+    // - InStock -> Defective
+    // - InStock -> Reserved
+    // - InStock -> Transferred
+    // - InStock -> Recalled
+    // - InStock -> Disposed
+    let outbound_targets = [
+        (SerialStatus::Sold, "sold"),
+        (SerialStatus::Defective, "defective"),
+        (SerialStatus::Reserved, "reserved"),
+        (SerialStatus::Transferred, "transferred"),
+        (SerialStatus::Recalled, "recalled"),
+        (SerialStatus::Disposed, "disposed"),
+    ];
+
+    for (target_status, target_name) in outbound_targets {
+        let err = update_serial_status(
+            &mut_conn,
+            &UpdateSerialStatusInput {
+                id: inst.id.clone(),
+                branch_id: branch_id.clone(),
+                status: target_status,
+            },
+        )
+        .unwrap_err();
+
+        match err {
+            SerialError::Validation(ref msg) => {
+                assert!(
+                    msg.contains("Direct transition from 'in_stock' is prohibited"),
+                    "Expected direct transition error for InStock -> {target_name}, got: {msg}"
+                );
+            }
+            other => panic!(
+                "Expected SerialError::Validation for InStock -> {target_name}, got: {other:?}"
+            ),
+        }
+
+        // Prove all invariants remain untouched:
+        // - status unchanged ('in_stock')
+        // - location unchanged
+        // - bin unchanged
+        // - inventory unchanged
+        // - location_inventory unchanged
+        // - stock_movements unchanged
+        // - idempotency unchanged
+        let (cur_status, cur_loc, cur_bin): (String, Option<String>, Option<String>) = mut_conn
+            .query_row(
+                "SELECT status, location_id, bin_id FROM serial_numbers WHERE id = ?1",
+                params![inst.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("query serial status");
+        assert_eq!(
+            cur_status, "in_stock",
+            "Status must remain in_stock after rejected transition to {target_name}"
+        );
+        assert_eq!(
+            cur_loc,
+            Some(loc.id.clone()),
+            "Location must remain unchanged"
+        );
+        assert_eq!(cur_bin, Some(bin.id.clone()), "Bin must remain unchanged");
+
+        let cur_inv: i64 = mut_conn
+            .query_row(
+                "SELECT quantity_milli FROM inventory WHERE product_id = ?1",
+                params![product_id],
+                |r| r.get(0),
+            )
+            .expect("query inventory");
+        assert_eq!(cur_inv, 1000, "Inventory balance must remain 1000");
+
+        let cur_loc_inv: i64 = mut_conn
+            .query_row(
+                "SELECT quantity_milli FROM location_inventory WHERE product_id = ?1",
+                params![product_id],
+                |r| r.get(0),
+            )
+            .expect("query location_inventory");
+        assert_eq!(
+            cur_loc_inv, 1000,
+            "Location inventory balance must remain 1000"
+        );
+
+        let cur_movements: i64 = mut_conn
+            .query_row(
+                "SELECT count(*) FROM stock_movements WHERE product_id = ?1",
+                params![product_id],
+                |r| r.get(0),
+            )
+            .expect("query movements");
+        assert_eq!(cur_movements, 1, "Stock movements count must remain 1");
+
+        let cur_idemp: i64 = mut_conn
+            .query_row("SELECT count(*) FROM idempotency_keys", [], |r| r.get(0))
+            .expect("query idempotency");
+        assert_eq!(cur_idemp, 1, "Idempotency keys count must remain 1");
+    }
+}
+
+#[test]
+fn test_terminal_status_error_precedence_over_instock_prohibition() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Medical Monitor", true);
+
+    let inst = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id,
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some("MED-MON-001".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
+        },
+    )
+    .expect("create");
+    assert_eq!(inst.status, SerialStatus::Reserved);
+
+    // Reserved -> Recalled is valid operational lifecycle transition
+    let recalled = update_serial_status(
+        &conn,
+        &UpdateSerialStatusInput {
+            id: inst.id.clone(),
+            branch_id: branch_id.clone(),
+            status: SerialStatus::Recalled,
+        },
+    )
+    .expect("transition to recalled");
+    assert_eq!(recalled.status, SerialStatus::Recalled);
+
+    // Attempting Recalled -> InStock must return TerminalStatus, NOT Validation
+    let err = update_serial_status(
+        &conn,
+        &UpdateSerialStatusInput {
+            id: inst.id,
+            branch_id,
+            status: SerialStatus::InStock,
+        },
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, SerialError::TerminalStatus(ref s) if s == "recalled"),
+        "Expected TerminalStatus('recalled') error precedence, got: {err:?}"
+    );
+}
+
+#[test]
+fn test_legacy_pre020_instock_serial_preservation() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Legacy Drill", true);
+
+    // Insert historical legacy serial with NULL location/bin
+    let legacy_id = "legacy-sn-id-001";
+    conn.execute(
+        "INSERT INTO serial_numbers (id, product_id, branch_id, serial_number, status, location_id, bin_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'LEGACY-DRILL-001', 'in_stock', NULL, NULL, '2025-01-01', '2025-01-01')",
+        params![legacy_id, product_id, branch_id],
+    )
+    .expect("insert legacy serial");
+
+    // 1. Verify legacy serial is readable with NULL coordinates
+    let inst = get_serial_instance(&conn, legacy_id)
+        .expect("get serial")
+        .expect("exists");
+    assert_eq!(inst.status, SerialStatus::InStock);
+    assert_eq!(inst.location_id, None);
+    assert_eq!(inst.bin_id, None);
+
+    // 2. Direct outbound transition from legacy in_stock is also blocked
+    let err = update_serial_status(
+        &conn,
+        &UpdateSerialStatusInput {
+            id: legacy_id.to_string(),
+            branch_id,
+            status: SerialStatus::Sold,
+        },
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, SerialError::Validation(ref msg) if msg.contains("Direct transition from 'in_stock' is prohibited")),
+        "Expected Direct transition from 'in_stock' prohibited error, got: {err:?}"
+    );
 }

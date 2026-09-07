@@ -505,23 +505,28 @@ fn validate_product_and_variant(
     }
 
     if let Some(var_id) = variant_id {
-        let var_prod_id: Option<String> = conn
+        let variant_info: Option<(String, i64)> = conn
             .query_row(
-                "SELECT product_id FROM product_variants WHERE id = ?1",
+                "SELECT product_id, is_active FROM product_variants WHERE id = ?1",
                 params![var_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
 
-        match var_prod_id {
+        match variant_info {
             None => {
                 return Err(StockLedgerError::VariantMismatch(format!(
                     "Variant '{var_id}' not found"
                 )))
             }
-            Some(var_prod) if var_prod != product_id => {
+            Some((var_prod, _)) if var_prod != product_id => {
                 return Err(StockLedgerError::VariantMismatch(format!(
                     "Variant '{var_id}' belongs to product '{var_prod}', not '{product_id}'"
+                )))
+            }
+            Some((_, is_active)) if is_active == 0 => {
+                return Err(StockLedgerError::Validation(format!(
+                    "Variant '{var_id}' is inactive and cannot accept stock movements"
                 )))
             }
             Some(_) => {}
@@ -883,6 +888,7 @@ fn mutate_serial_inventory(
         } else {
             let new_status = match reason {
                 MovementReason::Damage => "defective",
+                MovementReason::Adjustment => "reserved",
                 _ => "disposed",
             };
             conn.execute(

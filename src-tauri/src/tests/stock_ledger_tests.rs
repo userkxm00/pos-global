@@ -2501,3 +2501,466 @@ fn test_serial_creation_reconciliation_and_stock_ledger_intake_atomicity() {
         "Idempotency key for rolled back transaction must not exist"
     );
 }
+
+#[test]
+fn test_serial_reversible_adjustment_roundtrip() {
+    let mut ctx = setup_stock_test_context();
+
+    // Mark product as serial-tracked
+    ctx.conn
+        .execute(
+            "UPDATE products SET requires_serial = 1 WHERE id = ?1",
+            params![ctx.product_id],
+        )
+        .unwrap();
+
+    // 1. Create serial in Reserved state
+    let serial_input = CreateSerialInput {
+        product_id: ctx.product_id.clone(),
+        branch_id: ctx.branch_id.clone(),
+        variant_id: None,
+        serial_number: Some("SN-REVERSIBLE-001".into()),
+        imei: None,
+        asset_tag: None,
+        cost_price_minor: Some(100000),
+    };
+    let instance =
+        create_serial_instance(&ctx.conn, &serial_input).expect("create serial instance");
+    assert_eq!(instance.status, SerialStatus::Reserved);
+
+    // 2. Initial Intake (+1000 OpeningBalance) -> in_stock
+    let intake_req = PostMovementRequest {
+        idempotency_key: "k_rev_intake_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: Some(instance.id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: Some("Initial intake".into()),
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &intake_req).expect("intake succeeds");
+
+    // Stage 1 Verification: in_stock with coordinates, 1000 aggregate, 1000 spatial, 1 movement
+    let (stat_1, loc_1, bin_1): (String, Option<String>, Option<String>) = ctx
+        .conn
+        .query_row(
+            "SELECT status, location_id, bin_id FROM serial_numbers WHERE id = ?1",
+            params![instance.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(stat_1, "in_stock");
+    assert_eq!(loc_1, Some(ctx.location_id.clone()));
+    assert_eq!(bin_1, Some(ctx.bin_id.clone()));
+
+    let agg_1: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(agg_1, 1000);
+
+    let spat_1: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM location_inventory WHERE product_id = ?1 AND location_id = ?2",
+            params![ctx.product_id, ctx.location_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(spat_1, 1000);
+
+    let mov_1: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(mov_1, 1);
+
+    // 3. Negative Adjustment (-1000 Adjustment) -> serial becomes 'reserved', coordinates cleared
+    let neg_adj_req = PostMovementRequest {
+        idempotency_key: "k_rev_neg_adj_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: Some(instance.id.clone()),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Adjustment,
+        user_id: None,
+        notes: Some("Negative adjustment write-down".into()),
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &neg_adj_req)
+        .expect("negative adjustment succeeds");
+
+    // Stage 2 Verification: serial is reserved with NULL coordinates, balances 0, 2 movements
+    let (stat_2, loc_2, bin_2): (String, Option<String>, Option<String>) = ctx
+        .conn
+        .query_row(
+            "SELECT status, location_id, bin_id FROM serial_numbers WHERE id = ?1",
+            params![instance.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        stat_2, "reserved",
+        "Negative adjustment must transition serial to reserved"
+    );
+    assert_eq!(loc_2, None, "Negative adjustment must clear location_id");
+    assert_eq!(bin_2, None, "Negative adjustment must clear bin_id");
+
+    let agg_2: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(agg_2, 0);
+
+    let spat_2: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM location_inventory WHERE product_id = ?1 AND location_id = ?2",
+            params![ctx.product_id, ctx.location_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(spat_2, 0);
+
+    let mov_2: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(mov_2, 2);
+
+    // 4. Positive Adjustment (+1000 Adjustment) -> serial restored to 'in_stock', coordinates assigned
+    let pos_adj_req = PostMovementRequest {
+        idempotency_key: "k_rev_pos_adj_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: Some(instance.id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::Adjustment,
+        user_id: None,
+        notes: Some("Positive adjustment restoration".into()),
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &pos_adj_req)
+        .expect("positive adjustment succeeds");
+
+    // Stage 3 Verification: serial is restored to in_stock, coordinates reinstated, balances 1000, 3 movements
+    let (stat_3, loc_3, bin_3): (String, Option<String>, Option<String>) = ctx
+        .conn
+        .query_row(
+            "SELECT status, location_id, bin_id FROM serial_numbers WHERE id = ?1",
+            params![instance.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        stat_3, "in_stock",
+        "Positive adjustment must restore serial to in_stock"
+    );
+    assert_eq!(
+        loc_3,
+        Some(ctx.location_id.clone()),
+        "Location must be reinstated"
+    );
+    assert_eq!(bin_3, Some(ctx.bin_id.clone()), "Bin must be reinstated");
+
+    let agg_3: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(agg_3, 1000);
+
+    let spat_3: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM location_inventory WHERE product_id = ?1 AND location_id = ?2",
+            params![ctx.product_id, ctx.location_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(spat_3, 1000);
+
+    let mov_3: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(mov_3, 3);
+
+    // 5. Verification: Loss is NOT reversible
+    let loss_req = PostMovementRequest {
+        idempotency_key: "k_rev_loss_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: Some(instance.id.clone()),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Loss,
+        user_id: None,
+        notes: Some("Permanent loss write-off".into()),
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &loss_req).expect("loss succeeds");
+
+    let stat_loss: String = ctx
+        .conn
+        .query_row(
+            "SELECT status FROM serial_numbers WHERE id = ?1",
+            params![instance.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        stat_loss, "disposed",
+        "Loss must transition serial to disposed"
+    );
+
+    // Attempting to revive a disposed serial via +1000 Adjustment MUST FAIL
+    let revive_loss_req = PostMovementRequest {
+        idempotency_key: "k_rev_loss_attempt_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: Some(instance.id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::Adjustment,
+        user_id: None,
+        notes: Some("Attempted revival of lost serial".into()),
+    };
+    let err = StockLedgerService::post_movement(&mut ctx.conn, &revive_loss_req).unwrap_err();
+    assert!(
+        matches!(err, StockLedgerError::SerialInvalidStatus(ref msg) if msg.contains("terminal or non-revivable status 'disposed'")),
+        "Loss must not be reversible, got error: {err:?}"
+    );
+
+    // Serial remains disposed and movements count remains 4
+    let stat_after_failed_revive: String = ctx
+        .conn
+        .query_row(
+            "SELECT status FROM serial_numbers WHERE id = ?1",
+            params![instance.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(stat_after_failed_revive, "disposed");
+
+    let mov_final: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(mov_final, 4);
+}
+
+#[test]
+fn test_inactive_variant_movement_rejected_fail_closed() {
+    let mut ctx = setup_stock_test_context();
+
+    // 1. Create a variant for the product
+    let variant_id = "var-test-inactive-001";
+    ctx.conn
+        .execute(
+            "INSERT INTO product_variants (id, product_id, sku, barcode, is_active, created_at, updated_at)
+             VALUES (?1, ?2, 'SKU-INACT-001', 'BAR-INACT-001', 1, datetime('now'), datetime('now'))",
+            params![variant_id, ctx.product_id],
+        )
+        .unwrap();
+
+    // Deactivate the variant
+    ctx.conn
+        .execute(
+            "UPDATE product_variants SET is_active = 0 WHERE id = ?1",
+            params![variant_id],
+        )
+        .unwrap();
+
+    // 2. Attempt positive movement with inactive variant
+    let inact_req = PostMovementRequest {
+        idempotency_key: "k_inact_var_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: Some(variant_id.to_string()),
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 5000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: Some("Attempted movement for inactive variant".into()),
+    };
+
+    let err = StockLedgerService::post_movement(&mut ctx.conn, &inact_req).unwrap_err();
+    match err {
+        StockLedgerError::Validation(ref msg) => {
+            assert!(
+                msg.contains("inactive and cannot accept stock movements"),
+                "Expected inactive variant validation error, got: {msg}"
+            );
+        }
+        other => panic!("Expected StockLedgerError::Validation, got: {other:?}"),
+    }
+
+    // 3. Strict Fail-Closed Verification:
+    // - no inventory mutation
+    // - no spatial mutation
+    // - no batch mutation
+    // - no serial mutation
+    // - no stock movement
+    // - no successful idempotency record
+    let inv_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM inventory WHERE product_id = ?1 AND variant_id = ?2",
+            params![ctx.product_id, variant_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        inv_count, 0,
+        "No inventory row must exist for inactive variant"
+    );
+
+    let loc_inv_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM location_inventory WHERE product_id = ?1 AND variant_id = ?2",
+            params![ctx.product_id, variant_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        loc_inv_count, 0,
+        "No spatial row must exist for inactive variant"
+    );
+
+    let batch_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM product_batches WHERE variant_id = ?1",
+            params![variant_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        batch_count, 0,
+        "No batch row must exist for inactive variant"
+    );
+
+    let serial_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM serial_numbers WHERE variant_id = ?1",
+            params![variant_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serial_count, 0,
+        "No serial row must exist for inactive variant"
+    );
+
+    let mov_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM stock_movements WHERE variant_id = ?1",
+            params![variant_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        mov_count, 0,
+        "No stock movement must exist for inactive variant"
+    );
+
+    let idemp_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM idempotency_keys WHERE key = 'k_inact_var_001'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        idemp_count, 0,
+        "No successful idempotency key must exist for inactive variant"
+    );
+
+    // 4. Reactivate variant and confirm active-variant behavior is preserved
+    ctx.conn
+        .execute(
+            "UPDATE product_variants SET is_active = 1 WHERE id = ?1",
+            params![variant_id],
+        )
+        .unwrap();
+
+    let active_req = PostMovementRequest {
+        idempotency_key: "k_act_var_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: Some(variant_id.to_string()),
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 5000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: Some("Active variant movement".into()),
+    };
+
+    let active_res = StockLedgerService::post_movement(&mut ctx.conn, &active_req)
+        .expect("Active variant movement must succeed");
+    assert_eq!(active_res.quantity_after_milli, 5000);
+
+    let active_agg: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE product_id = ?1 AND variant_id = ?2",
+            params![ctx.product_id, variant_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(active_agg, 5000);
+}

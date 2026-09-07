@@ -692,6 +692,12 @@ pub fn update_serial_status(
 
     validate_status_transition(current.status, input.status)?;
 
+    if current.status == SerialStatus::InStock && input.status != SerialStatus::InStock {
+        return Err(SerialError::Validation(
+            "Direct transition from 'in_stock' is prohibited; stock-affecting outbound transitions must execute through stock workflow authority".into(),
+        ));
+    }
+
     if input.status == SerialStatus::InStock {
         return Err(SerialError::Validation(
             "Direct transition to 'in_stock' is prohibited; serial stock intake must execute through StockLedgerService".into(),
