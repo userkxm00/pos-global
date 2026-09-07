@@ -651,20 +651,34 @@ fn validate_serial_status_and_coordinates(
 
 fn validate_serial_asset(
     conn: &Connection,
-    serial_id: Option<&str>,
-    product_id: &str,
-    branch_id: &str,
-    variant_id: Option<&str>,
-    location_id: &str,
-    bin_id: Option<&str>,
-    delta: i64,
+    req: &PostMovementRequest,
 ) -> Result<(), StockLedgerError> {
-    let Some(s_id) = serial_id else {
+    let Some(s_id) = req
+        .serial_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
         return Ok(());
     };
     let record = fetch_serial_record(conn, s_id)?;
-    validate_serial_identity(&record, product_id, branch_id, variant_id)?;
-    validate_serial_status_and_coordinates(&record, location_id, bin_id, delta)?;
+    let var_id = req
+        .variant_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    validate_serial_identity(&record, req.product_id.trim(), req.branch_id.trim(), var_id)?;
+    let bin_id = req
+        .bin_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    validate_serial_status_and_coordinates(
+        &record,
+        req.location_id.trim(),
+        bin_id,
+        req.quantity_delta_milli,
+    )?;
     Ok(())
 }
 
@@ -1015,16 +1029,7 @@ impl StockLedgerService {
             variant_id,
             req.quantity_delta_milli,
         )?;
-        validate_serial_asset(
-            &tx,
-            serial_id,
-            product_id,
-            branch_id,
-            variant_id,
-            location_id,
-            bin_id,
-            req.quantity_delta_milli,
-        )?;
+        validate_serial_asset(&tx, req)?;
 
         // 5. Mutate balances atomically
         let (agg_before, agg_after) = mutate_aggregate_inventory(

@@ -13,7 +13,7 @@ use crate::tests::test_helpers::{
     apply_migrations_up_to, create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
     setup_test_db_up_to,
 };
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
 // =========================================================================
