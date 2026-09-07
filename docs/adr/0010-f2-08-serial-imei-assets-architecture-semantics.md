@@ -147,14 +147,19 @@ F2.08 adheres strictly to the quantity and ledger boundary established across Ph
    - Checkout deduction belongs strictly to **Phase 3 (Sales Checkout)**.
    - F2.08 is the instance identity, validation, and lifecycle registry only.
 
+### 5.1 Reconciliation with F2.11 Stock Ledger Boundary (Post-F2.11 Amendment)
+- **Instance Registration (`create_serial_instance`):** Instantiates an asset record in the `reserved` status with `location_id = NULL` and `bin_id = NULL`. In F2.08, this represents registered asset identity prior to stock-on-hand induction.
+- **Stock Ownership and On-Hand Intake (`StockLedgerService::post_movement`):** Transitioning a registered serialized unit to `in_stock` ownership on-hand requires posting an authenticated stock movement (reason: `opening_balance` or `adjustment` with $\Delta = +1000$ and mandatory `location_id`). F2.11 is the exclusive write authority that atomically assigns physical coordinates (`location_id`, `bin_id`), sets `status = 'in_stock'`, increments aggregate and spatial inventory balances, and records the immutable ledger entry.
+- **Firewall Preserved:** Serial registration alone does not and cannot create stock ownership, mutate inventory balances, or bypass spatial ledger attribution.
+
 ---
 
 ## 6. Lifecycle Status & State Transitions
 
 A tracked instance maintains an explicit operational status:
 - Allowed statuses:
-  - `in_stock`: Available at the branch for normal operations.
-  - `reserved`: Held for a pending customer order or quote.
+  - `in_stock`: Available at the branch for normal operations (backed by physical location attribution).
+  - `reserved`: Held for a pending customer order, quote, or registered instance awaiting stock intake.
   - `sold`: Dispatched/sold to a customer (historical reference to `sold_in_sale_id`).
   - `transferred`: Transferred to another branch or location.
   - `defective`: Flagged as damaged, defective, or awaiting repair.

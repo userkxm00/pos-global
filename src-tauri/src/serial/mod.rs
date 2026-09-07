@@ -580,7 +580,7 @@ pub fn create_serial_instance(
             product_id, branch_id, variant_id,
             serial_number, imei, asset_tag, cost_price_minor,
             status, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'in_stock', datetime('now'), datetime('now'))
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'reserved', datetime('now'), datetime('now'))
         RETURNING {SERIAL_COLUMNS}"
     );
 

@@ -366,7 +366,7 @@ fn test_serial_only_identifier() {
     assert_eq!(instance.serial_number.as_deref(), Some("PC-2026-X99"));
     assert!(instance.imei.is_none());
     assert!(instance.asset_tag.is_none());
-    assert_eq!(instance.status, SerialStatus::InStock);
+    assert_eq!(instance.status, SerialStatus::Reserved);
 }
 
 #[test]
@@ -1126,6 +1126,20 @@ fn test_lifecycle_status_transitions() {
         },
     )
     .expect("create");
+
+    assert_eq!(inst.status, SerialStatus::Reserved);
+
+    // Reserved -> InStock
+    let s_instock = update_serial_status(
+        &conn,
+        &UpdateSerialStatusInput {
+            id: inst.id.clone(),
+            branch_id: branch_id.clone(),
+            status: SerialStatus::InStock,
+        },
+    )
+    .expect("in_stock");
+    assert_eq!(s_instock.status, SerialStatus::InStock);
 
     // InStock -> Reserved
     let s_reserved = update_serial_status(

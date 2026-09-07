@@ -8,6 +8,7 @@ use crate::commands::stock::{
     post_stock_movement_impl, PostMovementInput,
 };
 use crate::location::{create_bin, create_location, CreateBinInput, CreateLocationInput};
+use crate::serial::{create_serial_instance, CreateSerialInput, SerialStatus};
 use crate::stock::{MovementReason, PostMovementRequest, StockLedgerError, StockLedgerService};
 use crate::tests::test_helpers::{
     apply_migrations_up_to, create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
@@ -2235,4 +2236,252 @@ fn test_whitespace_optional_identifiers_fail_closed() {
             "Expected validation error for {field}, got: {err:?}"
         );
     }
+}
+
+#[test]
+fn test_serial_creation_reconciliation_and_stock_ledger_intake_atomicity() {
+    let mut ctx = setup_stock_test_context();
+
+    // 1. Serial Creation (F2.08) creates instance in 'reserved' pre-stock state
+    let serial_input = CreateSerialInput {
+        product_id: ctx.product_id.clone(),
+        branch_id: ctx.branch_id.clone(),
+        variant_id: None,
+        serial_number: Some("SN-RECON-001".into()),
+        imei: None,
+        asset_tag: None,
+        cost_price_minor: Some(150000),
+    };
+    let instance = create_serial_instance(&ctx.conn, &serial_input)
+        .expect("serial creation must succeed in pre-stock state");
+
+    assert_eq!(instance.status, SerialStatus::Reserved);
+    assert_eq!(instance.location_id, None);
+    assert_eq!(instance.bin_id, None);
+
+    // Verify creation alone cannot create stock-on-hand unintentionally
+    let inv_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        inv_count, 0,
+        "No inventory row may exist from serial registration alone"
+    );
+
+    let loc_inv_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM location_inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        loc_inv_count, 0,
+        "No spatial inventory row may exist from serial registration alone"
+    );
+
+    let movements_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        movements_count, 0,
+        "No stock movements may exist from serial registration alone"
+    );
+
+    // 2. Stock Entry (F2.11) via StockLedgerService::post_movement inducts unit into stock
+    let intake_req = PostMovementRequest {
+        idempotency_key: "k_serial_recon_intake_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: Some(instance.id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: Some("Opening intake for reconciled serial".into()),
+    };
+
+    let intake_res = StockLedgerService::post_movement(&mut ctx.conn, &intake_req)
+        .expect("Stock intake through ledger must succeed");
+    assert_eq!(intake_res.serial_id, Some(instance.id.clone()));
+    assert_eq!(intake_res.quantity_after_milli, 1000);
+
+    // Verify atomic updates: serial becomes in_stock with assigned coordinates
+    let (stat, loc, bin): (String, Option<String>, Option<String>) = ctx
+        .conn
+        .query_row(
+            "SELECT status, location_id, bin_id FROM serial_numbers WHERE id = ?1",
+            params![instance.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(stat, "in_stock");
+    assert_eq!(loc, Some(ctx.location_id.clone()));
+    assert_eq!(bin, Some(ctx.bin_id.clone()));
+
+    // Aggregate inventory balance is exactly 1000
+    let agg_qty: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(agg_qty, 1000);
+
+    // Spatial inventory balance is exactly 1000
+    let loc_qty: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM location_inventory WHERE product_id = ?1 AND location_id = ?2 AND bin_id = ?3",
+            params![ctx.product_id, ctx.location_id, ctx.bin_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(loc_qty, 1000);
+
+    // Exactly one movement row in stock_movements
+    let mov_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(mov_count, 1);
+
+    // 3. Double-intake prevention: Attempting to intake the same serial again must fail
+    let duplicate_intake_req = PostMovementRequest {
+        idempotency_key: "k_serial_recon_intake_dup".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: Some(instance.id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    let dup_err =
+        StockLedgerService::post_movement(&mut ctx.conn, &duplicate_intake_req).unwrap_err();
+    assert!(
+        matches!(dup_err, StockLedgerError::SerialInvalidStatus(ref msg) if msg.contains("already in_stock")),
+        "Expected SerialInvalidStatus, got: {dup_err:?}"
+    );
+
+    // 4. Failure / Rollback atomicity test:
+    // Create another serial in 'reserved' state
+    let serial_input_2 = CreateSerialInput {
+        product_id: ctx.product_id.clone(),
+        branch_id: ctx.branch_id.clone(),
+        variant_id: None,
+        serial_number: Some("SN-RECON-FAIL-002".into()),
+        imei: None,
+        asset_tag: None,
+        cost_price_minor: None,
+    };
+    let instance_2 = create_serial_instance(&ctx.conn, &serial_input_2)
+        .expect("second serial creation succeeds");
+    assert_eq!(instance_2.status, SerialStatus::Reserved);
+
+    // Create an inactive bin to trigger validation error during transaction
+    let inactive_bin_id = crate::location::create_bin(
+        &ctx.conn,
+        &CreateBinInput {
+            location_id: ctx.location_id.clone(),
+            code: "BIN-INACTIVE-RECON".into(),
+            name: Some("Inactive Bin".into()),
+        },
+    )
+    .unwrap()
+    .id;
+    ctx.conn
+        .execute(
+            "UPDATE bins SET is_active = 0 WHERE id = ?1",
+            params![inactive_bin_id],
+        )
+        .unwrap();
+
+    let fail_req = PostMovementRequest {
+        idempotency_key: "k_serial_recon_fail_tx".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(inactive_bin_id),
+        batch_id: None,
+        serial_id: Some(instance_2.id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    let fail_err = StockLedgerService::post_movement(&mut ctx.conn, &fail_req).unwrap_err();
+    assert!(matches!(fail_err, StockLedgerError::BinInactive(_)));
+
+    // Verify full rollback: serial remains 'reserved', no coordinates assigned
+    let (stat_2, loc_2, bin_2): (String, Option<String>, Option<String>) = ctx
+        .conn
+        .query_row(
+            "SELECT status, location_id, bin_id FROM serial_numbers WHERE id = ?1",
+            params![instance_2.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(stat_2, "reserved");
+    assert_eq!(loc_2, None);
+    assert_eq!(bin_2, None);
+
+    // Balances remained unchanged from previous successful intake (1000 aggregate, 1 movement)
+    let final_agg: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(final_agg, 1000);
+
+    let final_mov: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(final_mov, 1);
+
+    let idem_check: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM idempotency_keys WHERE key = 'k_serial_recon_fail_tx'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        idem_check, 0,
+        "Idempotency key for rolled back transaction must not exist"
+    );
 }
