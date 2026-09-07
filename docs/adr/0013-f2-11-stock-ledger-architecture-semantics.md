@@ -1,7 +1,7 @@
 # ADR-0013 — F2.11 Stock Ledger Architecture & Semantics
 
-Status: Accepted — Approved for Planning & Contract Freeze  
-Date: 2026-09-07  
+Status: Accepted — Approved for Planning & Contract Freeze
+Date: 2026-09-07
 
 ---
 

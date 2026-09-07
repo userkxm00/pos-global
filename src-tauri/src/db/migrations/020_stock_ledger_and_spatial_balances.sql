@@ -108,18 +108,24 @@ BEGIN
         WHERE id = NEW.bin_id AND location_id = NEW.location_id
     );
 
-    -- Batch must belong to product and branch
-    SELECT RAISE(ABORT, 'Movement batch does not match product or branch')
+    -- Batch must belong to product, branch, and variant (null-safe equality)
+    SELECT RAISE(ABORT, 'Movement batch does not match product, branch, or variant')
     WHERE NEW.batch_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM product_batches
-        WHERE id = NEW.batch_id AND product_id = NEW.product_id AND branch_id = NEW.branch_id
+        WHERE id = NEW.batch_id
+          AND product_id = NEW.product_id
+          AND branch_id = NEW.branch_id
+          AND variant_id IS NEW.variant_id
     );
 
-    -- Serial must belong to product and branch
-    SELECT RAISE(ABORT, 'Movement serial does not match product or branch')
+    -- Serial must belong to product, branch, and variant (null-safe equality)
+    SELECT RAISE(ABORT, 'Movement serial does not match product, branch, or variant')
     WHERE NEW.serial_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM serial_numbers
-        WHERE id = NEW.serial_id AND product_id = NEW.product_id AND branch_id = NEW.branch_id
+        WHERE id = NEW.serial_id
+          AND product_id = NEW.product_id
+          AND branch_id = NEW.branch_id
+          AND variant_id IS NEW.variant_id
     );
 
     -- Stock movement delta cannot be zero

@@ -241,7 +241,7 @@ pub struct BatchSummaryRecord {
 // DECOMPOSED VALIDATION & MUTATION HELPERS (COGNITIVE COMPLEXITY <= 15)
 // =========================================================================
 
-fn validate_request_basic(req: &PostMovementRequest) -> Result<(), StockLedgerError> {
+fn validate_required_strings_and_delta(req: &PostMovementRequest) -> Result<(), StockLedgerError> {
     if req.idempotency_key.trim().is_empty() {
         return Err(StockLedgerError::Validation(
             "idempotency_key cannot be empty".into(),
@@ -263,7 +263,10 @@ fn validate_request_basic(req: &PostMovementRequest) -> Result<(), StockLedgerEr
     if req.quantity_delta_milli == 0 {
         return Err(StockLedgerError::ZeroQuantityDelta);
     }
+    Ok(())
+}
 
+fn validate_movement_reason_and_serial(req: &PostMovementRequest) -> Result<(), StockLedgerError> {
     match req.reason {
         MovementReason::OpeningBalance => {
             if req.quantity_delta_milli <= 0 {
@@ -300,7 +303,12 @@ fn validate_request_basic(req: &PostMovementRequest) -> Result<(), StockLedgerEr
                 .into(),
         ));
     }
+    Ok(())
+}
 
+fn validate_request_basic(req: &PostMovementRequest) -> Result<(), StockLedgerError> {
+    validate_required_strings_and_delta(req)?;
+    validate_movement_reason_and_serial(req)?;
     Ok(())
 }
 
@@ -480,17 +488,18 @@ fn validate_batch_lot(
     batch_id: Option<&str>,
     product_id: &str,
     branch_id: &str,
+    variant_id: Option<&str>,
     delta: i64,
-) -> Result<Option<i64>, StockLedgerError> {
+) -> Result<Option<(i64, String)>, StockLedgerError> {
     let Some(b_id) = batch_id else {
         return Ok(None);
     };
 
-    let batch_info: Option<(String, String, String, i64)> = conn
+    let batch_info: Option<(String, String, Option<String>, String, i64)> = conn
         .query_row(
-            "SELECT product_id, branch_id, status, quantity_milli FROM product_batches WHERE id = ?1",
+            "SELECT product_id, branch_id, variant_id, status, quantity_milli FROM product_batches WHERE id = ?1",
             params![b_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
         )
         .optional()?;
 
@@ -498,7 +507,7 @@ fn validate_batch_lot(
         None => Err(StockLedgerError::BatchMismatch(format!(
             "Batch '{b_id}' not found"
         ))),
-        Some((batch_prod, batch_branch, status, qty_milli)) => {
+        Some((batch_prod, batch_branch, batch_variant, status, qty_milli)) => {
             if batch_prod != product_id {
                 return Err(StockLedgerError::BatchMismatch(format!(
                     "Batch '{b_id}' belongs to product '{batch_prod}', not '{product_id}'"
@@ -507,6 +516,11 @@ fn validate_batch_lot(
             if batch_branch != branch_id {
                 return Err(StockLedgerError::BatchMismatch(format!(
                     "Batch '{b_id}' belongs to branch '{batch_branch}', not '{branch_id}'"
+                )));
+            }
+            if batch_variant.as_deref() != variant_id {
+                return Err(StockLedgerError::BatchMismatch(format!(
+                    "Batch '{b_id}' belongs to variant '{batch_variant:?}', not '{variant_id:?}'"
                 )));
             }
             if (status == "recalled" || status == "quarantined") && delta > 0 {
@@ -519,9 +533,120 @@ fn validate_batch_lot(
                     "Insufficient batch quantity: current {qty_milli} milli, delta {delta} milli"
                 )));
             }
-            Ok(Some(qty_milli))
+            Ok(Some((qty_milli, status)))
         }
     }
+}
+
+struct SerialRecord {
+    id: String,
+    product_id: String,
+    branch_id: String,
+    variant_id: Option<String>,
+    status: String,
+    location_id: Option<String>,
+    bin_id: Option<String>,
+}
+
+fn fetch_serial_record(conn: &Connection, s_id: &str) -> Result<SerialRecord, StockLedgerError> {
+    conn.query_row(
+        "SELECT id, product_id, branch_id, variant_id, status, location_id, bin_id
+         FROM serial_numbers WHERE id = ?1",
+        params![s_id],
+        |row| {
+            Ok(SerialRecord {
+                id: row.get(0)?,
+                product_id: row.get(1)?,
+                branch_id: row.get(2)?,
+                variant_id: row.get(3)?,
+                status: row.get(4)?,
+                location_id: row.get(5)?,
+                bin_id: row.get(6)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or_else(|| StockLedgerError::SerialMismatch(format!("Serial '{s_id}' not found")))
+}
+
+fn validate_serial_identity(
+    record: &SerialRecord,
+    product_id: &str,
+    branch_id: &str,
+    variant_id: Option<&str>,
+) -> Result<(), StockLedgerError> {
+    if record.product_id != product_id {
+        return Err(StockLedgerError::SerialMismatch(format!(
+            "Serial '{}' belongs to product '{}', not '{}'",
+            record.id, record.product_id, product_id
+        )));
+    }
+    if record.branch_id != branch_id {
+        return Err(StockLedgerError::SerialMismatch(format!(
+            "Serial '{}' belongs to branch '{}', not '{}'",
+            record.id, record.branch_id, branch_id
+        )));
+    }
+    if record.variant_id.as_deref() != variant_id {
+        return Err(StockLedgerError::SerialMismatch(format!(
+            "Serial '{}' belongs to variant '{:?}', not '{:?}'",
+            record.id, record.variant_id, variant_id
+        )));
+    }
+    Ok(())
+}
+
+fn validate_serial_status_and_coordinates(
+    record: &SerialRecord,
+    location_id: &str,
+    bin_id: Option<&str>,
+    delta: i64,
+) -> Result<(), StockLedgerError> {
+    let s_id = &record.id;
+    if delta > 0 {
+        if record.status == "in_stock" {
+            return Err(StockLedgerError::SerialInvalidStatus(format!(
+                "Serial '{s_id}' is already in_stock"
+            )));
+        }
+        if record.status == "disposed"
+            || record.status == "recalled"
+            || record.status == "sold"
+            || record.status == "transferred"
+        {
+            return Err(StockLedgerError::SerialInvalidStatus(format!(
+                "Serial '{s_id}' has terminal or non-revivable status '{}'",
+                record.status
+            )));
+        }
+    } else {
+        if record.status != "in_stock" {
+            return Err(StockLedgerError::SerialInvalidStatus(format!(
+                "Serial '{s_id}' cannot be deducted; status is '{}', expected 'in_stock'",
+                record.status
+            )));
+        }
+        match record.location_id.as_deref() {
+            Some(loc) if loc != location_id => {
+                return Err(StockLedgerError::LocationBranchMismatch(format!(
+                    "Serial '{s_id}' is physically located at location '{loc}', not '{location_id}'"
+                )));
+            }
+            None => {
+                return Err(StockLedgerError::LocationBranchMismatch(format!(
+                    "Serial '{s_id}' has no physical location assigned"
+                )));
+            }
+            _ => {}
+        }
+        if record.bin_id.as_deref() != bin_id {
+            return Err(StockLedgerError::LocationBranchMismatch(format!(
+                "Serial '{s_id}' is physically located at bin '{:?}', not '{:?}'",
+                record.bin_id, bin_id
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_serial_asset(
@@ -529,60 +654,18 @@ fn validate_serial_asset(
     serial_id: Option<&str>,
     product_id: &str,
     branch_id: &str,
+    variant_id: Option<&str>,
     location_id: &str,
+    bin_id: Option<&str>,
     delta: i64,
 ) -> Result<(), StockLedgerError> {
     let Some(s_id) = serial_id else {
         return Ok(());
     };
-
-    let serial_info: Option<(String, String, String, Option<String>)> = conn
-        .query_row(
-            "SELECT product_id, branch_id, status, location_id FROM serial_numbers WHERE id = ?1",
-            params![s_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .optional()?;
-
-    match serial_info {
-        None => Err(StockLedgerError::SerialMismatch(format!(
-            "Serial '{s_id}' not found"
-        ))),
-        Some((serial_prod, serial_branch, status, s_loc)) => {
-            if serial_prod != product_id {
-                return Err(StockLedgerError::SerialMismatch(format!(
-                    "Serial '{s_id}' belongs to product '{serial_prod}', not '{product_id}'"
-                )));
-            }
-            if serial_branch != branch_id {
-                return Err(StockLedgerError::SerialMismatch(format!(
-                    "Serial '{s_id}' belongs to branch '{serial_branch}', not '{branch_id}'"
-                )));
-            }
-
-            if delta > 0 && status == "in_stock" {
-                return Err(StockLedgerError::SerialInvalidStatus(format!(
-                    "Serial '{s_id}' is already in_stock"
-                )));
-            }
-
-            if delta < 0 {
-                if status != "in_stock" {
-                    return Err(StockLedgerError::SerialInvalidStatus(format!(
-                        "Serial '{s_id}' cannot be deducted; status is '{status}', expected 'in_stock'"
-                    )));
-                }
-                if let Some(ref loc) = s_loc {
-                    if loc != location_id {
-                        return Err(StockLedgerError::LocationBranchMismatch(format!(
-                            "Serial '{s_id}' is physically located at '{loc}', not '{location_id}'"
-                        )));
-                    }
-                }
-            }
-            Ok(())
-        }
-    }
+    let record = fetch_serial_record(conn, s_id)?;
+    validate_serial_identity(&record, product_id, branch_id, variant_id)?;
+    validate_serial_status_and_coordinates(&record, location_id, bin_id, delta)?;
+    Ok(())
 }
 
 fn mutate_aggregate_inventory(
@@ -634,14 +717,28 @@ fn mutate_aggregate_inventory(
 
 fn mutate_spatial_inventory(
     conn: &Connection,
-    branch_id: &str,
-    location_id: &str,
-    bin_id: Option<&str>,
-    product_id: &str,
-    variant_id: Option<&str>,
-    batch_id: Option<&str>,
-    delta: i64,
+    req: &PostMovementRequest,
 ) -> Result<(i64, i64), StockLedgerError> {
+    let branch_id = req.branch_id.trim();
+    let location_id = req.location_id.trim();
+    let bin_id = req
+        .bin_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let product_id = req.product_id.trim();
+    let variant_id = req
+        .variant_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let batch_id = req
+        .batch_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let delta = req.quantity_delta_milli;
+
     let slot_info: Option<(String, i64)> = conn
         .query_row(
             "SELECT id, quantity_milli FROM location_inventory
@@ -705,12 +802,25 @@ fn mutate_spatial_inventory(
 fn mutate_batch_inventory(
     conn: &Connection,
     batch_id: Option<&str>,
-    current_qty: Option<i64>,
+    batch_info: Option<(i64, String)>,
     delta: i64,
 ) -> Result<(), StockLedgerError> {
-    if let (Some(b_id), Some(b_qty)) = (batch_id, current_qty) {
-        let new_b_qty = b_qty + delta;
-        let new_status = if new_b_qty == 0 { "depleted" } else { "active" };
+    if let (Some(b_id), Some((b_qty, current_status))) = (batch_id, batch_info) {
+        let new_b_qty = b_qty
+            .checked_add(delta)
+            .ok_or_else(|| StockLedgerError::Validation("Batch quantity overflow".to_string()))?;
+        if new_b_qty < 0 {
+            return Err(StockLedgerError::NegativeStockBlocked(format!(
+                "Batch '{b_id}' quantity would drop below zero: {new_b_qty}"
+            )));
+        }
+        let new_status = if new_b_qty == 0 {
+            "depleted"
+        } else if current_status == "depleted" {
+            "active"
+        } else {
+            &current_status
+        };
         conn.execute(
             "UPDATE product_batches SET quantity_milli = ?1, status = ?2, updated_at = datetime('now') WHERE id = ?3",
             params![new_b_qty, new_status, b_id],
@@ -902,6 +1012,7 @@ impl StockLedgerService {
             batch_id,
             product_id,
             branch_id,
+            variant_id,
             req.quantity_delta_milli,
         )?;
         validate_serial_asset(
@@ -909,7 +1020,9 @@ impl StockLedgerService {
             serial_id,
             product_id,
             branch_id,
+            variant_id,
             location_id,
+            bin_id,
             req.quantity_delta_milli,
         )?;
 
@@ -921,16 +1034,7 @@ impl StockLedgerService {
             variant_id,
             req.quantity_delta_milli,
         )?;
-        let (slot_before, slot_after) = mutate_spatial_inventory(
-            &tx,
-            branch_id,
-            location_id,
-            bin_id,
-            product_id,
-            variant_id,
-            batch_id,
-            req.quantity_delta_milli,
-        )?;
+        let (slot_before, slot_after) = mutate_spatial_inventory(&tx, req)?;
         mutate_batch_inventory(&tx, batch_id, current_batch_qty, req.quantity_delta_milli)?;
         mutate_serial_inventory(
             &tx,
@@ -1056,6 +1160,7 @@ impl StockLedgerService {
     }
 
     /// Retrieves spatial slot balance.
+    #[cfg(test)]
     pub fn get_location_balance(
         conn: &Connection,
         branch_id: &str,

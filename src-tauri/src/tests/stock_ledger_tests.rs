@@ -22,10 +22,10 @@ use uuid::Uuid;
 
 struct TestContext {
     conn: Connection,
-    org_id: String,
     branch_id: String,
     branch_2_id: String,
     admin_session: String,
+    admin_b2_session: String,
     cashier_session: String,
     product_id: String,
     location_id: String,
@@ -40,7 +40,7 @@ fn setup_stock_test_context() -> TestContext {
     let branch_2 = crate::branch::create_branch(
         &conn,
         crate::branch::CreateBranchInput {
-            organization_id: org_id.clone(),
+            organization_id: org_id,
             name: "Branch 2 Warehouse".to_string(),
             address: Some("789 Secondary St".to_string()),
             currency: Some("USD".to_string()),
@@ -50,7 +50,7 @@ fn setup_stock_test_context() -> TestContext {
     .expect("branch 2 created");
     let branch_2_id = branch_2.id;
 
-    // Admin user session with InventoryAdjust
+    // Admin user session with InventoryAdjust for Branch 1
     let admin_user = create_test_user_with_creds(
         &conn,
         &branch_id,
@@ -69,6 +69,27 @@ fn setup_stock_test_context() -> TestContext {
         None,
     )
     .expect("admin session created")
+    .id;
+
+    // Admin user session with InventoryAdjust for Branch 2 (for spatial cross-branch testing)
+    let admin_b2_user = create_test_user_with_creds(
+        &conn,
+        &branch_2_id,
+        "Admin B2 User",
+        Some("stock_admin_b2"),
+        Some("Password123!"),
+        Some("5678"),
+        "admin",
+    )
+    .expect("admin b2 user created");
+    let admin_b2_session = crate::user::session::create_local_session(
+        &conn,
+        &admin_b2_user.id,
+        &branch_2_id,
+        "password",
+        None,
+    )
+    .expect("admin b2 session created")
     .id;
 
     // Cashier user session (no InventoryAdjust)
@@ -127,10 +148,10 @@ fn setup_stock_test_context() -> TestContext {
 
     TestContext {
         conn,
-        org_id,
         branch_id,
         branch_2_id,
         admin_session,
+        admin_b2_session,
         cashier_session,
         product_id,
         location_id,
@@ -1181,7 +1202,7 @@ fn test_branch_isolation_and_permission_enforcement() {
     let admin_ok = post_stock_movement_impl(&mut ctx.conn, &ctx.admin_session, input);
     assert!(admin_ok.is_ok());
 
-    // 3. Attempting to post movement in Branch 2 using Location from Branch 1 -> rejected
+    // 3. Attempting to post movement in Branch 2 using Location from Branch 1 -> rejected by spatial guard
     let input_cross_branch = PostMovementInput {
         idempotency_key: "ipc_cross_01".to_string(),
         branch_id: ctx.branch_2_id.clone(),
@@ -1195,8 +1216,16 @@ fn test_branch_isolation_and_permission_enforcement() {
         reason: "opening_balance".to_string(),
         notes: None,
     };
-    let cross_err = post_stock_movement_impl(&mut ctx.conn, &ctx.admin_session, input_cross_branch);
+    let cross_err =
+        post_stock_movement_impl(&mut ctx.conn, &ctx.admin_b2_session, input_cross_branch);
     assert!(cross_err.is_err());
+    let err_msg = cross_err.unwrap_err();
+    assert!(
+        err_msg.contains("does not belong to branch")
+            || err_msg.contains("Location branch mismatch")
+            || err_msg.contains("Movement location branch does not match movement branch"),
+        "Expected location branch mismatch error, got: {err_msg}"
+    );
 
     // 4. Query spatial balances via IPC impl
     let balances = get_product_spatial_balances_impl(
@@ -1220,4 +1249,662 @@ fn test_branch_isolation_and_permission_enforcement() {
     .unwrap();
     assert_eq!(b2_summary.total_quantity_milli, 0);
     assert_eq!(b2_summary.spatial_quantity_milli, 0);
+
+    // 5. Query batch summary via IPC impl (verifies get_batch_summary_impl)
+    let b_id = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO product_batches (id, product_id, branch_id, batch_number, quantity_milli, status, expiry_date, received_at)
+             VALUES (?1, ?2, ?3, 'IPC-BATCH-01', 5000, 'active', '2030-01-01', datetime('now'))",
+            params![b_id, ctx.product_id, ctx.branch_id],
+        )
+        .unwrap();
+    let batch_sum =
+        get_batch_summary_impl(&ctx.conn, &ctx.admin_session, &ctx.branch_id, &b_id).unwrap();
+    assert_eq!(batch_sum.total_quantity_milli, 5000);
+    assert_eq!(batch_sum.unallocated_quantity_milli, 5000);
+}
+
+// =========================================================================
+// 16. BATCH VARIANT CONSISTENCY (NULL-SAFE CASES)
+// =========================================================================
+
+#[test]
+fn test_batch_variant_consistency_all_four_null_safe_cases() {
+    let mut ctx = setup_stock_test_context();
+
+    let var_a = Uuid::new_v4().to_string();
+    let var_b = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO product_variants (id, product_id, sku, name, created_at, updated_at)
+             VALUES (?1, ?2, 'SKU-VAR-A', 'Variant A', datetime('now'), datetime('now'))",
+            params![var_a, ctx.product_id],
+        )
+        .unwrap();
+    ctx.conn
+        .execute(
+            "INSERT INTO product_variants (id, product_id, sku, name, created_at, updated_at)
+             VALUES (?1, ?2, 'SKU-VAR-B', 'Variant B', datetime('now'), datetime('now'))",
+            params![var_b, ctx.product_id],
+        )
+        .unwrap();
+
+    let batch_null = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO product_batches (id, product_id, branch_id, variant_id, batch_number, quantity_milli, status, expiry_date, received_at)
+             VALUES (?1, ?2, ?3, NULL, 'LOT-NULL-VAR', 10000, 'active', '2030-01-01', datetime('now'))",
+            params![batch_null, ctx.product_id, ctx.branch_id],
+        )
+        .unwrap();
+
+    let batch_a = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO product_batches (id, product_id, branch_id, variant_id, batch_number, quantity_milli, status, expiry_date, received_at)
+             VALUES (?1, ?2, ?3, ?4, 'LOT-VAR-A', 10000, 'active', '2030-01-01', datetime('now'))",
+            params![batch_a, ctx.product_id, ctx.branch_id, var_a],
+        )
+        .unwrap();
+
+    // Case 1: Both variant NULL => succeeds
+    let req_null_null = PostMovementRequest {
+        idempotency_key: "k_batch_v_null_null".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: Some(batch_null.clone()),
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    let res1 = StockLedgerService::post_movement(&mut ctx.conn, &req_null_null);
+    assert!(res1.is_ok());
+
+    // Case 2: Both variant equal (Variant A == Variant A) => succeeds
+    let req_a_a = PostMovementRequest {
+        idempotency_key: "k_batch_v_a_a".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: Some(var_a.clone()),
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: Some(batch_a.clone()),
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    let res2 = StockLedgerService::post_movement(&mut ctx.conn, &req_a_a);
+    assert!(res2.is_ok());
+
+    // Case 3: Batch has Variant A, request has NULL variant => rejected
+    let req_a_null = PostMovementRequest {
+        idempotency_key: "k_batch_v_a_null".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: Some(batch_a.clone()),
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    let err3 = StockLedgerService::post_movement(&mut ctx.conn, &req_a_null).unwrap_err();
+    assert!(matches!(err3, StockLedgerError::BatchMismatch(_)));
+
+    // Case 4: Batch has NULL variant, request has Variant A => rejected
+    let req_null_a = PostMovementRequest {
+        idempotency_key: "k_batch_v_null_a".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: Some(var_a.clone()),
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: Some(batch_null.clone()),
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    let err4 = StockLedgerService::post_movement(&mut ctx.conn, &req_null_a).unwrap_err();
+    assert!(matches!(err4, StockLedgerError::BatchMismatch(_)));
+
+    // Case 5: Batch has Variant A, request has Variant B => rejected
+    let req_a_b = PostMovementRequest {
+        idempotency_key: "k_batch_v_a_b".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: Some(var_b.clone()),
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: Some(batch_a),
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    let err5 = StockLedgerService::post_movement(&mut ctx.conn, &req_a_b).unwrap_err();
+    assert!(matches!(err5, StockLedgerError::BatchMismatch(_)));
+
+    // Verify Variant B has 0 balance (no leaked mutation)
+    let var_b_qty: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COALESCE(quantity_milli, 0) FROM inventory WHERE product_id = ?1 AND variant_id = ?2",
+            params![ctx.product_id, var_b],
+            |row| row.get(0),
+        )
+        .optional()
+        .unwrap()
+        .unwrap_or(0);
+    assert_eq!(var_b_qty, 0);
+}
+
+// =========================================================================
+// 17. SERIAL VARIANT CONSISTENCY
+// =========================================================================
+
+#[test]
+fn test_serial_variant_consistency_rejection() {
+    let mut ctx = setup_stock_test_context();
+
+    let var_a = Uuid::new_v4().to_string();
+    let var_b = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO product_variants (id, product_id, sku, name, created_at, updated_at)
+             VALUES (?1, ?2, 'SKU-SVAR-A', 'Variant A', datetime('now'), datetime('now'))",
+            params![var_a, ctx.product_id],
+        )
+        .unwrap();
+    ctx.conn
+        .execute(
+            "INSERT INTO product_variants (id, product_id, sku, name, created_at, updated_at)
+             VALUES (?1, ?2, 'SKU-SVAR-B', 'Variant B', datetime('now'), datetime('now'))",
+            params![var_b, ctx.product_id],
+        )
+        .unwrap();
+
+    let serial_id = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO serial_numbers (id, product_id, branch_id, variant_id, serial_number, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'SN-VAR-001', 'reserved', datetime('now'), datetime('now'))",
+            params![serial_id, ctx.product_id, ctx.branch_id, var_a],
+        )
+        .unwrap();
+
+    // Attempt to post movement for Variant B using Serial for Variant A
+    let req_mismatch = PostMovementRequest {
+        idempotency_key: "k_ser_var_mismatch".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: Some(var_b.clone()),
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: Some(serial_id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+
+    let err = StockLedgerService::post_movement(&mut ctx.conn, &req_mismatch).unwrap_err();
+    assert!(matches!(err, StockLedgerError::SerialMismatch(_)));
+
+    // Verify neither aggregate nor spatial balance was mutated for Variant B
+    let agg_b: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COALESCE(quantity_milli, 0) FROM inventory WHERE product_id = ?1 AND variant_id = ?2",
+            params![ctx.product_id, var_b],
+            |row| row.get(0),
+        )
+        .optional()
+        .unwrap()
+        .unwrap_or(0);
+    assert_eq!(agg_b, 0);
+
+    let spat_b: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COALESCE(SUM(quantity_milli), 0) FROM location_inventory WHERE product_id = ?1 AND variant_id = ?2",
+            params![ctx.product_id, var_b],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(spat_b, 0);
+
+    // Serial status remains unchanged
+    let s_status: String = ctx
+        .conn
+        .query_row(
+            "SELECT status FROM serial_numbers WHERE id = ?1",
+            params![serial_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(s_status, "reserved");
+}
+
+// =========================================================================
+// 18. SERIAL BIN CONSISTENCY
+// =========================================================================
+
+#[test]
+fn test_serial_bin_consistency_cases() {
+    let mut ctx = setup_stock_test_context();
+
+    // Create a second bin in the same location
+    let bin_b = create_bin(
+        &ctx.conn,
+        CreateBinInput {
+            location_id: ctx.location_id.clone(),
+            name: "Shelf Slot B".to_string(),
+            code: "SLOT-B".to_string(),
+        },
+    )
+    .expect("bin b created");
+
+    // 1. Establish serial in Bin A
+    let serial_id = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO serial_numbers (id, product_id, branch_id, serial_number, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'SN-BIN-TEST-1', 'reserved', datetime('now'), datetime('now'))",
+            params![serial_id, ctx.product_id, ctx.branch_id],
+        )
+        .unwrap();
+
+    let req_open = PostMovementRequest {
+        idempotency_key: "k_bin_open_a".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()), // Bin A
+        batch_id: None,
+        serial_id: Some(serial_id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &req_open).unwrap();
+
+    // 2. Try deducting serial from Bin B (mismatch: physically in Bin A!)
+    let req_deduct_bad_bin = PostMovementRequest {
+        idempotency_key: "k_bin_deduct_b".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(bin_b.id.clone()), // Mismatched Bin B!
+        batch_id: None,
+        serial_id: Some(serial_id.clone()),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Damage,
+        user_id: None,
+        notes: None,
+    };
+    let err_bin =
+        StockLedgerService::post_movement(&mut ctx.conn, &req_deduct_bad_bin).unwrap_err();
+    assert!(matches!(
+        err_bin,
+        StockLedgerError::LocationBranchMismatch(_)
+    ));
+
+    // Balances remain intact: Bin A has 1000, Bin B has 0
+    let bal_a: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM location_inventory WHERE bin_id = ?1",
+            params![ctx.bin_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(bal_a, 1000);
+
+    // 3. Deduct serial from correct Bin A -> succeeds
+    let req_deduct_ok = PostMovementRequest {
+        idempotency_key: "k_bin_deduct_a_ok".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()), // Correct Bin A
+        batch_id: None,
+        serial_id: Some(serial_id.clone()),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Damage,
+        user_id: None,
+        notes: None,
+    };
+    let res_ok = StockLedgerService::post_movement(&mut ctx.conn, &req_deduct_ok);
+    assert!(res_ok.is_ok());
+
+    // Serial is now defective and coordinates cleared
+    let (s_stat, s_loc, s_bin): (String, Option<String>, Option<String>) = ctx
+        .conn
+        .query_row(
+            "SELECT status, location_id, bin_id FROM serial_numbers WHERE id = ?1",
+            params![serial_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(s_stat, "defective");
+    assert!(s_loc.is_none());
+    assert!(s_bin.is_none());
+
+    // 4. Serial with NULL bin in location -> deducting with NULL bin succeeds
+    let serial_null_bin = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO serial_numbers (id, product_id, branch_id, serial_number, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'SN-BIN-NULL-1', 'reserved', datetime('now'), datetime('now'))",
+            params![serial_null_bin, ctx.product_id, ctx.branch_id],
+        )
+        .unwrap();
+
+    let req_open_null_bin = PostMovementRequest {
+        idempotency_key: "k_bin_open_null".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None, // NULL bin
+        batch_id: None,
+        serial_id: Some(serial_null_bin.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &req_open_null_bin).unwrap();
+
+    let req_deduct_null_bin = PostMovementRequest {
+        idempotency_key: "k_bin_deduct_null".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None, // NULL bin
+        batch_id: None,
+        serial_id: Some(serial_null_bin),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Loss,
+        user_id: None,
+        notes: None,
+    };
+    let res_null_bin = StockLedgerService::post_movement(&mut ctx.conn, &req_deduct_null_bin);
+    assert!(res_null_bin.is_ok());
+}
+
+// =========================================================================
+// 19. BATCH STATUS PRESERVATION & DEPLETION
+// =========================================================================
+
+#[test]
+fn test_batch_status_preservation_and_depletion() {
+    let mut ctx = setup_stock_test_context();
+
+    // 1. Recalled batch: negative deduction preserves 'recalled' status
+    let b_recalled = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO product_batches (id, product_id, branch_id, batch_number, quantity_milli, status, expiry_date, received_at)
+             VALUES (?1, ?2, ?3, 'LOT-REC-01', 5000, 'recalled', '2030-01-01', datetime('now'))",
+            params![b_recalled, ctx.product_id, ctx.branch_id],
+        )
+        .unwrap();
+
+    // Seed location and aggregate inventory for that batch so negative movement can occur
+    ctx.conn
+        .execute(
+            "INSERT INTO inventory (id, branch_id, product_id, quantity, quantity_milli, updated_at)
+             VALUES ('inv_rec', ?1, ?2, 5.0, 5000, datetime('now'))",
+            params![ctx.branch_id, ctx.product_id],
+        )
+        .unwrap();
+    ctx.conn
+        .execute(
+            "INSERT INTO location_inventory (id, branch_id, location_id, product_id, batch_id, quantity_milli)
+             VALUES ('loc_rec', ?1, ?2, ?3, ?4, 5000)",
+            params![ctx.branch_id, ctx.location_id, ctx.product_id, b_recalled],
+        )
+        .unwrap();
+
+    let req_rec_deduct = PostMovementRequest {
+        idempotency_key: "k_rec_deduct".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: Some(b_recalled.clone()),
+        serial_id: None,
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Damage,
+        user_id: None,
+        notes: None,
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &req_rec_deduct).unwrap();
+
+    let (rec_qty, rec_stat): (i64, String) = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli, status FROM product_batches WHERE id = ?1",
+            params![b_recalled],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(rec_qty, 4000);
+    assert_eq!(rec_stat, "recalled", "Recalled status must be preserved");
+
+    // 2. Quarantined batch: negative deduction preserves 'quarantined' status
+    let b_quarantine = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO product_batches (id, product_id, branch_id, batch_number, quantity_milli, status, expiry_date, received_at)
+             VALUES (?1, ?2, ?3, 'LOT-QUAR-01', 3000, 'quarantined', '2030-01-01', datetime('now'))",
+            params![b_quarantine, ctx.product_id, ctx.branch_id],
+        )
+        .unwrap();
+    ctx.conn
+        .execute(
+            "UPDATE inventory SET quantity_milli = quantity_milli + 3000 WHERE id = 'inv_rec'",
+            [],
+        )
+        .unwrap();
+    ctx.conn
+        .execute(
+            "INSERT INTO location_inventory (id, branch_id, location_id, product_id, batch_id, quantity_milli)
+             VALUES ('loc_quar', ?1, ?2, ?3, ?4, 3000)",
+            params![ctx.branch_id, ctx.location_id, ctx.product_id, b_quarantine],
+        )
+        .unwrap();
+
+    let req_quar_deduct = PostMovementRequest {
+        idempotency_key: "k_quar_deduct".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: Some(b_quarantine.clone()),
+        serial_id: None,
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Damage,
+        user_id: None,
+        notes: None,
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &req_quar_deduct).unwrap();
+
+    let (quar_qty, quar_stat): (i64, String) = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli, status FROM product_batches WHERE id = ?1",
+            params![b_quarantine],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(quar_qty, 2000);
+    assert_eq!(
+        quar_stat, "quarantined",
+        "Quarantined status must be preserved"
+    );
+
+    // 3. Batch reaching zero quantity transitions to 'depleted'
+    let req_quar_deplete = PostMovementRequest {
+        idempotency_key: "k_quar_deplete".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: Some(b_quarantine.clone()),
+        serial_id: None,
+        quantity_delta_milli: -2000, // consumes remaining 2000
+        reason: MovementReason::Loss,
+        user_id: None,
+        notes: None,
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &req_quar_deplete).unwrap();
+
+    let (dep_qty, dep_stat): (i64, String) = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli, status FROM product_batches WHERE id = ?1",
+            params![b_quarantine],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(dep_qty, 0);
+    assert_eq!(
+        dep_stat, "depleted",
+        "Zero quantity must transition to depleted"
+    );
+
+    // 4. Normal active batch remains active when deducted, and revives depleted when added
+    let b_active = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO product_batches (id, product_id, branch_id, batch_number, quantity_milli, status, expiry_date, received_at)
+             VALUES (?1, ?2, ?3, 'LOT-ACT-01', 0, 'depleted', '2030-01-01', datetime('now'))",
+            params![b_active, ctx.product_id, ctx.branch_id],
+        )
+        .unwrap();
+
+    let req_revive = PostMovementRequest {
+        idempotency_key: "k_dep_revive".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: Some(b_active.clone()),
+        serial_id: None,
+        quantity_delta_milli: 2500,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &req_revive).unwrap();
+
+    let (act_qty, act_stat): (i64, String) = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli, status FROM product_batches WHERE id = ?1",
+            params![b_active],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(act_qty, 2500);
+    assert_eq!(
+        act_stat, "active",
+        "Depleted batch revives to active on positive movement"
+    );
+}
+
+// =========================================================================
+// 20. SERIAL TERMINAL STATUS REVIVAL BLOCKED
+// =========================================================================
+
+#[test]
+fn test_serial_terminal_status_revival_blocked() {
+    let mut ctx = setup_stock_test_context();
+
+    for (status, name) in &[
+        ("disposed", "SN-TERM-DISPOSED"),
+        ("recalled", "SN-TERM-RECALLED"),
+        ("sold", "SN-TERM-SOLD"),
+        ("transferred", "SN-TERM-TRANSFERRED"),
+    ] {
+        let s_id = Uuid::new_v4().to_string();
+        ctx.conn
+            .execute(
+                "INSERT INTO serial_numbers (id, product_id, branch_id, serial_number, status, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now'))",
+                params![s_id, ctx.product_id, ctx.branch_id, name, status],
+            )
+            .unwrap();
+
+        let req = PostMovementRequest {
+            idempotency_key: format!("k_term_revive_{status}"),
+            branch_id: ctx.branch_id.clone(),
+            product_id: ctx.product_id.clone(),
+            variant_id: None,
+            location_id: ctx.location_id.clone(),
+            bin_id: None,
+            batch_id: None,
+            serial_id: Some(s_id.clone()),
+            quantity_delta_milli: 1000,
+            reason: MovementReason::OpeningBalance,
+            user_id: None,
+            notes: None,
+        };
+
+        let err = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap_err();
+        assert!(
+            matches!(err, StockLedgerError::SerialInvalidStatus(_)),
+            "Status {status} must be rejected from revival"
+        );
+
+        // Verify status remains unchanged
+        let cur_stat: String = ctx
+            .conn
+            .query_row(
+                "SELECT status FROM serial_numbers WHERE id = ?1",
+                params![s_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cur_stat, *status);
+    }
+
+    // Verify aggregate stock remains 0
+    let agg_qty: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COALESCE(quantity_milli, 0) FROM inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .unwrap()
+        .unwrap_or(0);
+    assert_eq!(agg_qty, 0);
 }
