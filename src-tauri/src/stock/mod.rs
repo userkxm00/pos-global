@@ -165,6 +165,47 @@ pub struct PostMovementRequest {
 }
 
 impl PostMovementRequest {
+    /// Normalizes and validates an optional identifier field on the request.
+    /// Fails closed if the field was provided but contains only whitespace.
+    pub fn normalized_optional_id<'a>(
+        raw: Option<&'a str>,
+        field_name: &str,
+    ) -> Result<Option<&'a str>, StockLedgerError> {
+        match raw {
+            None => Ok(None),
+            Some(s) => {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    Err(StockLedgerError::Validation(format!(
+                        "{field_name} cannot be whitespace-only when provided"
+                    )))
+                } else {
+                    Ok(Some(trimmed))
+                }
+            }
+        }
+    }
+
+    pub fn normalized_variant_id(&self) -> Result<Option<&str>, StockLedgerError> {
+        Self::normalized_optional_id(self.variant_id.as_deref(), "variant_id")
+    }
+
+    pub fn normalized_bin_id(&self) -> Result<Option<&str>, StockLedgerError> {
+        Self::normalized_optional_id(self.bin_id.as_deref(), "bin_id")
+    }
+
+    pub fn normalized_batch_id(&self) -> Result<Option<&str>, StockLedgerError> {
+        Self::normalized_optional_id(self.batch_id.as_deref(), "batch_id")
+    }
+
+    pub fn normalized_serial_id(&self) -> Result<Option<&str>, StockLedgerError> {
+        Self::normalized_optional_id(self.serial_id.as_deref(), "serial_id")
+    }
+
+    pub fn normalized_user_id(&self) -> Result<Option<&str>, StockLedgerError> {
+        Self::normalized_optional_id(self.user_id.as_deref(), "user_id")
+    }
+
     pub fn canonical_hash(&self) -> String {
         let mut hasher = Sha256::new();
         let payload = format!(
@@ -263,6 +304,12 @@ fn validate_required_strings_and_delta(req: &PostMovementRequest) -> Result<(), 
     if req.quantity_delta_milli == 0 {
         return Err(StockLedgerError::ZeroQuantityDelta);
     }
+
+    // Fail closed on whitespace-only optional identifiers
+    req.normalized_variant_id()?;
+    req.normalized_bin_id()?;
+    req.normalized_batch_id()?;
+    req.normalized_user_id()?;
     Ok(())
 }
 
@@ -297,7 +344,8 @@ fn validate_movement_reason_and_serial(req: &PostMovementRequest) -> Result<(), 
         }
     }
 
-    if req.serial_id.is_some() && req.quantity_delta_milli.abs() != 1000 {
+    let serial_id = req.normalized_serial_id()?;
+    if serial_id.is_some() && req.quantity_delta_milli.abs() != 1000 {
         return Err(StockLedgerError::SerialInvalidQuantity(
             "Serialized stock movements must have quantity_delta_milli equal to +1000 or -1000"
                 .into(),
@@ -653,26 +701,13 @@ fn validate_serial_asset(
     conn: &Connection,
     req: &PostMovementRequest,
 ) -> Result<(), StockLedgerError> {
-    let Some(s_id) = req
-        .serial_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    else {
+    let Some(s_id) = req.normalized_serial_id()? else {
         return Ok(());
     };
     let record = fetch_serial_record(conn, s_id)?;
-    let var_id = req
-        .variant_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    let var_id = req.normalized_variant_id()?;
     validate_serial_identity(&record, req.product_id.trim(), req.branch_id.trim(), var_id)?;
-    let bin_id = req
-        .bin_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    let bin_id = req.normalized_bin_id()?;
     validate_serial_status_and_coordinates(
         &record,
         req.location_id.trim(),
@@ -735,22 +770,10 @@ fn mutate_spatial_inventory(
 ) -> Result<(i64, i64), StockLedgerError> {
     let branch_id = req.branch_id.trim();
     let location_id = req.location_id.trim();
-    let bin_id = req
-        .bin_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    let bin_id = req.normalized_bin_id()?;
     let product_id = req.product_id.trim();
-    let variant_id = req
-        .variant_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let batch_id = req
-        .batch_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    let variant_id = req.normalized_variant_id()?;
+    let batch_id = req.normalized_batch_id()?;
     let delta = req.quantity_delta_milli;
 
     let slot_info: Option<(String, i64)> = conn
@@ -879,31 +902,11 @@ fn append_movement_record(
 ) -> Result<(String, String), StockLedgerError> {
     let movement_id = Uuid::new_v4().to_string();
     let reason_str = req.reason.as_str();
-    let user_id = req
-        .user_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let bin_id = req
-        .bin_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let var_id = req
-        .variant_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let batch_id = req
-        .batch_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let serial_id = req
-        .serial_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    let user_id = req.normalized_user_id()?;
+    let bin_id = req.normalized_bin_id()?;
+    let var_id = req.normalized_variant_id()?;
+    let batch_id = req.normalized_batch_id()?;
+    let serial_id = req.normalized_serial_id()?;
 
     conn.execute(
         "INSERT INTO stock_movements (
@@ -997,26 +1000,10 @@ impl StockLedgerService {
         let branch_id = req.branch_id.trim();
         let product_id = req.product_id.trim();
         let location_id = req.location_id.trim();
-        let variant_id = req
-            .variant_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let bin_id = req
-            .bin_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let batch_id = req
-            .batch_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let serial_id = req
-            .serial_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
+        let variant_id = req.normalized_variant_id()?;
+        let bin_id = req.normalized_bin_id()?;
+        let batch_id = req.normalized_batch_id()?;
+        let serial_id = req.normalized_serial_id()?;
 
         // 4. Validate relational references
         validate_branch_and_location(&tx, branch_id, location_id, bin_id)?;

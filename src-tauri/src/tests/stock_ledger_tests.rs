@@ -1919,3 +1919,320 @@ fn test_serial_terminal_status_revival_blocked() {
         .unwrap_or(0);
     assert_eq!(agg_qty, 0);
 }
+
+#[test]
+fn test_whitespace_serial_positive_movement_fails_closed_without_side_effects() {
+    let mut ctx = setup_stock_test_context();
+
+    let req = PostMovementRequest {
+        idempotency_key: "k_whitespace_serial_pos".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: Some("   \t  ".to_string()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+
+    let err = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap_err();
+    assert!(
+        matches!(err, StockLedgerError::Validation(ref msg) if msg.contains("serial_id cannot be whitespace-only")),
+        "Expected validation error for whitespace serial, got: {err:?}"
+    );
+
+    // Atomicity check: verify NO table was modified
+    let inv_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(inv_count, 0, "inventory must not be created");
+
+    let loc_inv_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM location_inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(loc_inv_count, 0, "location_inventory must not be created");
+
+    let mov_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(mov_count, 0, "stock_movements must not record movement");
+
+    let idem_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM idempotency_keys WHERE key = ?1",
+            params!["k_whitespace_serial_pos"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        idem_count, 0,
+        "idempotency_keys must not be recorded on validation failure"
+    );
+
+    let sn_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM serial_numbers WHERE product_id = ?1",
+            params![ctx.product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(sn_count, 0, "serial_numbers must not be mutated");
+}
+
+#[test]
+fn test_whitespace_serial_negative_movement_fails_closed_without_side_effects() {
+    let mut ctx = setup_stock_test_context();
+
+    // First establish genuine initial baseline stock via valid opening balance
+    let open_req = PostMovementRequest {
+        idempotency_key: "k_base_open_for_neg_ws".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 5000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &open_req).expect("baseline stock posted");
+
+    // Attempt negative movement with whitespace serial_id
+    let req = PostMovementRequest {
+        idempotency_key: "k_whitespace_serial_neg".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: Some(" \n  ".to_string()),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Damage,
+        user_id: None,
+        notes: None,
+    };
+
+    let err = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap_err();
+    assert!(
+        matches!(err, StockLedgerError::Validation(ref msg) if msg.contains("serial_id cannot be whitespace-only")),
+        "Expected validation error for whitespace serial, got: {err:?}"
+    );
+
+    // Atomicity check: inventory must remain exactly at baseline 5000
+    let inv_qty: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE product_id = ?1",
+            params![ctx.product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(inv_qty, 5000, "inventory must remain unchanged at 5000");
+
+    let loc_inv_qty: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM location_inventory WHERE product_id = ?1 AND location_id = ?2",
+            params![ctx.product_id, ctx.location_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        loc_inv_qty, 5000,
+        "location_inventory must remain unchanged at 5000"
+    );
+
+    let mov_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        mov_count, 1,
+        "only the opening baseline movement should exist"
+    );
+
+    let idem_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM idempotency_keys WHERE key = ?1",
+            params!["k_whitespace_serial_neg"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        idem_count, 0,
+        "failed request idempotency key must not be saved"
+    );
+}
+
+#[test]
+fn test_valid_serial_positive_and_negative_movement_lifecycle_succeeds() {
+    let mut ctx = setup_stock_test_context();
+
+    let s_id = Uuid::new_v4().to_string();
+    ctx.conn
+        .execute(
+            "INSERT INTO serial_numbers (id, product_id, branch_id, serial_number, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'SN-VALID-LIFECYCLE', 'ordered', datetime('now'), datetime('now'))",
+            params![s_id, ctx.product_id, ctx.branch_id],
+        )
+        .unwrap();
+
+    // 1. Positive serialized movement (+1000)
+    let pos_req = PostMovementRequest {
+        idempotency_key: "k_valid_serial_pos".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: Some(s_id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+    let pos_res = StockLedgerService::post_movement(&mut ctx.conn, &pos_req)
+        .expect("valid serial positive succeeds");
+    assert_eq!(pos_res.serial_id, Some(s_id.clone()));
+
+    // Verify serial status is now 'in_stock' at location
+    let (stat_after_pos, loc_after_pos): (String, Option<String>) = ctx
+        .conn
+        .query_row(
+            "SELECT status, location_id FROM serial_numbers WHERE id = ?1",
+            params![s_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(stat_after_pos, "in_stock");
+    assert_eq!(loc_after_pos, Some(ctx.location_id.clone()));
+
+    // 2. Negative serialized movement (-1000) with Damage
+    let neg_req = PostMovementRequest {
+        idempotency_key: "k_valid_serial_neg".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: Some(s_id.clone()),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Damage,
+        user_id: None,
+        notes: None,
+    };
+    let neg_res = StockLedgerService::post_movement(&mut ctx.conn, &neg_req)
+        .expect("valid serial negative succeeds");
+    assert_eq!(neg_res.serial_id, Some(s_id.clone()));
+
+    // Verify serial status transitioned to 'defective' with location cleared
+    let (stat_after_neg, loc_after_neg): (String, Option<String>) = ctx
+        .conn
+        .query_row(
+            "SELECT status, location_id FROM serial_numbers WHERE id = ?1",
+            params![s_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(stat_after_neg, "defective");
+    assert_eq!(loc_after_neg, None);
+}
+
+#[test]
+fn test_ordinary_non_serialized_movement_succeeds_with_none_serial() {
+    let mut ctx = setup_stock_test_context();
+
+    let req = PostMovementRequest {
+        idempotency_key: "k_none_serial_pos".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 2500,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: None,
+    };
+
+    let res =
+        StockLedgerService::post_movement(&mut ctx.conn, &req).expect("non-serialized succeeds");
+    assert_eq!(res.serial_id, None);
+    assert_eq!(res.quantity_after_milli, 2500);
+
+    // Verify movement recorded with NULL serial_id
+    let saved_serial: Option<String> = ctx
+        .conn
+        .query_row(
+            "SELECT serial_id FROM stock_movements WHERE id = ?1",
+            params![res.movement_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(saved_serial, None);
+}
+
+#[test]
+fn test_whitespace_optional_identifiers_fail_closed() {
+    let mut ctx = setup_stock_test_context();
+
+    for (field, var, bin, batch) in [
+        ("variant_id", Some("   ".to_string()), None, None),
+        ("bin_id", None, Some("\t ".to_string()), None),
+        ("batch_id", None, None, Some("  \n".to_string())),
+    ] {
+        let req = PostMovementRequest {
+            idempotency_key: format!("k_ws_opt_{field}"),
+            branch_id: ctx.branch_id.clone(),
+            product_id: ctx.product_id.clone(),
+            variant_id: var,
+            location_id: ctx.location_id.clone(),
+            bin_id: bin,
+            batch_id: batch,
+            serial_id: None,
+            quantity_delta_milli: 1000,
+            reason: MovementReason::OpeningBalance,
+            user_id: None,
+            notes: None,
+        };
+        let err = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap_err();
+        assert!(
+            matches!(err, StockLedgerError::Validation(ref msg) if msg.contains(&format!("{field} cannot be whitespace-only"))),
+            "Expected validation error for {field}, got: {err:?}"
+        );
+    }
+}
