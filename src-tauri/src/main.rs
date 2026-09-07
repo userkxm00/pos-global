@@ -12,6 +12,7 @@ mod category;
 mod commands;
 mod db;
 mod licence;
+mod location;
 mod manufacturer;
 mod organization;
 mod permission;
@@ -149,6 +150,19 @@ fn main() {
             commands::warranty::evaluate_warranty_coverage,
             commands::warranty::register_instance_warranty,
             commands::warranty::get_instance_warranty,
+            commands::location::create_location,
+            commands::location::get_location,
+            commands::location::list_locations,
+            commands::location::update_location,
+            commands::location::deactivate_location,
+            commands::location::reactivate_location,
+            commands::location::get_location_tree,
+            commands::location::create_bin,
+            commands::location::get_bin,
+            commands::location::list_bins,
+            commands::location::update_bin,
+            commands::location::deactivate_bin,
+            commands::location::reactivate_bin,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
