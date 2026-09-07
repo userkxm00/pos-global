@@ -150,6 +150,7 @@ F2.08 adheres strictly to the quantity and ledger boundary established across Ph
 ### 5.1 Reconciliation with F2.11 Stock Ledger Boundary (Post-F2.11 Amendment)
 - **Instance Registration (`create_serial_instance`):** Instantiates an asset record in the `reserved` status with `location_id = NULL` and `bin_id = NULL`. In F2.08, this represents registered asset identity prior to stock-on-hand induction.
 - **Stock Ownership and On-Hand Intake (`StockLedgerService::post_movement`):** Transitioning a registered serialized unit to `in_stock` ownership on-hand requires posting an authenticated stock movement (reason: `opening_balance` or `adjustment` with $\Delta = +1000$ and mandatory `location_id`). F2.11 is the exclusive write authority that atomically assigns physical coordinates (`location_id`, `bin_id`), sets `status = 'in_stock'`, increments aggregate and spatial inventory balances, and records the immutable ledger entry.
+- **Direct Status Transition Prohibited:** `update_serial_status` strictly prohibits direct transitions to `in_stock`. Physical on-hand stock induction must execute through `StockLedgerService::post_movement` to guarantee that all `in_stock` instances are backed by location attribution and ledger entries.
 - **Firewall Preserved:** Serial registration alone does not and cannot create stock ownership, mutate inventory balances, or bypass spatial ledger attribution.
 
 ---

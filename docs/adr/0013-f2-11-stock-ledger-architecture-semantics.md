@@ -199,6 +199,7 @@ A new F2.11 opening balance adds equal quantity to aggregate and spatial state s
      - `location_inventory.quantity_milli += 1000`
      - `stock_movements(serial_id = S, location_id = LOC, bin_id = BIN, delta_milli = 1000)`
    - No operation outside `StockLedgerService` may introduce or mutate a serial into `in_stock` with unallocated (`NULL`) or unverified location coordinates, guaranteeing that every `in_stock` serialized unit is backed by physical location inventory and immutable movement history.
+   - While pre-020 legacy serials retain their historical NULL location coordinates until reconciled in future milestones, all post-020 serials transitioning to `in_stock` must strictly possess valid location coordinates via `StockLedgerService`. Direct transitions to `in_stock` via `update_serial_status` are prohibited.
 
 ---
 

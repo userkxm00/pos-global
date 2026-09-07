@@ -2242,6 +2242,14 @@ fn test_whitespace_optional_identifiers_fail_closed() {
 fn test_serial_creation_reconciliation_and_stock_ledger_intake_atomicity() {
     let mut ctx = setup_stock_test_context();
 
+    // Mark product as serial-tracked so serial creation is authorized
+    ctx.conn
+        .execute(
+            "UPDATE products SET requires_serial = 1 WHERE id = ?1",
+            params![ctx.product_id],
+        )
+        .unwrap();
+
     // 1. Serial Creation (F2.08) creates instance in 'reserved' pre-stock state
     let serial_input = CreateSerialInput {
         product_id: ctx.product_id.clone(),
@@ -2414,7 +2422,7 @@ fn test_serial_creation_reconciliation_and_stock_ledger_intake_atomicity() {
     // Create an inactive bin to trigger validation error during transaction
     let inactive_bin_id = crate::location::create_bin(
         &ctx.conn,
-        &CreateBinInput {
+        CreateBinInput {
             location_id: ctx.location_id.clone(),
             code: "BIN-INACTIVE-RECON".into(),
             name: "Inactive Bin".into(),

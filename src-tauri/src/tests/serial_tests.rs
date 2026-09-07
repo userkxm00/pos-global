@@ -1129,8 +1129,8 @@ fn test_lifecycle_status_transitions() {
 
     assert_eq!(inst.status, SerialStatus::Reserved);
 
-    // Reserved -> InStock
-    let s_instock = update_serial_status(
+    // Direct transition to InStock via update_serial_status is prohibited (must use StockLedgerService)
+    let err = update_serial_status(
         &conn,
         &UpdateSerialStatusInput {
             id: inst.id.clone(),
@@ -1138,20 +1138,11 @@ fn test_lifecycle_status_transitions() {
             status: SerialStatus::InStock,
         },
     )
-    .expect("in_stock");
-    assert_eq!(s_instock.status, SerialStatus::InStock);
-
-    // InStock -> Reserved
-    let s_reserved = update_serial_status(
-        &conn,
-        &UpdateSerialStatusInput {
-            id: inst.id.clone(),
-            branch_id: branch_id.clone(),
-            status: SerialStatus::Reserved,
-        },
-    )
-    .expect("reserve");
-    assert_eq!(s_reserved.status, SerialStatus::Reserved);
+    .unwrap_err();
+    assert!(
+        matches!(err, SerialError::Validation(ref msg) if msg.contains("Direct transition to 'in_stock' is prohibited")),
+        "Expected validation error blocking direct transition to in_stock, got: {err:?}"
+    );
 
     // Reserved -> Sold
     let s_sold = update_serial_status(
