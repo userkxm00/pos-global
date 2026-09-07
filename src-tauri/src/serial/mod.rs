@@ -690,13 +690,13 @@ pub fn update_serial_status(
         return Err(SerialError::NotFound(input.id.clone()));
     }
 
+    validate_status_transition(current.status, input.status)?;
+
     if input.status == SerialStatus::InStock {
         return Err(SerialError::Validation(
             "Direct transition to 'in_stock' is prohibited; serial stock intake must execute through StockLedgerService".into(),
         ));
     }
-
-    validate_status_transition(current.status, input.status)?;
 
     let sql = format!(
         "UPDATE serial_numbers
