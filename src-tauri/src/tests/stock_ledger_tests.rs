@@ -2256,8 +2256,16 @@ fn test_serial_creation_reconciliation_and_stock_ledger_intake_atomicity() {
         .expect("serial creation must succeed in pre-stock state");
 
     assert_eq!(instance.status, SerialStatus::Reserved);
-    assert_eq!(instance.location_id, None);
-    assert_eq!(instance.bin_id, None);
+    let (init_loc, init_bin): (Option<String>, Option<String>) = ctx
+        .conn
+        .query_row(
+            "SELECT location_id, bin_id FROM serial_numbers WHERE id = ?1",
+            params![instance.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(init_loc, None);
+    assert_eq!(init_bin, None);
 
     // Verify creation alone cannot create stock-on-hand unintentionally
     let inv_count: i64 = ctx
@@ -2409,7 +2417,7 @@ fn test_serial_creation_reconciliation_and_stock_ledger_intake_atomicity() {
         &CreateBinInput {
             location_id: ctx.location_id.clone(),
             code: "BIN-INACTIVE-RECON".into(),
-            name: Some("Inactive Bin".into()),
+            name: "Inactive Bin".into(),
         },
     )
     .unwrap()
