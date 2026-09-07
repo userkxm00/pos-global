@@ -2125,8 +2125,16 @@ fn test_legacy_pre020_instock_serial_preservation() {
         .expect("get serial")
         .expect("exists");
     assert_eq!(inst.status, SerialStatus::InStock);
-    assert_eq!(inst.location_id, None);
-    assert_eq!(inst.bin_id, None);
+
+    let (legacy_loc, legacy_bin): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT location_id, bin_id FROM serial_numbers WHERE id = ?1",
+            params![legacy_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("query legacy coordinates");
+    assert_eq!(legacy_loc, None);
+    assert_eq!(legacy_bin, None);
 
     // 2. Direct outbound transition from legacy in_stock is also blocked
     let err = update_serial_status(

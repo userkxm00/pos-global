@@ -524,7 +524,7 @@ fn validate_product_and_variant(
                     "Variant '{var_id}' belongs to product '{var_prod}', not '{product_id}'"
                 )))
             }
-            Some((_, is_active)) if is_active == 0 => {
+            Some((_, 0)) => {
                 return Err(StockLedgerError::Validation(format!(
                     "Variant '{var_id}' is inactive and cannot accept stock movements"
                 )))
