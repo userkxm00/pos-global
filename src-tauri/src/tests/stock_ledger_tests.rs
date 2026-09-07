@@ -8,9 +8,7 @@ use crate::commands::stock::{
     post_stock_movement_impl, PostMovementInput,
 };
 use crate::location::{create_bin, create_location, CreateBinInput, CreateLocationInput};
-use crate::stock::{
-    MovementReason, PostMovementRequest, StockLedgerError, StockLedgerService,
-};
+use crate::stock::{MovementReason, PostMovementRequest, StockLedgerError, StockLedgerService};
 use crate::tests::test_helpers::{
     apply_migrations_up_to, create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
     setup_test_db_up_to,
@@ -212,10 +210,14 @@ fn test_migration_020_applies_cleanly_and_preserves_legacy_unallocated_stock() {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(loc_inv_count, 0, "Migration 020 must not backfill location_inventory");
+    assert_eq!(
+        loc_inv_count, 0,
+        "Migration 020 must not backfill location_inventory"
+    );
 
     // 5. Verify unallocated balance derivation
-    let summary = StockLedgerService::get_stock_summary(&conn, &branch_id, &product_id, None).unwrap();
+    let summary =
+        StockLedgerService::get_stock_summary(&conn, &branch_id, &product_id, None).unwrap();
     assert_eq!(summary.total_quantity_milli, legacy_qty_milli);
     assert_eq!(summary.spatial_quantity_milli, 0);
     assert_eq!(summary.unallocated_quantity_milli, legacy_qty_milli);
@@ -251,7 +253,10 @@ fn test_immutable_stock_movements_triggers_block_update_and_delete() {
         "UPDATE stock_movements SET quantity_delta_milli = 99999 WHERE id = ?1",
         params![result.movement_id],
     );
-    assert!(update_res.is_err(), "Trigger must block UPDATE on stock_movements");
+    assert!(
+        update_res.is_err(),
+        "Trigger must block UPDATE on stock_movements"
+    );
     let err_str = update_res.unwrap_err().to_string();
     assert!(err_str.contains("Historical stock_movements rows are immutable"));
 
@@ -260,7 +265,10 @@ fn test_immutable_stock_movements_triggers_block_update_and_delete() {
         "DELETE FROM stock_movements WHERE id = ?1",
         params![result.movement_id],
     );
-    assert!(delete_res.is_err(), "Trigger must block DELETE on stock_movements");
+    assert!(
+        delete_res.is_err(),
+        "Trigger must block DELETE on stock_movements"
+    );
     let err_str = delete_res.unwrap_err().to_string();
     assert!(err_str.contains("Historical stock_movements rows are immutable"));
 }
@@ -280,7 +288,10 @@ fn test_stock_movements_spatial_guard_triggers() {
         params![ctx.branch_id, ctx.product_id, ctx.bin_id],
     );
     assert!(err1.is_err());
-    assert!(err1.unwrap_err().to_string().contains("Movement bin cannot be specified without a location"));
+    assert!(err1
+        .unwrap_err()
+        .to_string()
+        .contains("Movement bin cannot be specified without a location"));
 
     // Trigger check 2: Location from another branch
     let loc_branch_2 = create_location(
@@ -301,7 +312,10 @@ fn test_stock_movements_spatial_guard_triggers() {
         params![ctx.branch_id, ctx.product_id, loc_branch_2.id],
     );
     assert!(err2.is_err());
-    assert!(err2.unwrap_err().to_string().contains("Movement location branch does not match movement branch"));
+    assert!(err2
+        .unwrap_err()
+        .to_string()
+        .contains("Movement location branch does not match movement branch"));
 
     // Trigger check 3: Bin does not belong to location
     let loc_another = create_location(
@@ -322,7 +336,10 @@ fn test_stock_movements_spatial_guard_triggers() {
         params![ctx.branch_id, ctx.product_id, loc_another.id, ctx.bin_id],
     );
     assert!(err3.is_err());
-    assert!(err3.unwrap_err().to_string().contains("Movement bin does not belong to movement location"));
+    assert!(err3
+        .unwrap_err()
+        .to_string()
+        .contains("Movement bin does not belong to movement location"));
 
     // Trigger check 4: Zero delta rejected
     let err4 = ctx.conn.execute(
@@ -331,7 +348,10 @@ fn test_stock_movements_spatial_guard_triggers() {
         params![ctx.branch_id, ctx.product_id, ctx.location_id],
     );
     assert!(err4.is_err());
-    assert!(err4.unwrap_err().to_string().contains("Stock movement quantity delta cannot be zero"));
+    assert!(err4
+        .unwrap_err()
+        .to_string()
+        .contains("Stock movement quantity delta cannot be zero"));
 
     // Trigger check 5: after != before + delta rejected
     let err5 = ctx.conn.execute(
@@ -340,7 +360,10 @@ fn test_stock_movements_spatial_guard_triggers() {
         params![ctx.branch_id, ctx.product_id, ctx.location_id],
     );
     assert!(err5.is_err());
-    assert!(err5.unwrap_err().to_string().contains("after quantity must equal before quantity plus delta"));
+    assert!(err5
+        .unwrap_err()
+        .to_string()
+        .contains("after quantity must equal before quantity plus delta"));
 }
 
 // =========================================================================
@@ -393,28 +416,68 @@ fn test_location_inventory_8_mutually_exclusive_partial_unique_indexes() {
     }
 
     // Index 1: bin NULL, var NULL, batch NULL
-    test_slot_collision!(None::<&str>, None::<&str>, None::<&str>, "u1 (NULL, NULL, NULL)");
+    test_slot_collision!(
+        None::<&str>,
+        None::<&str>,
+        None::<&str>,
+        "u1 (NULL, NULL, NULL)"
+    );
 
     // Index 2: bin NOT NULL, var NULL, batch NULL
-    test_slot_collision!(Some(&ctx.bin_id), None::<&str>, None::<&str>, "u2 (bin, NULL, NULL)");
+    test_slot_collision!(
+        Some(&ctx.bin_id),
+        None::<&str>,
+        None::<&str>,
+        "u2 (bin, NULL, NULL)"
+    );
 
     // Index 3: bin NULL, var NOT NULL, batch NULL
-    test_slot_collision!(None::<&str>, Some(&variant_id), None::<&str>, "u3 (NULL, var, NULL)");
+    test_slot_collision!(
+        None::<&str>,
+        Some(&variant_id),
+        None::<&str>,
+        "u3 (NULL, var, NULL)"
+    );
 
     // Index 4: bin NULL, var NULL, batch NOT NULL
-    test_slot_collision!(None::<&str>, None::<&str>, Some(&batch_id), "u4 (NULL, NULL, batch)");
+    test_slot_collision!(
+        None::<&str>,
+        None::<&str>,
+        Some(&batch_id),
+        "u4 (NULL, NULL, batch)"
+    );
 
     // Index 5: bin NOT NULL, var NOT NULL, batch NULL
-    test_slot_collision!(Some(&ctx.bin_id), Some(&variant_id), None::<&str>, "u5 (bin, var, NULL)");
+    test_slot_collision!(
+        Some(&ctx.bin_id),
+        Some(&variant_id),
+        None::<&str>,
+        "u5 (bin, var, NULL)"
+    );
 
     // Index 6: bin NOT NULL, var NULL, batch NOT NULL
-    test_slot_collision!(Some(&ctx.bin_id), None::<&str>, Some(&batch_id), "u6 (bin, NULL, batch)");
+    test_slot_collision!(
+        Some(&ctx.bin_id),
+        None::<&str>,
+        Some(&batch_id),
+        "u6 (bin, NULL, batch)"
+    );
 
     // Index 7: bin NULL, var NOT NULL, batch NOT NULL
-    test_slot_collision!(None::<&str>, Some(&variant_id), Some(&batch_id), "u7 (NULL, var, batch)");
+    test_slot_collision!(
+        None::<&str>,
+        Some(&variant_id),
+        Some(&batch_id),
+        "u7 (NULL, var, batch)"
+    );
 
     // Index 8: bin NOT NULL, var NOT NULL, batch NOT NULL
-    test_slot_collision!(Some(&ctx.bin_id), Some(&variant_id), Some(&batch_id), "u8 (bin, var, batch)");
+    test_slot_collision!(
+        Some(&ctx.bin_id),
+        Some(&variant_id),
+        Some(&batch_id),
+        "u8 (bin, var, batch)"
+    );
 }
 
 // =========================================================================
@@ -436,7 +499,8 @@ fn test_opening_balance_happy_path_and_unallocated_invariance() {
         .unwrap();
 
     let initial_summary =
-        StockLedgerService::get_stock_summary(&ctx.conn, &ctx.branch_id, &ctx.product_id, None).unwrap();
+        StockLedgerService::get_stock_summary(&ctx.conn, &ctx.branch_id, &ctx.product_id, None)
+            .unwrap();
     assert_eq!(initial_summary.total_quantity_milli, 4000);
     assert_eq!(initial_summary.spatial_quantity_milli, 0);
     assert_eq!(initial_summary.unallocated_quantity_milli, 4000);
@@ -470,7 +534,8 @@ fn test_opening_balance_happy_path_and_unallocated_invariance() {
     // spatial += delta (0 -> 6000)
     // unallocated remains STRICTLY unchanged at 4000!
     let final_summary =
-        StockLedgerService::get_stock_summary(&ctx.conn, &ctx.branch_id, &ctx.product_id, None).unwrap();
+        StockLedgerService::get_stock_summary(&ctx.conn, &ctx.branch_id, &ctx.product_id, None)
+            .unwrap();
     assert_eq!(final_summary.total_quantity_milli, 10000);
     assert_eq!(final_summary.spatial_quantity_milli, 6000);
     assert_eq!(final_summary.unallocated_quantity_milli, 4000);
@@ -589,7 +654,10 @@ fn test_adjustments_damage_loss_and_negative_stock_prevention() {
         notes: None,
     };
     let err_over = StockLedgerService::post_movement(&mut ctx.conn, &req_overdraft).unwrap_err();
-    assert!(matches!(err_over, StockLedgerError::NegativeStockBlocked(_)));
+    assert!(matches!(
+        err_over,
+        StockLedgerError::NegativeStockBlocked(_)
+    ));
 
     // Balance remains exactly 9,000
     let cur_qty = StockLedgerService::get_location_balance(
@@ -876,7 +944,9 @@ fn test_atomic_rollback_on_partial_failure() {
         .unwrap();
     let initial_idemp_count: i64 = ctx
         .conn
-        .query_row("SELECT COUNT(*) FROM idempotency_keys", [], |row| row.get(0))
+        .query_row("SELECT COUNT(*) FROM idempotency_keys", [], |row| {
+            row.get(0)
+        })
         .unwrap();
 
     // Attempt a transaction that fails during validation/invariants (e.g. negative stock)
@@ -920,7 +990,9 @@ fn test_atomic_rollback_on_partial_failure() {
         .unwrap();
     let final_idemp_count: i64 = ctx
         .conn
-        .query_row("SELECT COUNT(*) FROM idempotency_keys", [], |row| row.get(0))
+        .query_row("SELECT COUNT(*) FROM idempotency_keys", [], |row| {
+            row.get(0)
+        })
         .unwrap();
 
     assert_eq!(initial_movements_count, final_movements_count);
@@ -1115,16 +1187,25 @@ fn test_branch_isolation_and_permission_enforcement() {
     assert!(cross_err.is_err());
 
     // 4. Query spatial balances via IPC impl
-    let balances =
-        get_product_spatial_balances_impl(&ctx.conn, &ctx.admin_session, &ctx.branch_id, &ctx.product_id)
-            .unwrap();
+    let balances = get_product_spatial_balances_impl(
+        &ctx.conn,
+        &ctx.admin_session,
+        &ctx.branch_id,
+        &ctx.product_id,
+    )
+    .unwrap();
     assert_eq!(balances.len(), 1);
     assert_eq!(balances[0].quantity_milli, 1000);
 
     // Summary for Branch 2 is 0
-    let b2_summary =
-        get_stock_summary_impl(&ctx.conn, &ctx.admin_session, &ctx.branch_2_id, &ctx.product_id, None)
-            .unwrap();
+    let b2_summary = get_stock_summary_impl(
+        &ctx.conn,
+        &ctx.admin_session,
+        &ctx.branch_2_id,
+        &ctx.product_id,
+        None,
+    )
+    .unwrap();
     assert_eq!(b2_summary.total_quantity_milli, 0);
     assert_eq!(b2_summary.spatial_quantity_milli, 0);
 }

@@ -7,7 +7,7 @@ Date: 2026-09-07
 
 ## 1. Context
 
-Following the completion and merge of milestone `F2.10 — Locations / Bins` ([019_locations_bins.sql](file:///c:/Users/user0/Desktop/pos%20global/pos-global/src-tauri/src/db/migrations/019_locations_bins.sql)), which established the physical topography master data (`locations` and `bins`) with zero quantity tracking, milestone `F2.11 — Stock Ledger` operationalizes spatial inventory tracking.
+Following the completion and merge of milestone `F2.10 — Locations / Bins` (`019_locations_bins.sql`), which established the physical topography master data (`locations` and `bins`) with zero quantity tracking, milestone `F2.11 — Stock Ledger` operationalizes spatial inventory tracking.
 
 In retail, wholesale, and multi-facility commercial operations:
 - **At the aggregate level**, inventory balances track total physical ownership per product and variant within a branch.
@@ -24,23 +24,23 @@ This document establishes the authoritative architectural decisions, entity mode
 To maintain absolute architectural clarity and prevent specification drift, this ADR categorizes all architectural statements into distinct tiers:
 
 ### A. Authoritative Existing Facts
-1. **Aggregate Inventory Source of Truth ([001_initial.sql](file:///c:/Users/user0/Desktop/pos%20global/pos-global/src-tauri/src/db/migrations/001_initial.sql#L96), [006_quantity_precision_hardening.sql](file:///c:/Users/user0/Desktop/pos%20global/pos-global/src-tauri/src/db/migrations/006_quantity_precision_hardening.sql#L5)):**
+1. **Aggregate Inventory Source of Truth (`001_initial.sql:96`, `006_quantity_precision_hardening.sql:5`):**
    - The `inventory` table stores aggregate stock per `(branch_id, product_id, variant_id)` using integer milli-units (`quantity_milli INTEGER NOT NULL DEFAULT 0`).
    - Prior to Migration 020, `inventory` contains no `location_id` or `bin_id` columns.
-2. **Batch Source of Truth ([016_batches_and_expiry.sql](file:///c:/Users/user0/Desktop/pos%20global/pos-global/src-tauri/src/db/migrations/016_batches_and_expiry.sql#L32)):**
+2. **Batch Source of Truth (`016_batches_and_expiry.sql:32`):**
    - The `product_batches` table tracks batch lots per `(branch_id, product_id, variant_id, batch_number)` using `quantity_milli INTEGER NOT NULL DEFAULT 0 CHECK (quantity_milli >= 0)`.
    - Prior to Migration 020, `product_batches` contains no `location_id` or `bin_id` columns.
-3. **Serial Number Source of Truth ([017_serial_imei_assets.sql](file:///c:/Users/user0/Desktop/pos%20global/pos-global/src-tauri/src/db/migrations/017_serial_imei_assets.sql#L51)):**
+3. **Serial Number Source of Truth (`017_serial_imei_assets.sql:51`):**
    - The `serial_numbers` table tracks individual units with `status CHECK (status IN ('in_stock', 'reserved', 'sold', 'transferred', 'defective', 'recalled', 'disposed'))`.
    - Prior to Migration 020, `serial_numbers` contains no `location_id` or `bin_id` columns.
-4. **Existing Stock Movement Ledger ([003_global_commerce_foundation.sql](file:///c:/Users/user0/Desktop/pos%20global/pos-global/src-tauri/src/db/migrations/003_global_commerce_foundation.sql#L73), [006_quantity_precision_hardening.sql](file:///c:/Users/user0/Desktop/pos%20global/pos-global/src-tauri/src/db/migrations/006_quantity_precision_hardening.sql#L15)):**
+4. **Existing Stock Movement Ledger (`003_global_commerce_foundation.sql:73`, `006_quantity_precision_hardening.sql:15`):**
    - `stock_movements` records historical movements with `quantity_delta_milli`, `quantity_before_milli`, and `quantity_after_milli`.
    - Existing historical rows have `location_id IS NULL` and `bin_id IS NULL`.
-5. **Existing Idempotency Table ([003_global_commerce_foundation.sql:89](file:///c:/Users/user0/Desktop/pos%20global/pos-global/src-tauri/src/db/migrations/003_global_commerce_foundation.sql#L89)):**
+5. **Existing Idempotency Table (`003_global_commerce_foundation.sql:89`):**
    - `idempotency_keys` stores `(key TEXT PRIMARY KEY, operation TEXT, result_json TEXT, created_at TEXT)`.
-6. **Physical Topography Master Data ([019_locations_bins.sql](file:///c:/Users/user0/Desktop/pos%20global/pos-global/src-tauri/src/db/migrations/019_locations_bins.sql)):**
+6. **Physical Topography Master Data (`019_locations_bins.sql`):**
    - `locations` and `bins` exist as physical storage entities scoped to branches.
-7. **Append-Only Migration Rule ([DATABASE_RULES.md:9](file:///c:/Users/user0/Desktop/pos%20global/pos-global/DATABASE_RULES.md#L9)):**
+7. **Append-Only Migration Rule (`DATABASE_RULES.md:9`):**
    - Applied migrations 001–019 are immutable. All schema modifications for F2.11 must be delivered strictly via Migration 020.
 
 ### B. Explicit Architectural Decisions
@@ -239,7 +239,7 @@ All other movement reasons (`sale`, `refund`, `purchase_receipt`, `transfer_out`
 
 ## 8. Idempotency Architecture
 
-Canonical idempotency persistence uses the existing `idempotency_keys` table ([003_global_commerce_foundation.sql:89](file:///c:/Users/user0/Desktop/pos%20global/pos-global/src-tauri/src/db/migrations/003_global_commerce_foundation.sql#L89)), extended via Migration 020 with:
+Canonical idempotency persistence uses the existing `idempotency_keys` table (`003_global_commerce_foundation.sql:89`), extended via Migration 020 with:
 ```sql
 ALTER TABLE idempotency_keys ADD COLUMN request_hash TEXT;
 ```
