@@ -62,7 +62,7 @@
 | 2026-09-03 | F2.08 Serial / IMEI / Assets | PR #76 merged into main; merge commit 341b54b | PASS | PR #76 merged (`341b54b`); 36 tests passing on main, exact-head CI #33782675305 green |
 | 2026-09-04 | F2.09 Warranty Core & Index | PR #77 merged into main; merge commit 05b9fed; 481 Rust tests pass in CI; SonarCloud/CodeQL/Supabase clean | PASS | PR #77 merged (`05b9fed`); exact-head CI #33851161602 Job #100962272791 green |
 | 2026-09-07 | F2.10 Locations & Bins | PR #78 merged into main; merge commit c882a8b; discrete two-entity model, composite same-branch FK, anti-existence leakage protection | PASS | PR #78 merged (`c882a8b`); exact-head CI green |
-| 2026-09-07 | F2.11 Stock Ledger | ADR-0013 accepted; Migration 020; StockLedgerService single write authority; 8 partial unique indexes; immutable movements | PASS (local) | Local npm test & build clean; awaiting remote CI |
+| 2026-09-07 | F2.11 Stock Ledger | ADR-0013 accepted; Migration 020; StockLedgerService single write authority; 8 partial unique indexes; immutable movements; 22 test suites | PASS (local) | Local npm test & build clean; awaiting remote CI |
 
 ## Known Blockers
 

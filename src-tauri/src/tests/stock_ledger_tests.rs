@@ -411,8 +411,8 @@ fn test_location_inventory_8_mutually_exclusive_partial_unique_indexes() {
     let variant_id = Uuid::new_v4().to_string();
     ctx.conn
         .execute(
-            "INSERT INTO product_variants (id, product_id, sku, name, created_at, updated_at)
-             VALUES (?1, ?2, 'SKU-VAR-1', 'Large Variant', datetime('now'), datetime('now'))",
+            "INSERT INTO product_variants (id, product_id, sku, is_active, created_at, updated_at)
+             VALUES (?1, ?2, 'SKU-VAR-1', 1, datetime('now'), datetime('now'))",
             params![variant_id, ctx.product_id],
         )
         .unwrap();
@@ -1238,10 +1238,21 @@ fn test_branch_isolation_and_permission_enforcement() {
     assert_eq!(balances.len(), 1);
     assert_eq!(balances[0].quantity_milli, 1000);
 
-    // Summary for Branch 2 is 0
-    let b2_summary = get_stock_summary_impl(
+    // Cross-branch read with Branch 1 session attempting to read Branch 2 is rejected
+    let cross_read_err = get_stock_summary_impl(
         &ctx.conn,
         &ctx.admin_session,
+        &ctx.branch_2_id,
+        &ctx.product_id,
+        None,
+    )
+    .unwrap_err();
+    assert!(cross_read_err.contains("Scope mismatch"));
+
+    // Summary for Branch 2 with Branch 2 session is 0
+    let b2_summary = get_stock_summary_impl(
+        &ctx.conn,
+        &ctx.admin_b2_session,
         &ctx.branch_2_id,
         &ctx.product_id,
         None,
@@ -1277,15 +1288,15 @@ fn test_batch_variant_consistency_all_four_null_safe_cases() {
     let var_b = Uuid::new_v4().to_string();
     ctx.conn
         .execute(
-            "INSERT INTO product_variants (id, product_id, sku, name, created_at, updated_at)
-             VALUES (?1, ?2, 'SKU-VAR-A', 'Variant A', datetime('now'), datetime('now'))",
+            "INSERT INTO product_variants (id, product_id, sku, is_active, created_at, updated_at)
+             VALUES (?1, ?2, 'SKU-VAR-A', 1, datetime('now'), datetime('now'))",
             params![var_a, ctx.product_id],
         )
         .unwrap();
     ctx.conn
         .execute(
-            "INSERT INTO product_variants (id, product_id, sku, name, created_at, updated_at)
-             VALUES (?1, ?2, 'SKU-VAR-B', 'Variant B', datetime('now'), datetime('now'))",
+            "INSERT INTO product_variants (id, product_id, sku, is_active, created_at, updated_at)
+             VALUES (?1, ?2, 'SKU-VAR-B', 1, datetime('now'), datetime('now'))",
             params![var_b, ctx.product_id],
         )
         .unwrap();
@@ -1424,15 +1435,15 @@ fn test_serial_variant_consistency_rejection() {
     let var_b = Uuid::new_v4().to_string();
     ctx.conn
         .execute(
-            "INSERT INTO product_variants (id, product_id, sku, name, created_at, updated_at)
-             VALUES (?1, ?2, 'SKU-SVAR-A', 'Variant A', datetime('now'), datetime('now'))",
+            "INSERT INTO product_variants (id, product_id, sku, is_active, created_at, updated_at)
+             VALUES (?1, ?2, 'SKU-SVAR-A', 1, datetime('now'), datetime('now'))",
             params![var_a, ctx.product_id],
         )
         .unwrap();
     ctx.conn
         .execute(
-            "INSERT INTO product_variants (id, product_id, sku, name, created_at, updated_at)
-             VALUES (?1, ?2, 'SKU-SVAR-B', 'Variant B', datetime('now'), datetime('now'))",
+            "INSERT INTO product_variants (id, product_id, sku, is_active, created_at, updated_at)
+             VALUES (?1, ?2, 'SKU-SVAR-B', 1, datetime('now'), datetime('now'))",
             params![var_b, ctx.product_id],
         )
         .unwrap();
