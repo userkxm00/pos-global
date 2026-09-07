@@ -75,6 +75,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "019_locations_bins",
         include_str!("migrations/019_locations_bins.sql"),
     ),
+    (
+        "020_stock_ledger_and_spatial_balances",
+        include_str!("migrations/020_stock_ledger_and_spatial_balances.sql"),
+    ),
 ];
 
 pub fn open_database(path: &Path) -> Result<Connection> {
