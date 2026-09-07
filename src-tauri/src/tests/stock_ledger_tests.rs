@@ -61,9 +61,15 @@ fn setup_stock_test_context() -> TestContext {
         "admin",
     )
     .expect("admin user created");
-    let admin_session = crate::user::session::create_local_session(&conn, &admin_user.id)
-        .expect("admin session created")
-        .id;
+    let admin_session = crate::user::session::create_local_session(
+        &conn,
+        &admin_user.id,
+        &branch_id,
+        "password",
+        None,
+    )
+    .expect("admin session created")
+    .id;
 
     // Cashier user session (no InventoryAdjust)
     let cashier_user = create_test_user_with_creds(
@@ -76,9 +82,15 @@ fn setup_stock_test_context() -> TestContext {
         "cashier",
     )
     .expect("cashier user created");
-    let cashier_session = crate::user::session::create_local_session(&conn, &cashier_user.id)
-        .expect("cashier session created")
-        .id;
+    let cashier_session = crate::user::session::create_local_session(
+        &conn,
+        &cashier_user.id,
+        &branch_id,
+        "password",
+        None,
+    )
+    .expect("cashier session created")
+    .id;
 
     // Test product
     let product_id = Uuid::new_v4().to_string();
