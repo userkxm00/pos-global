@@ -2102,7 +2102,7 @@ fn test_valid_serial_positive_and_negative_movement_lifecycle_succeeds() {
     ctx.conn
         .execute(
             "INSERT INTO serial_numbers (id, product_id, branch_id, serial_number, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'SN-VALID-LIFECYCLE', 'ordered', datetime('now'), datetime('now'))",
+             VALUES (?1, ?2, ?3, 'SN-VALID-LIFECYCLE', 'reserved', datetime('now'), datetime('now'))",
             params![s_id, ctx.product_id, ctx.branch_id],
         )
         .unwrap();
