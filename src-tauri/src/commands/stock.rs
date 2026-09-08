@@ -24,7 +24,6 @@ pub struct PostMovementInput {
     pub serial_id: Option<String>,
     pub quantity_delta_milli: i64,
     pub reason: String,
-    pub notes: Option<String>,
 }
 
 pub fn post_stock_movement_impl(
@@ -56,7 +55,6 @@ pub fn post_stock_movement_impl(
         quantity_delta_milli: input.quantity_delta_milli,
         reason: parsed_reason,
         user_id: Some(session.user_id),
-        notes: input.notes,
     };
 
     StockLedgerService::post_movement(conn, &req).map_err(|e| e.to_string())

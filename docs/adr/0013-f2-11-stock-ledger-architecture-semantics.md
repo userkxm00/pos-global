@@ -180,9 +180,9 @@ A new F2.11 opening balance adds equal quantity to aggregate and spatial state s
 1. **Legacy Serials (Pre-020):**
    - Existing rows in `serial_numbers` with `status = 'in_stock'` and `location_id IS NULL, bin_id IS NULL` remain preserved exactly as legacy unallocated serials.
    - Migration 020 does not assign or fabricate locations for legacy serials.
-   - **Boundary & Milestone Ownership:** F2.11 strictly prohibits spatial deductions of legacy serials without a physical location (`LocationBranchMismatch`), and F2.08 `update_serial_status` prohibits direct status bypass. Physical location attribution belongs to **F2.14 (Stock Count & Physical Reconciliation)**, while point-of-sale customer checkout belongs to **Phase 3 (F3.03 Sales Checkout)**. F2.11 preserves historical unallocated state without fabricating synthetic locations or fake movements.
+   - **Boundary & Milestone Ownership:** F2.11 strictly prohibits spatial deductions of legacy serials without a physical location (`SerialCoordinateMismatch`), and F2.08 `update_serial_status` prohibits direct status bypass. Physical location attribution belongs to **F2.14 (Stock Count & Physical Reconciliation)**, while point-of-sale customer checkout belongs to **Phase 3 (F3.03 Sales Checkout)**. F2.11 preserves historical unallocated state without fabricating synthetic locations or fake movements.
 2. **New Serialized Opening Balance (Post-020):**
-   - Establishing a new serialized asset requires a physical location (`location_id NOT NULL`).
+   - Distinguishes lifecycle phases: `create_serial_instance` registration registers unit identity in `reserved` status with no coordinates (`location_id = NULL, bin_id = NULL`), whereas serialized `opening_balance` / stock intake strictly requires a physical location (`location_id NOT NULL`).
    - Every serialized movement represents an indivisible single unit: $|\Delta_{\text{milli}}| = 1000$.
    - Atomically updates:
      - `serial_numbers.location_id = LOC`

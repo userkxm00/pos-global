@@ -26,6 +26,7 @@ pub enum StockLedgerError {
     BatchMismatch(String),
     BatchDepletedOrInactive(String),
     SerialMismatch(String),
+    SerialCoordinateMismatch(String),
     SerialInvalidStatus(String),
     SerialInvalidQuantity(String),
     NegativeStockBlocked(String),
@@ -58,6 +59,9 @@ impl std::fmt::Display for StockLedgerError {
                 write!(f, "Batch depleted or inactive: {msg}")
             }
             StockLedgerError::SerialMismatch(msg) => write!(f, "Serial mismatch: {msg}"),
+            StockLedgerError::SerialCoordinateMismatch(msg) => {
+                write!(f, "Serial coordinate mismatch: {msg}")
+            }
             StockLedgerError::SerialInvalidStatus(msg) => {
                 write!(f, "Serial invalid status: {msg}")
             }
@@ -161,7 +165,6 @@ pub struct PostMovementRequest {
     pub quantity_delta_milli: i64,
     pub reason: MovementReason,
     pub user_id: Option<String>,
-    pub notes: Option<String>,
 }
 
 impl PostMovementRequest {
@@ -345,7 +348,8 @@ fn validate_movement_reason_and_serial(req: &PostMovementRequest) -> Result<(), 
     }
 
     let serial_id = req.normalized_serial_id()?;
-    if serial_id.is_some() && req.quantity_delta_milli.abs() != 1000 {
+    if serial_id.is_some() && req.quantity_delta_milli != 1000 && req.quantity_delta_milli != -1000
+    {
         return Err(StockLedgerError::SerialInvalidQuantity(
             "Serialized stock movements must have quantity_delta_milli equal to +1000 or -1000"
                 .into(),
@@ -581,7 +585,10 @@ fn validate_batch_lot(
                     "Batch '{b_id}' has non-active status '{status}'"
                 )));
             }
-            if delta < 0 && (qty_milli + delta) < 0 {
+            let resulting_qty = qty_milli.checked_add(delta).ok_or_else(|| {
+                StockLedgerError::Validation("Batch quantity arithmetic overflow".to_string())
+            })?;
+            if delta < 0 && resulting_qty < 0 {
                 return Err(StockLedgerError::NegativeStockBlocked(format!(
                     "Insufficient batch quantity: current {qty_milli} milli, delta {delta} milli"
                 )));
@@ -681,19 +688,19 @@ fn validate_serial_status_and_coordinates(
         }
         match record.location_id.as_deref() {
             Some(loc) if loc != location_id => {
-                return Err(StockLedgerError::LocationBranchMismatch(format!(
+                return Err(StockLedgerError::SerialCoordinateMismatch(format!(
                     "Serial '{s_id}' is physically located at location '{loc}', not '{location_id}'"
                 )));
             }
             None => {
-                return Err(StockLedgerError::LocationBranchMismatch(format!(
-                    "Serial '{s_id}' has no physical location assigned"
-                )));
+                return Err(StockLedgerError::SerialCoordinateMismatch(
+                    "Serial has no physical location assigned".to_string(),
+                ));
             }
             _ => {}
         }
         if record.bin_id.as_deref() != bin_id {
-            return Err(StockLedgerError::LocationBranchMismatch(format!(
+            return Err(StockLedgerError::SerialCoordinateMismatch(format!(
                 "Serial '{s_id}' is physically located at bin '{:?}', not '{:?}'",
                 record.bin_id, bin_id
             )));
@@ -995,13 +1002,13 @@ impl StockLedgerService {
         let canonical_hash = req.canonical_hash();
         let trimmed_key = req.idempotency_key.trim();
 
-        // 2. Idempotency pre-check
-        if let Some(cached) = check_idempotency(conn, trimmed_key, &canonical_hash)? {
+        // 2. Begin atomic transaction
+        let tx = conn.transaction()?;
+
+        // 3. Idempotency check inside atomic transaction
+        if let Some(cached) = check_idempotency(&tx, trimmed_key, &canonical_hash)? {
             return Ok(cached);
         }
-
-        // 3. Begin atomic transaction
-        let tx = conn.transaction()?;
 
         let branch_id = req.branch_id.trim();
         let product_id = req.product_id.trim();

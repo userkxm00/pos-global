@@ -277,7 +277,6 @@ fn test_immutable_stock_movements_triggers_block_update_and_delete() {
         quantity_delta_milli: 10000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
 
     let result = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap();
@@ -553,7 +552,6 @@ fn test_opening_balance_happy_path_and_unallocated_invariance() {
         quantity_delta_milli: delta,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: Some("Initial slot establishment".to_string()),
     };
 
     let result = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap();
@@ -596,7 +594,6 @@ fn test_adjustments_damage_loss_and_negative_stock_prevention() {
         quantity_delta_milli: 10000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_init).unwrap();
 
@@ -613,7 +610,6 @@ fn test_adjustments_damage_loss_and_negative_stock_prevention() {
         quantity_delta_milli: 2000,
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: None,
     };
     let res_adj = StockLedgerService::post_movement(&mut ctx.conn, &req_adj_pos).unwrap();
     assert_eq!(res_adj.quantity_after_milli, 12000);
@@ -631,7 +627,6 @@ fn test_adjustments_damage_loss_and_negative_stock_prevention() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Damage,
         user_id: None,
-        notes: None,
     };
     let res_dmg = StockLedgerService::post_movement(&mut ctx.conn, &req_damage).unwrap();
     assert_eq!(res_dmg.quantity_after_milli, 11000);
@@ -649,7 +644,6 @@ fn test_adjustments_damage_loss_and_negative_stock_prevention() {
         quantity_delta_milli: -2000,
         reason: MovementReason::Loss,
         user_id: None,
-        notes: None,
     };
     let res_loss = StockLedgerService::post_movement(&mut ctx.conn, &req_loss).unwrap();
     assert_eq!(res_loss.quantity_after_milli, 9000);
@@ -667,7 +661,6 @@ fn test_adjustments_damage_loss_and_negative_stock_prevention() {
         quantity_delta_milli: 1000, // Invalid positive
         reason: MovementReason::Damage,
         user_id: None,
-        notes: None,
     };
     let err_dmg = StockLedgerService::post_movement(&mut ctx.conn, &req_dmg_invalid).unwrap_err();
     assert!(matches!(err_dmg, StockLedgerError::Validation(_)));
@@ -685,7 +678,6 @@ fn test_adjustments_damage_loss_and_negative_stock_prevention() {
         quantity_delta_milli: -20000, // exceeds 9,000 on hand
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: None,
     };
     let err_over = StockLedgerService::post_movement(&mut ctx.conn, &req_overdraft).unwrap_err();
     assert!(matches!(
@@ -728,7 +720,6 @@ fn test_negative_aggregate_rejection() {
         quantity_delta_milli: 2000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_init).unwrap();
 
@@ -745,7 +736,6 @@ fn test_negative_aggregate_rejection() {
         quantity_delta_milli: -5000,
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: None,
     };
     let err = StockLedgerService::post_movement(&mut ctx.conn, &req_neg_agg).unwrap_err();
     assert!(matches!(err, StockLedgerError::NegativeStockBlocked(_)));
@@ -785,7 +775,6 @@ fn test_negative_spatial_balance_rejection() {
         quantity_delta_milli: 10000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_init).unwrap();
 
@@ -803,7 +792,6 @@ fn test_negative_spatial_balance_rejection() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: None,
     };
     let err = StockLedgerService::post_movement(&mut ctx.conn, &req_neg_slot).unwrap_err();
     assert!(matches!(err, StockLedgerError::NegativeStockBlocked(_)));
@@ -839,7 +827,6 @@ fn test_negative_batch_balance_rejection() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_init).unwrap();
 
@@ -856,7 +843,6 @@ fn test_negative_batch_balance_rejection() {
         quantity_delta_milli: -3000,
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: None,
     };
     let err = StockLedgerService::post_movement(&mut ctx.conn, &req_neg_b).unwrap_err();
     assert!(matches!(err, StockLedgerError::NegativeStockBlocked(_)));
@@ -882,7 +868,6 @@ fn test_zero_delta_rejection() {
         quantity_delta_milli: 0, // Zero delta
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: None,
     };
     let err = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap_err();
     assert_eq!(err, StockLedgerError::ZeroQuantityDelta);
@@ -904,7 +889,6 @@ fn test_missing_location_rejection() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let err = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap_err();
     assert_eq!(err, StockLedgerError::MissingLocation);
@@ -952,7 +936,6 @@ fn test_atomic_rollback_on_partial_failure() {
         quantity_delta_milli: 5000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_init).unwrap();
 
@@ -996,7 +979,6 @@ fn test_atomic_rollback_on_partial_failure() {
         quantity_delta_milli: -10000, // Insufficient: fails check
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: None,
     };
     let err = StockLedgerService::post_movement(&mut ctx.conn, &req_fail).unwrap_err();
     assert!(matches!(err, StockLedgerError::NegativeStockBlocked(_)));
@@ -1055,7 +1037,6 @@ fn test_idempotent_replay_with_same_key_and_hash() {
         quantity_delta_milli: 3000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
 
     let res1 = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap();
@@ -1089,7 +1070,6 @@ fn test_idempotency_conflict_with_same_key_and_different_hash() {
         quantity_delta_milli: 3000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap();
 
@@ -1130,7 +1110,6 @@ fn test_serialized_opening_balance_requires_exactly_1000_milli_and_location() {
         quantity_delta_milli: 500, // Invalid: must be 1000
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let err = StockLedgerService::post_movement(&mut ctx.conn, &req_bad_delta).unwrap_err();
     assert!(matches!(err, StockLedgerError::SerialInvalidQuantity(_)));
@@ -1148,7 +1127,6 @@ fn test_serialized_opening_balance_requires_exactly_1000_milli_and_location() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let res = StockLedgerService::post_movement(&mut ctx.conn, &req_ok).unwrap();
     assert_eq!(res.quantity_delta_milli, 1000);
@@ -1166,7 +1144,6 @@ fn test_serialized_opening_balance_requires_exactly_1000_milli_and_location() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let err_dup = StockLedgerService::post_movement(&mut ctx.conn, &req_dup).unwrap_err();
     assert!(matches!(err_dup, StockLedgerError::SerialInvalidStatus(_)));
@@ -1191,7 +1168,6 @@ fn test_branch_isolation_and_permission_enforcement() {
         serial_id: None,
         quantity_delta_milli: 1000,
         reason: "opening_balance".to_string(),
-        notes: None,
     };
 
     // 1. Cashier lacks InventoryAdjust permission -> rejected
@@ -1215,7 +1191,6 @@ fn test_branch_isolation_and_permission_enforcement() {
         serial_id: None,
         quantity_delta_milli: 1000,
         reason: "opening_balance".to_string(),
-        notes: None,
     };
     let cross_err =
         post_stock_movement_impl(&mut ctx.conn, &ctx.admin_b2_session, input_cross_branch);
@@ -1333,7 +1308,6 @@ fn test_batch_variant_consistency_all_four_null_safe_cases() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let res1 = StockLedgerService::post_movement(&mut ctx.conn, &req_null_null);
     assert!(res1.is_ok());
@@ -1351,7 +1325,6 @@ fn test_batch_variant_consistency_all_four_null_safe_cases() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let res2 = StockLedgerService::post_movement(&mut ctx.conn, &req_a_a);
     assert!(res2.is_ok());
@@ -1369,7 +1342,6 @@ fn test_batch_variant_consistency_all_four_null_safe_cases() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let err3 = StockLedgerService::post_movement(&mut ctx.conn, &req_a_null).unwrap_err();
     assert!(matches!(err3, StockLedgerError::BatchMismatch(_)));
@@ -1387,7 +1359,6 @@ fn test_batch_variant_consistency_all_four_null_safe_cases() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let err4 = StockLedgerService::post_movement(&mut ctx.conn, &req_null_a).unwrap_err();
     assert!(matches!(err4, StockLedgerError::BatchMismatch(_)));
@@ -1405,7 +1376,6 @@ fn test_batch_variant_consistency_all_four_null_safe_cases() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let err5 = StockLedgerService::post_movement(&mut ctx.conn, &req_a_b).unwrap_err();
     assert!(matches!(err5, StockLedgerError::BatchMismatch(_)));
@@ -1471,7 +1441,6 @@ fn test_serial_variant_consistency_rejection() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
 
     let err = StockLedgerService::post_movement(&mut ctx.conn, &req_mismatch).unwrap_err();
@@ -1553,7 +1522,6 @@ fn test_serial_bin_consistency_cases() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_open).unwrap();
 
@@ -1570,13 +1538,12 @@ fn test_serial_bin_consistency_cases() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Damage,
         user_id: None,
-        notes: None,
     };
     let err_bin =
         StockLedgerService::post_movement(&mut ctx.conn, &req_deduct_bad_bin).unwrap_err();
     assert!(matches!(
         err_bin,
-        StockLedgerError::LocationBranchMismatch(_)
+        StockLedgerError::SerialCoordinateMismatch(_)
     ));
 
     // Balances remain intact: Bin A has 1000, Bin B has 0
@@ -1603,7 +1570,6 @@ fn test_serial_bin_consistency_cases() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Damage,
         user_id: None,
-        notes: None,
     };
     let res_ok = StockLedgerService::post_movement(&mut ctx.conn, &req_deduct_ok);
     assert!(res_ok.is_ok());
@@ -1643,7 +1609,6 @@ fn test_serial_bin_consistency_cases() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_open_null_bin).unwrap();
 
@@ -1659,7 +1624,6 @@ fn test_serial_bin_consistency_cases() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Loss,
         user_id: None,
-        notes: None,
     };
     let res_null_bin = StockLedgerService::post_movement(&mut ctx.conn, &req_deduct_null_bin);
     assert!(res_null_bin.is_ok());
@@ -1711,7 +1675,6 @@ fn test_batch_status_preservation_and_depletion() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Damage,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_rec_deduct).unwrap();
 
@@ -1761,7 +1724,6 @@ fn test_batch_status_preservation_and_depletion() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Damage,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_quar_deduct).unwrap();
 
@@ -1792,7 +1754,6 @@ fn test_batch_status_preservation_and_depletion() {
         quantity_delta_milli: -2000, // consumes remaining 2000
         reason: MovementReason::Loss,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_quar_deplete).unwrap();
 
@@ -1832,7 +1793,6 @@ fn test_batch_status_preservation_and_depletion() {
         quantity_delta_milli: 2500,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &req_revive).unwrap();
 
@@ -1886,7 +1846,6 @@ fn test_serial_terminal_status_revival_blocked() {
             quantity_delta_milli: 1000,
             reason: MovementReason::OpeningBalance,
             user_id: None,
-            notes: None,
         };
 
         let err = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap_err();
@@ -1937,7 +1896,6 @@ fn test_whitespace_serial_positive_movement_fails_closed_without_side_effects() 
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
 
     let err = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap_err();
@@ -2018,7 +1976,6 @@ fn test_whitespace_serial_negative_movement_fails_closed_without_side_effects() 
         quantity_delta_milli: 5000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     StockLedgerService::post_movement(&mut ctx.conn, &open_req).expect("baseline stock posted");
 
@@ -2035,7 +1992,6 @@ fn test_whitespace_serial_negative_movement_fails_closed_without_side_effects() 
         quantity_delta_milli: -1000,
         reason: MovementReason::Damage,
         user_id: None,
-        notes: None,
     };
 
     let err = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap_err();
@@ -2121,7 +2077,6 @@ fn test_valid_serial_positive_and_negative_movement_lifecycle_succeeds() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let pos_res = StockLedgerService::post_movement(&mut ctx.conn, &pos_req)
         .expect("valid serial positive succeeds");
@@ -2152,7 +2107,6 @@ fn test_valid_serial_positive_and_negative_movement_lifecycle_succeeds() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Damage,
         user_id: None,
-        notes: None,
     };
     let neg_res = StockLedgerService::post_movement(&mut ctx.conn, &neg_req)
         .expect("valid serial negative succeeds");
@@ -2187,7 +2141,6 @@ fn test_ordinary_non_serialized_movement_succeeds_with_none_serial() {
         quantity_delta_milli: 2500,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
 
     let res =
@@ -2228,7 +2181,6 @@ fn test_whitespace_optional_identifiers_fail_closed() {
             quantity_delta_milli: 1000,
             reason: MovementReason::OpeningBalance,
             user_id: None,
-            notes: None,
         };
         let err = StockLedgerService::post_movement(&mut ctx.conn, &req).unwrap_err();
         assert!(
@@ -2328,7 +2280,6 @@ fn test_serial_creation_reconciliation_and_stock_ledger_intake_atomicity() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: Some("Opening intake for reconciled serial".into()),
     };
 
     let intake_res = StockLedgerService::post_movement(&mut ctx.conn, &intake_req)
@@ -2395,7 +2346,6 @@ fn test_serial_creation_reconciliation_and_stock_ledger_intake_atomicity() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let dup_err =
         StockLedgerService::post_movement(&mut ctx.conn, &duplicate_intake_req).unwrap_err();
@@ -2449,7 +2399,6 @@ fn test_serial_creation_reconciliation_and_stock_ledger_intake_atomicity() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: None,
     };
     let fail_err = StockLedgerService::post_movement(&mut ctx.conn, &fail_req).unwrap_err();
     assert!(matches!(fail_err, StockLedgerError::BinInactive(_)));
@@ -2541,7 +2490,6 @@ fn test_serial_reversible_adjustment_roundtrip() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: Some("Initial intake".into()),
     };
     StockLedgerService::post_movement(&mut ctx.conn, &intake_req).expect("intake succeeds");
 
@@ -2601,7 +2549,6 @@ fn test_serial_reversible_adjustment_roundtrip() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: Some("Negative adjustment write-down".into()),
     };
     StockLedgerService::post_movement(&mut ctx.conn, &neg_adj_req)
         .expect("negative adjustment succeeds");
@@ -2665,7 +2612,6 @@ fn test_serial_reversible_adjustment_roundtrip() {
         quantity_delta_milli: 1000,
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: Some("Positive adjustment restoration".into()),
     };
     StockLedgerService::post_movement(&mut ctx.conn, &pos_adj_req)
         .expect("positive adjustment succeeds");
@@ -2733,7 +2679,6 @@ fn test_serial_reversible_adjustment_roundtrip() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Loss,
         user_id: None,
-        notes: Some("Permanent loss write-off".into()),
     };
     StockLedgerService::post_movement(&mut ctx.conn, &loss_req).expect("loss succeeds");
 
@@ -2763,7 +2708,6 @@ fn test_serial_reversible_adjustment_roundtrip() {
         quantity_delta_milli: 1000,
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: Some("Attempted revival of lost serial".into()),
     };
     let err = StockLedgerService::post_movement(&mut ctx.conn, &revive_loss_req).unwrap_err();
     assert!(
@@ -2828,7 +2772,6 @@ fn test_inactive_variant_movement_rejected_fail_closed() {
         quantity_delta_milli: 5000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: Some("Attempted movement for inactive variant".into()),
     };
 
     let err = StockLedgerService::post_movement(&mut ctx.conn, &inact_req).unwrap_err();
@@ -2947,7 +2890,6 @@ fn test_inactive_variant_movement_rejected_fail_closed() {
         quantity_delta_milli: 5000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: Some("Active variant movement".into()),
     };
 
     let active_res = StockLedgerService::post_movement(&mut ctx.conn, &active_req)
@@ -3009,7 +2951,6 @@ fn test_batch_positive_stock_intake_via_ledger_roundtrip() {
         quantity_delta_milli: 10000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: Some("Initial batch stock intake".into()),
     };
 
     let result = StockLedgerService::post_movement(&mut ctx.conn, &intake_req)
@@ -3113,7 +3054,6 @@ fn test_batch_stock_intake_failed_no_partial_writes() {
         quantity_delta_milli: 5000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: Some("Mismatch attempt".into()),
     };
 
     let err = StockLedgerService::post_movement(&mut ctx.conn, &fail_req).unwrap_err();
@@ -3172,13 +3112,12 @@ fn test_legacy_unallocated_serial_boundary_and_rejection() {
         quantity_delta_milli: -1000,
         reason: MovementReason::Adjustment,
         user_id: None,
-        notes: Some("Attempted unallocated deduction".into()),
     };
 
     let err_ledger = StockLedgerService::post_movement(&mut ctx.conn, &deduct_req).unwrap_err();
     assert!(
-        matches!(err_ledger, StockLedgerError::LocationBranchMismatch(ref msg) if msg.contains("no physical location assigned")),
-        "Deduction of unallocated serial must fail with LocationBranchMismatch: {err_ledger:?}"
+        matches!(err_ledger, StockLedgerError::SerialCoordinateMismatch(ref msg) if msg.contains("Serial has no physical location assigned")),
+        "Deduction of unallocated serial must fail with SerialCoordinateMismatch: {err_ledger:?}"
     );
 
     // 2. Direct outbound status mutation via update_serial_status fails fail-closed
@@ -3221,5 +3160,341 @@ fn test_legacy_unallocated_serial_boundary_and_rejection() {
     assert_eq!(
         mov_count, 0,
         "No stock movement must be fabricated for legacy serial"
+    );
+}
+
+// =========================================================================
+// 27. REMEDIATION REGRESSION TESTS (PR #79)
+// =========================================================================
+
+#[test]
+fn test_focused_idempotency_regression_concurrency_and_replay() {
+    let mut ctx = setup_stock_test_context();
+
+    let req = PostMovementRequest {
+        idempotency_key: "idemp_reg_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 2000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+    };
+
+    // 1. First execution succeeds and mutates balances
+    let res1 = StockLedgerService::post_movement(&mut ctx.conn, &req)
+        .expect("Initial movement must succeed");
+    assert_eq!(res1.quantity_delta_milli, 2000);
+    assert_eq!(res1.quantity_before_milli, 0);
+    assert_eq!(res1.quantity_after_milli, 2000);
+
+    // 2. Same key + same canonical request => replayed existing result
+    let res2 = StockLedgerService::post_movement(&mut ctx.conn, &req).expect("Replay must succeed");
+    assert_eq!(res1, res2, "Replay must return identical cached result");
+
+    // 3. Verify no duplicate stock movement is created (exactly 1 exists)
+    let movement_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        movement_count, 1,
+        "Must create exactly 1 stock movement row"
+    );
+
+    // 4. Verify no duplicate balance mutation occurs
+    let agg_qty: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE branch_id = ?1 AND product_id = ?2",
+            params![ctx.branch_id, ctx.product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        agg_qty, 2000,
+        "Aggregate balance must remain exactly 2000 milli"
+    );
+
+    let slot_qty: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM location_inventory WHERE location_id = ?1 AND bin_id = ?2",
+            params![ctx.location_id, ctx.bin_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        slot_qty, 2000,
+        "Spatial slot balance must remain exactly 2000 milli"
+    );
+
+    // 5. Same key + different canonical request => IdempotencyConflict
+    let mut req_conflict = req.clone();
+    req_conflict.quantity_delta_milli = 5000;
+    let err_conflict = StockLedgerService::post_movement(&mut ctx.conn, &req_conflict).unwrap_err();
+    assert!(
+        matches!(err_conflict, StockLedgerError::IdempotencyConflict(_)),
+        "Expected IdempotencyConflict, got: {err_conflict:?}"
+    );
+
+    // Verify balance and movement count remained completely unchanged after conflict
+    let movement_count_after: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM stock_movements WHERE product_id = ?1",
+            params![ctx.product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        movement_count_after, 1,
+        "Conflict must not create new movement"
+    );
+
+    // 6. Deterministic concurrency test: two competing requests with same key on Mutex<Connection>
+    // Simulate concurrent IPC requests arriving at DbState
+    let conn_arc = std::sync::Arc::new(std::sync::Mutex::new(ctx.conn));
+    let c1 = std::sync::Arc::clone(&conn_arc);
+    let c2 = std::sync::Arc::clone(&conn_arc);
+
+    let concurrent_req = PostMovementInput {
+        idempotency_key: "idemp_concurrent_race_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: "opening_balance".to_string(),
+    };
+
+    let req_t1 = concurrent_req.clone();
+    let session_t1 = ctx.admin_session.clone();
+    let handle1 = std::thread::spawn(move || {
+        let mut conn_guard = c1.lock().unwrap();
+        post_stock_movement_impl(&mut conn_guard, &session_t1, req_t1)
+    });
+
+    let req_t2 = concurrent_req;
+    let session_t2 = ctx.admin_session.clone();
+    let handle2 = std::thread::spawn(move || {
+        let mut conn_guard = c2.lock().unwrap();
+        post_stock_movement_impl(&mut conn_guard, &session_t2, req_t2)
+    });
+
+    let res_t1 = handle1
+        .join()
+        .unwrap()
+        .expect("Thread 1 should succeed or replay");
+    let res_t2 = handle2
+        .join()
+        .unwrap()
+        .expect("Thread 2 should succeed or replay");
+
+    assert_eq!(
+        res_t1.movement_id, res_t2.movement_id,
+        "Both concurrent requests must return the exact same movement_id (one executed, one replayed)"
+    );
+
+    let final_conn = conn_arc.lock().unwrap();
+    let final_mov_count: i64 = final_conn
+        .query_row(
+            "SELECT COUNT(*) FROM stock_movements WHERE id = ?1",
+            params![res_t1.movement_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        final_mov_count, 1,
+        "Exactly one movement row must be committed across competing concurrent requests"
+    );
+
+    let final_agg: i64 = final_conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE branch_id = ?1 AND product_id = ?2",
+            params![ctx.branch_id, ctx.product_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        final_agg, 3000,
+        "Aggregate balance must increase by exactly 1000 (from 2000 to 3000), not double-mutated"
+    );
+}
+
+#[test]
+fn test_focused_serial_coordinate_mismatch_regression() {
+    let mut ctx = setup_stock_test_context();
+
+    // Secondary location in Branch 1
+    let loc_alt = create_location(
+        &ctx.conn,
+        CreateLocationInput {
+            branch_id: ctx.branch_id.clone(),
+            parent_id: None,
+            name: "Alternate Location".to_string(),
+            code: "ALT-LOC".to_string(),
+            location_type: Some("staging".to_string()),
+        },
+    )
+    .expect("alt location created");
+
+    let bin_alt = create_bin(
+        &ctx.conn,
+        CreateBinInput {
+            location_id: loc_alt.id.clone(),
+            name: "Alt Bin".to_string(),
+            code: "ALT-BIN".to_string(),
+        },
+    )
+    .expect("alt bin created");
+
+    // Register serial instance in reserved status
+    let s_inst = create_serial_instance(
+        &ctx.conn,
+        &CreateSerialInput {
+            product_id: ctx.product_id.clone(),
+            branch_id: ctx.branch_id.clone(),
+            variant_id: None,
+            serial_number: Some("FOCUSED-SN-12345".to_string()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: Some(15000),
+        },
+    )
+    .expect("serial created in reserved status");
+
+    // Intake serial into Location 1, Bin 1 via StockLedgerService
+    let intake_req = PostMovementRequest {
+        idempotency_key: "k_serial_focus_intake".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: Some(s_inst.id.clone()),
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+    };
+    StockLedgerService::post_movement(&mut ctx.conn, &intake_req).expect("Serial intake succeeds");
+
+    // 1. Deduction specifying wrong location -> SerialCoordinateMismatch
+    let wrong_loc_req = PostMovementRequest {
+        idempotency_key: "k_serial_wrong_loc".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: loc_alt.id.clone(), // Wrong location!
+        bin_id: Some(bin_alt.id.clone()),
+        batch_id: None,
+        serial_id: Some(s_inst.id.clone()),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Damage,
+        user_id: None,
+    };
+    let err_loc = StockLedgerService::post_movement(&mut ctx.conn, &wrong_loc_req).unwrap_err();
+    assert!(
+        matches!(err_loc, StockLedgerError::SerialCoordinateMismatch(ref msg) if msg.contains("physically located at location")),
+        "Expected SerialCoordinateMismatch for location mismatch, got: {err_loc:?}"
+    );
+
+    // 2. Deduction specifying correct location but wrong bin -> SerialCoordinateMismatch
+    let wrong_bin_req = PostMovementRequest {
+        idempotency_key: "k_serial_wrong_bin".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(), // Correct location
+        bin_id: None,                         // Mismatched Bin (was in bin_id)
+        batch_id: None,
+        serial_id: Some(s_inst.id.clone()),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Damage,
+        user_id: None,
+    };
+    let err_bin = StockLedgerService::post_movement(&mut ctx.conn, &wrong_bin_req).unwrap_err();
+    assert!(
+        matches!(err_bin, StockLedgerError::SerialCoordinateMismatch(ref msg) if msg.contains("physically located at bin")),
+        "Expected SerialCoordinateMismatch for bin mismatch, got: {err_bin:?}"
+    );
+
+    // 3. Unallocated legacy serial with NULL coordinates -> SerialCoordinateMismatch("Serial has no physical location assigned")
+    ctx.conn
+        .execute(
+            "INSERT INTO serial_numbers (
+                id, product_id, branch_id, serial_number, status, location_id, bin_id, created_at, updated_at
+            ) VALUES (
+                'sn-unallocated-999', ?1, ?2, 'HIST-UNALLOC-999', 'in_stock', NULL, NULL, datetime('now'), datetime('now')
+            )",
+            params![ctx.product_id, ctx.branch_id],
+        )
+        .unwrap();
+
+    let unalloc_req = PostMovementRequest {
+        idempotency_key: "k_unalloc_deduct".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: Some("sn-unallocated-999".to_string()),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Adjustment,
+        user_id: None,
+    };
+    let err_unalloc = StockLedgerService::post_movement(&mut ctx.conn, &unalloc_req).unwrap_err();
+    assert_eq!(
+        err_unalloc,
+        StockLedgerError::SerialCoordinateMismatch(
+            "Serial has no physical location assigned".to_string()
+        ),
+        "Missing coordinates must yield exact SerialCoordinateMismatch message"
+    );
+
+    // 4. Genuine Location-vs-Branch mismatch must still return LocationBranchMismatch
+    let loc_b2 = create_location(
+        &ctx.conn,
+        CreateLocationInput {
+            branch_id: ctx.branch_2_id.clone(),
+            parent_id: None,
+            name: "Branch 2 Location".to_string(),
+            code: "B2-LOC".to_string(),
+            location_type: Some("warehouse_bay".to_string()),
+        },
+    )
+    .expect("b2 location created");
+
+    let branch_mismatch_req = PostMovementRequest {
+        idempotency_key: "k_branch_mismatch".to_string(),
+        branch_id: ctx.branch_id.clone(), // Branch 1
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: loc_b2.id.clone(), // Location belonging to Branch 2!
+        bin_id: None,
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+    };
+    let err_branch =
+        StockLedgerService::post_movement(&mut ctx.conn, &branch_mismatch_req).unwrap_err();
+    assert!(
+        matches!(err_branch, StockLedgerError::LocationBranchMismatch(_)),
+        "Location-vs-branch mismatch must still return LocationBranchMismatch, got: {err_branch:?}"
     );
 }
