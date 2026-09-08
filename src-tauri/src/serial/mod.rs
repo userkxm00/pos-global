@@ -580,7 +580,7 @@ pub fn create_serial_instance(
             product_id, branch_id, variant_id,
             serial_number, imei, asset_tag, cost_price_minor,
             status, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'in_stock', datetime('now'), datetime('now'))
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'reserved', datetime('now'), datetime('now'))
         RETURNING {SERIAL_COLUMNS}"
     );
 
@@ -688,6 +688,12 @@ pub fn update_serial_status(
 
     if current.branch_id != input.branch_id {
         return Err(SerialError::NotFound(input.id.clone()));
+    }
+
+    if current.status == SerialStatus::InStock || input.status == SerialStatus::InStock {
+        return Err(SerialError::Validation(
+            "Transitions to or from in_stock must be performed via stock movements to maintain inventory ledger integrity".to_string(),
+        ));
     }
 
     validate_status_transition(current.status, input.status)?;

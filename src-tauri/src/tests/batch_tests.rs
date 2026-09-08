@@ -68,19 +68,28 @@ fn create_test_batch(
     quantity_milli: i64,
     expiry_date: Option<&str>,
 ) -> Result<ProductBatch, BatchError> {
-    create_batch(
+    let mut b = create_batch(
         conn,
         &CreateBatchInput {
             product_id: product_id.to_string(),
             branch_id: branch_id.to_string(),
             variant_id: None,
             batch_number: batch_number.to_string(),
-            quantity_milli,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: expiry_date.map(ToString::to_string),
         },
-    )
+    )?;
+    if quantity_milli > 0 {
+        conn.execute(
+            "UPDATE product_batches SET quantity_milli = ?1, status = 'active' WHERE id = ?2",
+            params![quantity_milli, b.id],
+        )?;
+        b.quantity_milli = quantity_milli;
+        b.status = BatchStatus::Active;
+    }
+    Ok(b)
 }
 
 // =========================================================================
@@ -379,6 +388,30 @@ fn test_batch_creation_ineligible_product_rejected() {
     assert!(matches!(err, BatchError::IneligibleProduct(_)));
 }
 
+#[test]
+fn test_batch_creation_positive_quantity_rejected() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Vaccine", true);
+
+    let err = create_batch(
+        &conn,
+        &CreateBatchInput {
+            product_id,
+            branch_id,
+            variant_id: None,
+            batch_number: "VAC-2026-01".into(),
+            quantity_milli: 5000,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: Some("2029-01-01".into()),
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, BatchError::Validation(msg) if msg.contains("created with quantity 0")));
+}
+
 // =========================================================================
 // 3. DATE VALIDATION & INTEGRITY TESTS
 // =========================================================================
@@ -413,7 +446,7 @@ fn test_batch_creation_manufactured_date_after_expiry_rejected() {
             branch_id,
             variant_id: None,
             batch_number: "YOG-01".into(),
-            quantity_milli: 5000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: Some("2099-05-10".into()),
             expiry_date: Some("2099-05-01".into()),
@@ -513,7 +546,7 @@ fn test_batch_duplicate_variant_number_case_insensitive_rejected() {
             branch_id: branch_id.clone(),
             variant_id: Some(variant_id.clone()),
             batch_number: "LOT-RED-01".into(),
-            quantity_milli: 5000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -529,7 +562,7 @@ fn test_batch_duplicate_variant_number_case_insensitive_rejected() {
             branch_id: branch_id.clone(),
             variant_id: Some(variant_id),
             batch_number: "lot-red-01".into(),
-            quantity_milli: 3000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -556,7 +589,7 @@ fn test_batch_same_number_allowed_for_different_variants() {
             branch_id: branch_id.clone(),
             variant_id: Some(var1),
             batch_number: "SEASON-2026".into(),
-            quantity_milli: 10000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -571,7 +604,7 @@ fn test_batch_same_number_allowed_for_different_variants() {
             branch_id,
             variant_id: Some(var2),
             batch_number: "SEASON-2026".into(),
-            quantity_milli: 10000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -646,7 +679,7 @@ fn test_batch_creation_variant_mismatch_rejected() {
             branch_id,
             variant_id: Some(variant_b),
             batch_number: "BATCH-MISMATCH".into(),
-            quantity_milli: 1000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: Some("2099-01-01".into()),
@@ -933,7 +966,7 @@ fn test_create_batch_command_authorized_and_unauthenticated() {
         branch_id: branch_id.clone(),
         variant_id: None,
         batch_number: "HONEY-01".into(),
-        quantity_milli: 1000,
+        quantity_milli: 0,
         cost_price_minor: None,
         manufactured_date: None,
         expiry_date: Some("2099-01-01".into()),

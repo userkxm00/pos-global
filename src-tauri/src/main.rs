@@ -19,6 +19,7 @@ mod permission;
 mod product;
 mod register;
 mod serial;
+mod stock;
 #[cfg(test)]
 mod tests;
 mod unit;
@@ -163,6 +164,10 @@ fn main() {
             commands::location::update_bin,
             commands::location::deactivate_bin,
             commands::location::reactivate_bin,
+            commands::stock::post_stock_movement,
+            commands::stock::get_stock_summary,
+            commands::stock::get_product_spatial_balances,
+            commands::stock::get_batch_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

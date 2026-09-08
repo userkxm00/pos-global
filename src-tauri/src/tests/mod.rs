@@ -39,6 +39,8 @@ mod serial_tests;
 mod session_tests;
 #[path = "sku_tests.rs"]
 mod sku_tests;
+#[path = "stock_ledger_tests.rs"]
+mod stock_ledger_tests;
 #[path = "tenant_isolation_tests.rs"]
 mod tenant_isolation_tests;
 #[path = "test_helpers.rs"]

@@ -544,11 +544,13 @@ pub fn create_batch(
         &batch_number,
     )?;
 
-    let initial_status = if input.quantity_milli == 0 {
-        BatchStatus::Depleted
-    } else {
-        BatchStatus::Active
-    };
+    if input.quantity_milli != 0 {
+        return Err(BatchError::Validation(
+            "Product batches must be created with quantity 0. Initial stock must be added via stock movements.".to_string(),
+        ));
+    }
+
+    let initial_status = BatchStatus::Depleted;
 
     let insert_res = conn.execute(
         "INSERT INTO product_batches (

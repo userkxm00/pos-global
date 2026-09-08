@@ -366,7 +366,7 @@ fn test_serial_only_identifier() {
     assert_eq!(instance.serial_number.as_deref(), Some("PC-2026-X99"));
     assert!(instance.imei.is_none());
     assert!(instance.asset_tag.is_none());
-    assert_eq!(instance.status, SerialStatus::InStock);
+    assert_eq!(instance.status, SerialStatus::Reserved);
 }
 
 #[test]
@@ -1200,13 +1200,68 @@ fn test_lifecycle_terminal_status_cannot_transition() {
     let err = update_serial_status(
         &conn,
         &UpdateSerialStatusInput {
-            id: inst.id,
-            branch_id,
-            status: SerialStatus::InStock,
+            id: inst.id.clone(),
+            branch_id: branch_id.clone(),
+            status: SerialStatus::Sold,
         },
     )
     .unwrap_err();
     assert!(matches!(err, SerialError::TerminalStatus(_)));
+}
+
+#[test]
+fn test_update_serial_status_rejects_in_stock_transitions() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Firewalled Serial", true);
+
+    let inst = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id,
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some("FIREWALL-01".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
+        },
+    )
+    .expect("create");
+
+    assert_eq!(inst.status, SerialStatus::Reserved);
+
+    // Direct transition to InStock via update_serial_status MUST FAIL fail-closed
+    let err = update_serial_status(
+        &conn,
+        &UpdateSerialStatusInput {
+            id: inst.id.clone(),
+            branch_id: branch_id.clone(),
+            status: SerialStatus::InStock,
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, SerialError::Validation(msg) if msg.contains("in_stock")));
+
+    // Direct transition from InStock via update_serial_status MUST FAIL fail-closed
+    conn.execute(
+        "UPDATE serial_numbers SET status = 'in_stock' WHERE id = ?1",
+        params![inst.id],
+    )
+    .expect("simulate in_stock");
+
+    let err_out = update_serial_status(
+        &conn,
+        &UpdateSerialStatusInput {
+            id: inst.id,
+            branch_id,
+            status: SerialStatus::Reserved,
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(err_out, SerialError::Validation(msg) if msg.contains("in_stock")));
 }
 
 // =========================================================================
