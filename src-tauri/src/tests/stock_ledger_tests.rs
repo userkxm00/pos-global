@@ -51,7 +51,7 @@ fn setup_stock_context(conn: &Connection) -> TestStockContext {
 
     let bin = create_bin(
         conn,
-        &CreateBinInput {
+        CreateBinInput {
             location_id: loc.id.clone(),
             name: "Shelf A1".into(),
             code: "BIN-A1".into(),
@@ -471,7 +471,7 @@ fn test_post_movement_negative_spatial_rejected() {
     // Create Bin 2 (has 0 balance)
     let bin2 = create_bin(
         &conn,
-        &CreateBinInput {
+        CreateBinInput {
             location_id: ctx.location_id.clone(),
             name: "Shelf B2".into(),
             code: "BIN-B2".into(),
@@ -658,7 +658,7 @@ fn test_validation_bin_location_mismatch_rejected() {
     // Create bin in location 2
     let bin_loc2 = create_bin(
         &conn,
-        &CreateBinInput {
+        CreateBinInput {
             location_id: loc2.id,
             name: "Bin in Loc 2".into(),
             code: "BIN-L2".into(),
@@ -1108,8 +1108,15 @@ fn test_serial_creation_reserved_and_positive_movement_instock() {
 
     // Invariant: Registered with status reserved and NULL coordinates
     assert_eq!(serial.status, SerialStatus::Reserved);
-    assert_eq!(serial.location_id, None);
-    assert_eq!(serial.bin_id, None);
+    let (init_loc, init_bin): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT location_id, bin_id FROM serial_numbers WHERE id = ?1",
+            params![serial.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(init_loc, None);
+    assert_eq!(init_bin, None);
 
     // Stock intake via stock ledger: +1000 milli
     let req = PostMovementRequest {
@@ -1591,7 +1598,7 @@ fn test_serial_movement_coordinate_mismatch_rejected() {
     // Create Bin 2
     let bin2 = create_bin(
         &conn,
-        &CreateBinInput {
+        CreateBinInput {
             location_id: ctx.location_id.clone(),
             name: "Shelf B2".into(),
             code: "BIN-C-B2".into(),
@@ -1883,7 +1890,7 @@ fn test_get_product_spatial_balances_query() {
 
     let bin2 = create_bin(
         &conn,
-        &CreateBinInput {
+        CreateBinInput {
             location_id: ctx.location_id.clone(),
             name: "Shelf A2".into(),
             code: "BIN-A2".into(),
@@ -2103,11 +2110,14 @@ fn test_post_stock_movement_command_permission() {
 
     let manager = create_test_user_with_creds(
         &conn,
-        "mgr_user",
-        "manager",
         &branch_id,
-        "manager@example.com",
-    );
+        "Manager Staff",
+        Some("mgr_user"),
+        Some("pass_123"),
+        Some("1234"),
+        "manager",
+    )
+    .expect("create manager");
 
     let session_cashier =
         create_local_session(&conn, &cashier.id, &branch_id, "pin", None).unwrap();

@@ -727,14 +727,16 @@ fn mutate_aggregate_inventory(
 
 fn mutate_spatial_inventory(
     conn: &Connection,
-    branch_id: &str,
-    location_id: &str,
-    bin_id: Option<&str>,
-    product_id: &str,
-    variant_id: Option<&str>,
-    batch_id: Option<&str>,
-    delta: i64,
+    req: &PostMovementRequest,
 ) -> Result<(), StockLedgerError> {
+    let branch_id = req.branch_id.trim();
+    let location_id = req.location_id.trim();
+    let bin_id = req.normalized_bin_id()?;
+    let product_id = req.product_id.trim();
+    let variant_id = req.normalized_variant_id()?;
+    let batch_id = req.normalized_batch_id()?;
+    let delta = req.quantity_delta_milli;
+
     let query = "SELECT id, quantity_milli FROM location_inventory
          WHERE branch_id = ?1
            AND location_id = ?2
@@ -978,16 +980,7 @@ impl StockLedgerService {
             req.quantity_delta_milli,
         )?;
 
-        mutate_spatial_inventory(
-            &tx,
-            branch_id,
-            location_id,
-            bin_id,
-            product_id,
-            variant_id,
-            batch_id,
-            req.quantity_delta_milli,
-        )?;
+        mutate_spatial_inventory(&tx, req)?;
 
         mutate_batch_inventory(&tx, batch_id, req.quantity_delta_milli, current_batch_qty)?;
 
