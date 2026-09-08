@@ -3360,6 +3360,14 @@ fn test_focused_serial_coordinate_mismatch_regression() {
     )
     .expect("alt bin created");
 
+    // Mark product as serialized
+    ctx.conn
+        .execute(
+            "UPDATE products SET requires_serial = 1 WHERE id = ?1",
+            params![ctx.product_id],
+        )
+        .unwrap();
+
     // Register serial instance in reserved status
     let s_inst = create_serial_instance(
         &ctx.conn,
