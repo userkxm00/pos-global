@@ -39,12 +39,12 @@ fn setup_stock_context(conn: &Connection) -> TestStockContext {
 
     let loc = create_location(
         conn,
-        &CreateLocationInput {
+        CreateLocationInput {
             branch_id: branch_id.clone(),
             parent_id: None,
             name: "Main Warehouse".into(),
             code: "WH-01".into(),
-            location_type: "warehouse".into(),
+            location_type: Some("warehouse".into()),
         },
     )
     .expect("create location");
@@ -556,12 +556,12 @@ fn test_validation_location_branch_mismatch_rejected() {
     let (_, branch_2) = create_test_org_and_branch(&conn);
     let loc_b2 = create_location(
         &conn,
-        &CreateLocationInput {
+        CreateLocationInput {
             branch_id: branch_2,
             parent_id: None,
             name: "Branch 2 Store".into(),
             code: "B2-ST".into(),
-            location_type: "store".into(),
+            location_type: Some("store".into()),
         },
     )
     .unwrap();
@@ -645,12 +645,12 @@ fn test_validation_bin_location_mismatch_rejected() {
     // Create location 2
     let loc2 = create_location(
         &conn,
-        &CreateLocationInput {
+        CreateLocationInput {
             branch_id: ctx.branch_id.clone(),
             parent_id: None,
             name: "Location 2".into(),
             code: "LOC-02".into(),
-            location_type: "store".into(),
+            location_type: Some("store".into()),
         },
     )
     .unwrap();
