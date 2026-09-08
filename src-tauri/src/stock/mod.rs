@@ -215,6 +215,14 @@ pub struct BatchSummaryRecord {
     pub unallocated_quantity_milli: i64,
 }
 
+struct RawBatchSummary {
+    product_id: String,
+    variant_id: Option<String>,
+    batch_number: Option<String>,
+    status: String,
+    quantity_milli: i64,
+}
+
 // =========================================================================
 // ERROR TYPES
 // =========================================================================
@@ -1102,25 +1110,25 @@ impl StockLedgerService {
         branch_id: &str,
         batch_id: &str,
     ) -> Result<BatchSummaryRecord, StockLedgerError> {
-        let batch_row: Option<(String, Option<String>, Option<String>, String, i64)> = conn
+        let batch_row: Option<RawBatchSummary> = conn
             .query_row(
                 "SELECT product_id, variant_id, batch_number, status, quantity_milli
                  FROM product_batches
                  WHERE id = ?1 AND branch_id = ?2",
                 params![batch_id, branch_id],
                 |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
+                    Ok(RawBatchSummary {
+                        product_id: row.get(0)?,
+                        variant_id: row.get(1)?,
+                        batch_number: row.get(2)?,
+                        status: row.get(3)?,
+                        quantity_milli: row.get(4)?,
+                    })
                 },
             )
             .optional()?;
 
-        let Some((prod_id, var_id, batch_num, status, total_qty)) = batch_row else {
+        let Some(batch) = batch_row else {
             return Err(StockLedgerError::BatchNotFound(batch_id.to_string()));
         };
 
@@ -1133,16 +1141,16 @@ impl StockLedgerService {
             )
             .unwrap_or(0);
 
-        let unallocated = total_qty - spatial_qty;
+        let unallocated = batch.quantity_milli - spatial_qty;
 
         Ok(BatchSummaryRecord {
             batch_id: batch_id.to_string(),
             branch_id: branch_id.to_string(),
-            product_id: prod_id,
-            variant_id: var_id,
-            batch_number: batch_num,
-            status,
-            total_quantity_milli: total_qty,
+            product_id: batch.product_id,
+            variant_id: batch.variant_id,
+            batch_number: batch.batch_number,
+            status: batch.status,
+            total_quantity_milli: batch.quantity_milli,
             spatial_quantity_milli: spatial_qty,
             unallocated_quantity_milli: unallocated,
         })

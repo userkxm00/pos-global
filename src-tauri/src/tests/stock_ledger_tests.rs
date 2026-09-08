@@ -2,10 +2,7 @@
 // ADR-0013: Spatial balance tracking, immutable ledger, single write authority.
 
 use crate::batch::{create_batch, BatchStatus, CreateBatchInput};
-use crate::commands::stock::{
-    get_batch_summary_impl, get_product_spatial_balances_impl, get_stock_summary_impl,
-    post_stock_movement_impl, PostMovementInput,
-};
+use crate::commands::stock::{get_stock_summary_impl, post_stock_movement_impl, PostMovementInput};
 use crate::location::{create_bin, create_location, CreateBinInput, CreateLocationInput};
 use crate::product::{create_product, CreateProductInput};
 use crate::serial::{
