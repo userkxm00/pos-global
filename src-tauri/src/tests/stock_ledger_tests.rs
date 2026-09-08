@@ -3177,7 +3177,7 @@ fn test_legacy_unallocated_serial_boundary_and_rejection() {
 
     let err_ledger = StockLedgerService::post_movement(&mut ctx.conn, &deduct_req).unwrap_err();
     assert!(
-        matches!(err_ledger, StockLedgerError::LocationBranchMismatch(msg) if msg.contains("no physical location assigned")),
+        matches!(err_ledger, StockLedgerError::LocationBranchMismatch(ref msg) if msg.contains("no physical location assigned")),
         "Deduction of unallocated serial must fail with LocationBranchMismatch: {err_ledger:?}"
     );
 
@@ -3192,7 +3192,7 @@ fn test_legacy_unallocated_serial_boundary_and_rejection() {
     )
     .unwrap_err();
     assert!(
-        matches!(err_status, crate::serial::SerialError::Validation(msg) if msg.contains("Direct transition from 'in_stock' is prohibited")),
+        matches!(err_status, crate::serial::SerialError::Validation(ref msg) if msg.contains("Direct transition from 'in_stock' is prohibited")),
         "Direct outbound status transition must be rejected: {err_status:?}"
     );
 

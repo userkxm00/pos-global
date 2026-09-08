@@ -1026,7 +1026,7 @@ fn test_batch_creation_zero_quantity_and_positive_rejected() {
     )
     .unwrap_err();
     assert!(
-        matches!(err_pos, BatchError::Validation(msg) if msg.contains("prohibited post-F2.11")),
+        matches!(err_pos, BatchError::Validation(ref msg) if msg.contains("prohibited post-F2.11")),
         "Positive batch creation must be rejected: {err_pos:?}"
     );
 
@@ -1046,7 +1046,7 @@ fn test_batch_creation_zero_quantity_and_positive_rejected() {
     )
     .unwrap_err();
     assert!(
-        matches!(err_neg, BatchError::Validation(msg) if msg.contains("negative")),
+        matches!(err_neg, BatchError::Validation(ref msg) if msg.contains("negative")),
         "Negative batch creation must be rejected: {err_neg:?}"
     );
 
