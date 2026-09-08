@@ -354,6 +354,11 @@ fn validate_batch_quantities(
             "Batch quantity cannot be negative".into(),
         ));
     }
+    if quantity_milli > 0 {
+        return Err(BatchError::Validation(
+            "Batch creation with positive quantity is prohibited post-F2.11. Initial batch quantity must be zero (0); initial stock intake must be performed via StockLedgerService::post_movement".into(),
+        ));
+    }
     if let Some(cost) = cost_price_minor {
         if cost < 0 {
             return Err(BatchError::Validation(
@@ -544,11 +549,7 @@ pub fn create_batch(
         &batch_number,
     )?;
 
-    let initial_status = if input.quantity_milli == 0 {
-        BatchStatus::Depleted
-    } else {
-        BatchStatus::Active
-    };
+    let initial_status = BatchStatus::Depleted;
 
     let insert_res = conn.execute(
         "INSERT INTO product_batches (
@@ -563,7 +564,7 @@ pub fn create_batch(
             branch_id,
             normalized_variant_id,
             batch_number,
-            input.quantity_milli,
+            0i64,
             input.cost_price_minor,
             initial_status.as_str(),
             normalized_mfg,

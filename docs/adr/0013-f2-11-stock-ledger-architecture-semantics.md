@@ -180,6 +180,7 @@ A new F2.11 opening balance adds equal quantity to aggregate and spatial state s
 1. **Legacy Serials (Pre-020):**
    - Existing rows in `serial_numbers` with `status = 'in_stock'` and `location_id IS NULL, bin_id IS NULL` remain preserved exactly as legacy unallocated serials.
    - Migration 020 does not assign or fabricate locations for legacy serials.
+   - **Boundary & Milestone Ownership:** F2.11 strictly prohibits spatial deductions of legacy serials without a physical location (`LocationBranchMismatch`), and F2.08 `update_serial_status` prohibits direct status bypass. Physical location attribution belongs to **F2.14 (Stock Count & Physical Reconciliation)**, while point-of-sale customer checkout belongs to **Phase 3 (F3.03 Sales Checkout)**. F2.11 preserves historical unallocated state without fabricating synthetic locations or fake movements.
 2. **New Serialized Opening Balance (Post-020):**
    - Establishing a new serialized asset requires a physical location (`location_id NOT NULL`).
    - Every serialized movement represents an indivisible single unit: $|\Delta_{\text{milli}}| = 1000$.
@@ -208,6 +209,10 @@ A new F2.11 opening balance adds equal quantity to aggregate and spatial state s
      - `MovementReason::Loss`: Maps serial to `disposed` and clears coordinates (`location_id = NULL, bin_id = NULL`). Status `disposed` is a permanent terminal state; it cannot be revivified.
      - `MovementReason::Adjustment`: Maps serial to `reserved` and clears coordinates (`location_id = NULL, bin_id = NULL`). Here, `reserved` serves as the canonical reversible non-stock holding state.
    - A subsequent positive adjustment (`MovementReason::Adjustment` with $\Delta_{\text{milli}} = +1000$) specifying valid `location_id` and optional `bin_id` successfully revives a `reserved` serial back to `in_stock`, reinstating physical coordinates and incrementing spatial and aggregate balances with a new immutable movement record.
+
+5. **Batch Creation vs Stock Intake Boundary (Reconciliation with F2.07/F2.09):**
+   - Under F2.07/F2.09 (`batch::create_batch`), product batches are registered as master lot identity with initial `quantity_milli = 0` and initial status `depleted`. Direct creation with positive quantity is rejected fail-closed.
+   - Initial on-hand batch stock enters **exclusively** through `StockLedgerService::post_movement` with `batch_id`, valid `location_id`, and $\Delta > 0$, transitioning the batch from `depleted` to `active` while atomically updating spatial and aggregate balances. StockLedgerService remains the sole write authority for all batch stock changes.
 
 ---
 

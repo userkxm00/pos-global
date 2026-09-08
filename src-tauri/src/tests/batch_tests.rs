@@ -68,19 +68,33 @@ fn create_test_batch(
     quantity_milli: i64,
     expiry_date: Option<&str>,
 ) -> Result<ProductBatch, BatchError> {
-    create_batch(
+    let mut batch = create_batch(
         conn,
         &CreateBatchInput {
             product_id: product_id.to_string(),
             branch_id: branch_id.to_string(),
             variant_id: None,
             batch_number: batch_number.to_string(),
-            quantity_milli,
+            quantity_milli: if quantity_milli < 0 {
+                quantity_milli
+            } else {
+                0
+            },
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: expiry_date.map(ToString::to_string),
         },
-    )
+    )?;
+    if quantity_milli > 0 {
+        // This direct fixture mutation is test-only and is not a production stock-management path.
+        conn.execute(
+            "UPDATE product_batches SET quantity_milli = ?1, status = 'active' WHERE id = ?2",
+            rusqlite::params![quantity_milli, batch.id],
+        )?;
+        batch.quantity_milli = quantity_milli;
+        batch.status = BatchStatus::Active;
+    }
+    Ok(batch)
 }
 
 // =========================================================================
@@ -413,7 +427,7 @@ fn test_batch_creation_manufactured_date_after_expiry_rejected() {
             branch_id,
             variant_id: None,
             batch_number: "YOG-01".into(),
-            quantity_milli: 5000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: Some("2099-05-10".into()),
             expiry_date: Some("2099-05-01".into()),
@@ -513,7 +527,7 @@ fn test_batch_duplicate_variant_number_case_insensitive_rejected() {
             branch_id: branch_id.clone(),
             variant_id: Some(variant_id.clone()),
             batch_number: "LOT-RED-01".into(),
-            quantity_milli: 5000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -529,7 +543,7 @@ fn test_batch_duplicate_variant_number_case_insensitive_rejected() {
             branch_id: branch_id.clone(),
             variant_id: Some(variant_id),
             batch_number: "lot-red-01".into(),
-            quantity_milli: 3000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -556,7 +570,7 @@ fn test_batch_same_number_allowed_for_different_variants() {
             branch_id: branch_id.clone(),
             variant_id: Some(var1),
             batch_number: "SEASON-2026".into(),
-            quantity_milli: 10000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -571,7 +585,7 @@ fn test_batch_same_number_allowed_for_different_variants() {
             branch_id,
             variant_id: Some(var2),
             batch_number: "SEASON-2026".into(),
-            quantity_milli: 10000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -646,7 +660,7 @@ fn test_batch_creation_variant_mismatch_rejected() {
             branch_id,
             variant_id: Some(variant_b),
             batch_number: "BATCH-MISMATCH".into(),
-            quantity_milli: 1000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: Some("2099-01-01".into()),
@@ -933,7 +947,7 @@ fn test_create_batch_command_authorized_and_unauthenticated() {
         branch_id: branch_id.clone(),
         variant_id: None,
         batch_number: "HONEY-01".into(),
-        quantity_milli: 1000,
+        quantity_milli: 0,
         cost_price_minor: None,
         manufactured_date: None,
         expiry_date: Some("2099-01-01".into()),
@@ -988,4 +1002,82 @@ fn test_get_batch_command_cross_branch_leakage_prevented() {
     // Attempting to query batch from branch 2 must fail without existence leakage
     let res = get_product_batch_impl(&conn, &session.id, &b2.id);
     assert!(res.is_err(), "Cross-branch batch access must fail closed");
+}
+
+#[test]
+fn test_batch_creation_zero_quantity_and_positive_rejected() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Vanilla Extract", true);
+
+    // 1. Creation with positive quantity is rejected fail-closed post-F2.11
+    let err_pos = create_batch(
+        &conn,
+        &CreateBatchInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            batch_number: "VANILLA-01".into(),
+            quantity_milli: 1000,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: Some("2099-01-01".into()),
+        },
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err_pos, BatchError::Validation(msg) if msg.contains("prohibited post-F2.11")),
+        "Positive batch creation must be rejected: {err_pos:?}"
+    );
+
+    // 2. Creation with negative quantity is rejected fail-closed
+    let err_neg = create_batch(
+        &conn,
+        &CreateBatchInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            batch_number: "VANILLA-NEG".into(),
+            quantity_milli: -500,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: Some("2099-01-01".into()),
+        },
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err_neg, BatchError::Validation(msg) if msg.contains("negative")),
+        "Negative batch creation must be rejected: {err_neg:?}"
+    );
+
+    // 3. Creation with quantity 0 succeeds in 'depleted' status with zero stock movements
+    let batch = create_batch(
+        &conn,
+        &CreateBatchInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            batch_number: "VANILLA-01".into(),
+            quantity_milli: 0,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: Some("2099-01-01".into()),
+        },
+    )
+    .expect("batch creation with 0 quantity must succeed");
+
+    assert_eq!(batch.quantity_milli, 0);
+    assert_eq!(batch.status, BatchStatus::Depleted);
+
+    let movements_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM stock_movements WHERE batch_id = ?1",
+            rusqlite::params![batch.id],
+            |r| r.get(0),
+        )
+        .expect("count movements");
+    assert_eq!(
+        movements_count, 0,
+        "No stock movement must be created on batch registration"
+    );
 }

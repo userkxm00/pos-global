@@ -2964,3 +2964,262 @@ fn test_inactive_variant_movement_rejected_fail_closed() {
         .unwrap();
     assert_eq!(active_agg, 5000);
 }
+
+#[test]
+fn test_batch_positive_stock_intake_via_ledger_roundtrip() {
+    let mut ctx = setup_stock_test_context();
+
+    // Enable batch tracking on product
+    ctx.conn
+        .execute(
+            "UPDATE products SET requires_expiry = 1 WHERE id = ?1",
+            params![ctx.product_id],
+        )
+        .unwrap();
+
+    // 1. Create batch using production create_batch API (initializes with quantity 0, 'depleted')
+    let batch = crate::batch::create_batch(
+        &ctx.conn,
+        &crate::batch::CreateBatchInput {
+            product_id: ctx.product_id.clone(),
+            branch_id: ctx.branch_id.clone(),
+            variant_id: None,
+            batch_number: "BATCH-LEDGER-001".into(),
+            quantity_milli: 0,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: Some("2099-12-31".into()),
+        },
+    )
+    .expect("batch creation with 0 quantity must succeed");
+
+    assert_eq!(batch.quantity_milli, 0);
+    assert_eq!(batch.status, crate::batch::BatchStatus::Depleted);
+
+    // 2. Perform positive stock intake exclusively via StockLedgerService::post_movement
+    let intake_req = PostMovementRequest {
+        idempotency_key: "k_batch_intake_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: Some(batch.id.clone()),
+        serial_id: None,
+        quantity_delta_milli: 10000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: Some("Initial batch stock intake".into()),
+    };
+
+    let result = StockLedgerService::post_movement(&mut ctx.conn, &intake_req)
+        .expect("Stock intake for batch must succeed");
+    assert_eq!(result.quantity_after_milli, 10000);
+
+    // 3. Verify batch quantity and status updated to 'active'
+    let (batch_qty, batch_status): (i64, String) = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli, status FROM product_batches WHERE id = ?1",
+            params![batch.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(batch_qty, 10000);
+    assert_eq!(batch_status, "active");
+
+    // 4. Verify aggregate inventory
+    let agg_qty: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE product_id = ?1 AND branch_id = ?2",
+            params![ctx.product_id, ctx.branch_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(agg_qty, 10000);
+
+    // 5. Verify spatial inventory
+    let spatial_qty: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli FROM location_inventory WHERE product_id = ?1 AND location_id = ?2 AND bin_id = ?3 AND batch_id = ?4",
+            params![ctx.product_id, ctx.location_id, ctx.bin_id, batch.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(spatial_qty, 10000);
+
+    // 6. Verify stock movement row
+    let mov_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM stock_movements WHERE batch_id = ?1 AND quantity_delta_milli = 10000",
+            params![batch.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(mov_count, 1);
+}
+
+#[test]
+fn test_batch_stock_intake_failed_no_partial_writes() {
+    let mut ctx = setup_stock_test_context();
+
+    ctx.conn
+        .execute(
+            "UPDATE products SET requires_expiry = 1 WHERE id = ?1",
+            params![ctx.product_id],
+        )
+        .unwrap();
+
+    let batch = crate::batch::create_batch(
+        &ctx.conn,
+        &crate::batch::CreateBatchInput {
+            product_id: ctx.product_id.clone(),
+            branch_id: ctx.branch_id.clone(),
+            variant_id: None,
+            batch_number: "BATCH-FAIL-001".into(),
+            quantity_milli: 0,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: Some("2099-12-31".into()),
+        },
+    )
+    .expect("batch creation with 0 quantity must succeed");
+
+    // Location belongs to Branch 2, but request specifies Branch 1 -> location mismatch
+    let loc_b2 = create_location(
+        &ctx.conn,
+        CreateLocationInput {
+            branch_id: ctx.branch_2_id.clone(),
+            parent_id: None,
+            name: "Branch 2 Bay".to_string(),
+            code: "BAY-B2".to_string(),
+            location_type: Some("warehouse_bay".to_string()),
+        },
+    )
+    .expect("b2 location created");
+
+    let fail_req = PostMovementRequest {
+        idempotency_key: "k_batch_fail_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: loc_b2.id,
+        bin_id: None,
+        batch_id: Some(batch.id.clone()),
+        serial_id: None,
+        quantity_delta_milli: 5000,
+        reason: MovementReason::OpeningBalance,
+        user_id: None,
+        notes: Some("Mismatch attempt".into()),
+    };
+
+    let err = StockLedgerService::post_movement(&mut ctx.conn, &fail_req).unwrap_err();
+    assert!(matches!(err, StockLedgerError::LocationBranchMismatch(_)));
+
+    // Batch quantity remains 0 and status remains 'depleted'
+    let (batch_qty, batch_status): (i64, String) = ctx
+        .conn
+        .query_row(
+            "SELECT quantity_milli, status FROM product_batches WHERE id = ?1",
+            params![batch.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(batch_qty, 0);
+    assert_eq!(batch_status, "depleted");
+
+    // No movements or inventory created
+    let mov_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM stock_movements WHERE batch_id = ?1",
+            params![batch.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(mov_count, 0);
+}
+
+#[test]
+fn test_legacy_unallocated_serial_boundary_and_rejection() {
+    let mut ctx = setup_stock_test_context();
+
+    // Insert historical pre-020 serial row directly: in_stock with NULL location and bin
+    ctx.conn
+        .execute(
+            "INSERT INTO serial_numbers (
+                id, product_id, branch_id, serial_number, status, location_id, bin_id, created_at, updated_at
+            ) VALUES (
+                'leg-sn-001', ?1, ?2, 'HISTORICAL-SN-999', 'in_stock', NULL, NULL, datetime('now', '-30 days'), datetime('now', '-30 days')
+            )",
+            params![ctx.product_id, ctx.branch_id],
+        )
+        .unwrap();
+
+    // 1. Attempting spatial deduction via StockLedgerService fails fail-closed
+    let deduct_req = PostMovementRequest {
+        idempotency_key: "k_legacy_deduct_001".to_string(),
+        branch_id: ctx.branch_id.clone(),
+        product_id: ctx.product_id.clone(),
+        variant_id: None,
+        location_id: ctx.location_id.clone(),
+        bin_id: Some(ctx.bin_id.clone()),
+        batch_id: None,
+        serial_id: Some("leg-sn-001".to_string()),
+        quantity_delta_milli: -1000,
+        reason: MovementReason::Adjustment,
+        user_id: None,
+        notes: Some("Attempted unallocated deduction".into()),
+    };
+
+    let err_ledger = StockLedgerService::post_movement(&mut ctx.conn, &deduct_req).unwrap_err();
+    assert!(
+        matches!(err_ledger, StockLedgerError::LocationBranchMismatch(msg) if msg.contains("no physical location assigned")),
+        "Deduction of unallocated serial must fail with LocationBranchMismatch: {err_ledger:?}"
+    );
+
+    // 2. Direct outbound status mutation via update_serial_status fails fail-closed
+    let err_status = crate::serial::update_serial_status(
+        &ctx.conn,
+        &crate::serial::UpdateSerialStatusInput {
+            id: "leg-sn-001".to_string(),
+            branch_id: ctx.branch_id.clone(),
+            status: SerialStatus::Sold,
+        },
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err_status, crate::serial::SerialError::Validation(msg) if msg.contains("Direct transition from 'in_stock' is prohibited")),
+        "Direct outbound status transition must be rejected: {err_status:?}"
+    );
+
+    // 3. Verify serial remains completely uncorrupted in historical state
+    let (status, loc, bin): (String, Option<String>, Option<String>) = ctx
+        .conn
+        .query_row(
+            "SELECT status, location_id, bin_id FROM serial_numbers WHERE id = 'leg-sn-001'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "in_stock");
+    assert!(loc.is_none(), "Legacy serial must retain NULL location");
+    assert!(bin.is_none(), "Legacy serial must retain NULL bin");
+
+    // 4. Verify zero movements were fabricated
+    let mov_count: i64 = ctx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM stock_movements WHERE serial_id = 'leg-sn-001'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        mov_count, 0,
+        "No stock movement must be fabricated for legacy serial"
+    );
+}
