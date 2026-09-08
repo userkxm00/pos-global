@@ -1900,7 +1900,6 @@ fn test_instock_direct_outbound_transitions_rejected() {
         quantity_delta_milli: 1000,
         reason: MovementReason::OpeningBalance,
         user_id: None,
-        notes: Some("Opening balance for server node".into()),
     };
     let mut mut_conn = conn;
     let intake_res =
