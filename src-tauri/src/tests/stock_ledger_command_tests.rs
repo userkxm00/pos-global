@@ -569,3 +569,199 @@ fn test_command_idempotent_repeated_ipc_request_returns_same_result_without_dupl
     .unwrap();
     assert_eq!(bal.aggregate_quantity_milli, 4000);
 }
+
+#[test]
+fn test_command_map_stock_ledger_error_all_variants() {
+    use crate::commands::stock_ledger::map_stock_ledger_error;
+    use crate::stock_ledger::StockLedgerError;
+
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::Validation("bad field".to_string())),
+        "Validation error: bad field"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::NotFound("missing entity".to_string())),
+        "Entity not found: missing entity"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::InsufficientStock {
+            requested_milli: 1000,
+            available_milli: 500,
+        }),
+        "Insufficient stock: requested 1000 milli, available 500 milli"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::IdempotencyConflict(
+            "conflict".to_string()
+        )),
+        "Idempotency conflict: conflict"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::InvalidReason(
+            "invalid reason".to_string()
+        )),
+        "Invalid reason: invalid reason"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::InvalidQuantity("invalid qty".to_string())),
+        "Invalid quantity: invalid qty"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::InvalidLocation("invalid loc".to_string())),
+        "Invalid location: invalid loc"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::InvalidBin("invalid bin".to_string())),
+        "Invalid bin: invalid bin"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::InvalidBatch("invalid batch".to_string())),
+        "Invalid batch: invalid batch"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::InvalidSerial(
+            "invalid serial".to_string()
+        )),
+        "Invalid serial: invalid serial"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::BranchMismatch(
+            "branch mismatch".to_string()
+        )),
+        "Branch mismatch: branch mismatch"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::VariantMismatch(
+            "variant mismatch".to_string()
+        )),
+        "Variant mismatch: variant mismatch"
+    );
+    assert_eq!(
+        map_stock_ledger_error(StockLedgerError::Database("db error".to_string())),
+        "Database error: db error"
+    );
+}
+
+#[test]
+fn test_command_list_location_inventory_with_filters() {
+    let mut conn = setup_test_db();
+    let f = setup_command_fixtures(&conn);
+
+    let req = PostMovementRequest {
+        branch_id: f.branch_a.clone(),
+        product_id: f.product_id.clone(),
+        variant_id: Some(f.variant_id.clone()),
+        location_id: f.location_id.clone(),
+        bin_id: Some(f.bin_id.clone()),
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 2500,
+        reason: "opening_balance".to_string(),
+        source_type: None,
+        source_id: None,
+        idempotency_key: None,
+    };
+    post_stock_movement_impl(&mut conn, &f.manager_session_a, req).unwrap();
+
+    // Match with all filters
+    let loc_list = list_location_inventory_impl(
+        &conn,
+        &f.admin_session_a,
+        LocationInventoryFilterRequest {
+            branch_id: f.branch_a.clone(),
+            location_id: Some(f.location_id.clone()),
+            bin_id: Some(f.bin_id.clone()),
+            product_id: Some(f.product_id.clone()),
+            variant_id: Some(f.variant_id.clone()),
+            batch_id: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(loc_list.len(), 1);
+    assert_eq!(loc_list[0].quantity_milli, 2500);
+
+    // Mismatch filter returns empty list
+    let loc_empty = list_location_inventory_impl(
+        &conn,
+        &f.admin_session_a,
+        LocationInventoryFilterRequest {
+            branch_id: f.branch_a.clone(),
+            location_id: Some("nonexistent_loc".to_string()),
+            bin_id: None,
+            product_id: None,
+            variant_id: None,
+            batch_id: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(loc_empty.len(), 0);
+}
+
+#[test]
+fn test_command_list_movements_with_filters_and_not_found() {
+    let mut conn = setup_test_db();
+    let f = setup_command_fixtures(&conn);
+
+    let req = PostMovementRequest {
+        branch_id: f.branch_a.clone(),
+        product_id: f.product_id.clone(),
+        variant_id: Some(f.variant_id.clone()),
+        location_id: f.location_id.clone(),
+        bin_id: Some(f.bin_id.clone()),
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 1500,
+        reason: "opening_balance".to_string(),
+        source_type: None,
+        source_id: None,
+        idempotency_key: None,
+    };
+    let m = post_stock_movement_impl(&mut conn, &f.manager_session_a, req).unwrap();
+
+    // Query with all filters populated
+    let mov_list = list_stock_movements_impl(
+        &conn,
+        &f.admin_session_a,
+        StockMovementFilterRequest {
+            branch_id: f.branch_a.clone(),
+            product_id: Some(f.product_id.clone()),
+            variant_id: Some(f.variant_id.clone()),
+            location_id: Some(f.location_id.clone()),
+            bin_id: Some(f.bin_id.clone()),
+            batch_id: None,
+            serial_id: None,
+            reason: Some("opening_balance".to_string()),
+            limit: Some(10),
+            offset: Some(0),
+        },
+    )
+    .unwrap();
+    assert_eq!(mov_list.len(), 1);
+    assert_eq!(mov_list[0].id, m.id);
+
+    // Mismatch reason filter returns empty
+    let mov_empty = list_stock_movements_impl(
+        &conn,
+        &f.admin_session_a,
+        StockMovementFilterRequest {
+            branch_id: f.branch_a.clone(),
+            product_id: None,
+            variant_id: None,
+            location_id: None,
+            bin_id: None,
+            batch_id: None,
+            serial_id: None,
+            reason: Some("damage".to_string()),
+            limit: Some(5),
+            offset: Some(0),
+        },
+    )
+    .unwrap();
+    assert_eq!(mov_empty.len(), 0);
+
+    // Nonexistent movement returns Ok(None)
+    let not_found =
+        get_stock_movement_impl(&conn, &f.admin_session_a, &f.branch_a, "nonexistent-mov-id")
+            .unwrap();
+    assert!(not_found.is_none());
+}

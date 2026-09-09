@@ -1793,3 +1793,132 @@ fn test_serialized_application_concurrency_with_arc_mutex() {
         StockLedgerService::get_balance(&conn_guard, &f.branch_id, &f.product_id, None).unwrap();
     assert_eq!(bal.aggregate_quantity_milli, 10000);
 }
+
+#[test]
+fn test_stock_ledger_error_display_and_from_impls() {
+    let errs = vec![
+        StockLedgerError::Validation("validation err".to_string()),
+        StockLedgerError::NotFound("not found err".to_string()),
+        StockLedgerError::InsufficientStock {
+            requested_milli: 2000,
+            available_milli: 1000,
+        },
+        StockLedgerError::IdempotencyConflict("conflict err".to_string()),
+        StockLedgerError::InvalidReason("invalid reason".to_string()),
+        StockLedgerError::InvalidQuantity("invalid qty".to_string()),
+        StockLedgerError::InvalidLocation("invalid loc".to_string()),
+        StockLedgerError::InvalidBin("invalid bin".to_string()),
+        StockLedgerError::InvalidBatch("invalid batch".to_string()),
+        StockLedgerError::InvalidSerial("invalid serial".to_string()),
+        StockLedgerError::BranchMismatch("branch err".to_string()),
+        StockLedgerError::VariantMismatch("variant err".to_string()),
+        StockLedgerError::Database("db err".to_string()),
+    ];
+
+    for e in errs {
+        let msg = format!("{e}");
+        assert!(!msg.is_empty());
+    }
+
+    // std::error::Error trait implementation
+    let boxed_err: Box<dyn std::error::Error> =
+        Box::new(StockLedgerError::Validation("boxed".to_string()));
+    assert_eq!(format!("{boxed_err}"), "Validation error: boxed");
+
+    // From rusqlite::Error
+    let r_err: StockLedgerError = rusqlite::Error::QueryReturnedNoRows.into();
+    assert!(matches!(r_err, StockLedgerError::Database(_)));
+
+    // From serde_json::Error
+    let bad_json_res: Result<serde_json::Value, _> = serde_json::from_str("bad json");
+    let j_err: StockLedgerError = bad_json_res.unwrap_err().into();
+    assert!(matches!(j_err, StockLedgerError::Database(_)));
+}
+
+#[test]
+fn test_stock_movement_reason_semantics_and_directionality() {
+    // from_persisted_str
+    assert_eq!(
+        StockMovementReason::from_persisted_str("opening_balance"),
+        StockMovementReason::OpeningBalance
+    );
+    assert_eq!(
+        StockMovementReason::from_persisted_str("adjustment"),
+        StockMovementReason::Adjustment
+    );
+    assert_eq!(
+        StockMovementReason::from_persisted_str("damage"),
+        StockMovementReason::Damage
+    );
+    assert_eq!(
+        StockMovementReason::from_persisted_str("loss"),
+        StockMovementReason::Loss
+    );
+    assert_eq!(
+        StockMovementReason::from_persisted_str("sale"),
+        StockMovementReason::Sale
+    );
+    assert_eq!(
+        StockMovementReason::from_persisted_str("refund"),
+        StockMovementReason::Refund
+    );
+    assert_eq!(
+        StockMovementReason::from_persisted_str("purchase"),
+        StockMovementReason::PurchaseReceipt
+    );
+    assert_eq!(
+        StockMovementReason::from_persisted_str("purchase_receipt"),
+        StockMovementReason::PurchaseReceipt
+    );
+    assert_eq!(
+        StockMovementReason::from_persisted_str("transfer"),
+        StockMovementReason::Transfer
+    );
+    assert_eq!(
+        StockMovementReason::from_persisted_str("custom_vendor_intake"),
+        StockMovementReason::Other("custom_vendor_intake".to_string())
+    );
+
+    // Display
+    assert_eq!(
+        format!("{}", StockMovementReason::OpeningBalance),
+        "opening_balance"
+    );
+    assert_eq!(format!("{}", StockMovementReason::Adjustment), "adjustment");
+    assert_eq!(format!("{}", StockMovementReason::Damage), "damage");
+    assert_eq!(format!("{}", StockMovementReason::Loss), "loss");
+    assert_eq!(format!("{}", StockMovementReason::Sale), "sale");
+    assert_eq!(format!("{}", StockMovementReason::Refund), "refund");
+    assert_eq!(
+        format!("{}", StockMovementReason::PurchaseReceipt),
+        "purchase_receipt"
+    );
+    assert_eq!(format!("{}", StockMovementReason::Transfer), "transfer");
+    assert_eq!(
+        format!("{}", StockMovementReason::Other("foo".to_string())),
+        "foo"
+    );
+
+    // validate_delta directional constraints
+    assert!(StockMovementReason::OpeningBalance
+        .validate_delta(100)
+        .is_ok());
+    assert!(StockMovementReason::OpeningBalance
+        .validate_delta(0)
+        .is_err());
+    assert!(StockMovementReason::OpeningBalance
+        .validate_delta(-100)
+        .is_err());
+
+    assert!(StockMovementReason::Adjustment.validate_delta(100).is_ok());
+    assert!(StockMovementReason::Adjustment.validate_delta(-100).is_ok());
+    assert!(StockMovementReason::Adjustment.validate_delta(0).is_err());
+
+    assert!(StockMovementReason::Damage.validate_delta(-100).is_ok());
+    assert!(StockMovementReason::Damage.validate_delta(100).is_err());
+    assert!(StockMovementReason::Damage.validate_delta(0).is_err());
+
+    assert!(StockMovementReason::Loss.validate_delta(-100).is_ok());
+    assert!(StockMovementReason::Loss.validate_delta(100).is_err());
+    assert!(StockMovementReason::Loss.validate_delta(0).is_err());
+}
