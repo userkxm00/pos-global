@@ -596,9 +596,9 @@ fn test_movement_row_matches_exact_before_delta_after_fields() {
     let f = setup_fixtures(&conn);
 
     conn.execute(
-        "INSERT INTO users (id, organization_id, email, password_hash, role)
-         VALUES ('usr_auditor', ?1, 'auditor@example.com', 'hash', 'admin')",
-        [&f.org_id],
+        "INSERT INTO users (id, branch_id, full_name, username, password_hash, role)
+         VALUES ('usr_auditor', ?1, 'Auditor User', 'auditor_user', 'hash', 'admin')",
+        [&f.branch_id],
     )
     .unwrap();
 
