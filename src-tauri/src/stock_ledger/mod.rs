@@ -12,7 +12,7 @@ use std::str::FromStr;
 // =========================================================================
 
 /// Authoritative movement reasons supported in F2.11.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StockMovementReason {
     /// Initial stock establishment (inbound only, positive delta).
@@ -23,20 +23,60 @@ pub enum StockMovementReason {
     Damage,
     /// Missing or stolen inventory written off (outbound only, negative delta).
     Loss,
+    /// Historical/system reason: Point-of-sale deduction.
+    Sale,
+    /// Historical/system reason: Customer return / refund.
+    Refund,
+    /// Historical/system reason: Goods receipt note / purchasing intake.
+    PurchaseReceipt,
+    /// Historical/system reason: Stock transfer movement.
+    Transfer,
+    /// Fallback for arbitrary or legacy persisted text to prevent read query conversion aborts.
+    #[serde(untagged)]
+    Other(String),
 }
 
 impl StockMovementReason {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             StockMovementReason::OpeningBalance => "opening_balance",
             StockMovementReason::Adjustment => "adjustment",
             StockMovementReason::Damage => "damage",
             StockMovementReason::Loss => "loss",
+            StockMovementReason::Sale => "sale",
+            StockMovementReason::Refund => "refund",
+            StockMovementReason::PurchaseReceipt => "purchase_receipt",
+            StockMovementReason::Transfer => "transfer",
+            StockMovementReason::Other(s) => s.as_str(),
         }
+    }
+
+    /// Returns true if this reason is an authorized F2.11 write mutation reason.
+    pub fn is_mutation_reason(&self) -> bool {
+        matches!(
+            self,
+            StockMovementReason::OpeningBalance
+                | StockMovementReason::Adjustment
+                | StockMovementReason::Damage
+                | StockMovementReason::Loss
+        )
+    }
+
+    /// Enforces that mutations only accept authorized F2.11 reasons.
+    pub fn validate_mutation(&self) -> Result<(), StockLedgerError> {
+        if !self.is_mutation_reason() {
+            return Err(StockLedgerError::InvalidReason(format!(
+                "Invalid movement reason '{}'. Allowed: opening_balance, adjustment, damage, loss",
+                self.as_str()
+            )));
+        }
+        Ok(())
     }
 
     /// Validates directional delta invariants according to ADR-0013.
     pub fn validate_delta(&self, delta: i64) -> Result<(), StockLedgerError> {
+        self.validate_mutation()?;
+
         if delta == 0 {
             return Err(StockLedgerError::InvalidQuantity(
                 "Quantity delta cannot be zero".to_string(),
@@ -72,13 +112,40 @@ impl StockMovementReason {
                     Ok(())
                 }
             }
+            _ => unreachable!(),
         }
+    }
+
+    /// Reads and parses persisted movement reasons from database rows.
+    /// Supports the four F2.11 mutation reasons, known historical/system reasons (e.g. sale),
+    /// and safely falls back to Other(String) for arbitrary/corrupt text without crashing readers.
+    pub fn from_persisted_str(s: &str) -> Self {
+        let trimmed = s.trim();
+        match trimmed.to_ascii_lowercase().as_str() {
+            "opening_balance" => StockMovementReason::OpeningBalance,
+            "adjustment" => StockMovementReason::Adjustment,
+            "damage" => StockMovementReason::Damage,
+            "loss" => StockMovementReason::Loss,
+            "sale" => StockMovementReason::Sale,
+            "refund" => StockMovementReason::Refund,
+            "purchase" | "purchase_receipt" => StockMovementReason::PurchaseReceipt,
+            "transfer" => StockMovementReason::Transfer,
+            _ => StockMovementReason::Other(trimmed.to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for StockMovementReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
 impl FromStr for StockMovementReason {
     type Err = StockLedgerError;
 
+    /// Parses and validates authorized F2.11 mutation reasons.
+    /// Rejects historical or arbitrary reasons so write mutations cannot use them.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
             "opening_balance" => Ok(StockMovementReason::OpeningBalance),
@@ -920,7 +987,7 @@ pub fn post_stock_movement(
         quantity_delta_milli: delta,
         quantity_before_milli: Some(agg_before),
         quantity_after_milli: Some(agg_after),
-        reason: input.reason,
+        reason: input.reason.clone(),
         source_type: input.source_type.clone(),
         source_id: input.source_id.clone(),
         location_id: Some(location_id.to_string()),
@@ -1087,7 +1154,7 @@ pub fn list_stock_movements(
         params_vec.push(Box::new(ser.clone()));
         query.push_str(&format!(" AND serial_id = ?{}", params_vec.len()));
     }
-    if let Some(reason) = filter.reason {
+    if let Some(ref reason) = filter.reason {
         params_vec.push(Box::new(reason.as_str().to_string()));
         query.push_str(&format!(" AND reason = ?{}", params_vec.len()));
     }
@@ -1108,16 +1175,7 @@ pub fn list_stock_movements(
 
     let rows = stmt.query_map(rusqlite_params.as_slice(), |row| {
         let reason_str: String = row.get(7)?;
-        let reason = StockMovementReason::from_str(&reason_str).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(
-                7,
-                rusqlite::types::Type::Text,
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    e.to_string(),
-                )),
-            )
-        })?;
+        let reason = StockMovementReason::from_persisted_str(&reason_str);
 
         Ok(StockMovement {
             id: row.get(0)?,
@@ -1163,16 +1221,7 @@ pub fn get_stock_movement_by_id(
     let result = stmt
         .query_row(params![branch_id.trim(), id.trim()], |row| {
             let reason_str: String = row.get(7)?;
-            let reason = StockMovementReason::from_str(&reason_str).map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    7,
-                    rusqlite::types::Type::Text,
-                    Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        e.to_string(),
-                    )),
-                )
-            })?;
+            let reason = StockMovementReason::from_persisted_str(&reason_str);
 
             Ok(StockMovement {
                 id: row.get(0)?,

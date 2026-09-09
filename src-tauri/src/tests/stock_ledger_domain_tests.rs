@@ -1099,6 +1099,276 @@ fn test_quarantined_and_recalled_batch_preservation_on_stock_deduction() {
         .unwrap();
     assert_eq!(qty, 3000);
     assert_eq!(status, "quarantined"); // Status preserved! Not reactivated to active!
+
+    // B) Recalled batch test
+    let batch_recalled = create_batch(
+        &conn,
+        &CreateBatchInput {
+            product_id: f.product_id.clone(),
+            branch_id: f.branch_id.clone(),
+            variant_id: None,
+            batch_number: "BATCH-RECALLED-01".to_string(),
+            quantity_milli: 0,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: None,
+        },
+    )
+    .unwrap();
+
+    StockLedgerService::post_movement(
+        &mut conn,
+        &PostMovementInput {
+            branch_id: f.branch_id.clone(),
+            product_id: f.product_id.clone(),
+            variant_id: None,
+            location_id: f.location_id.clone(),
+            bin_id: None,
+            batch_id: Some(batch_recalled.id.clone()),
+            serial_id: None,
+            quantity_delta_milli: 6000,
+            reason: StockMovementReason::OpeningBalance,
+            source_type: None,
+            source_id: None,
+            user_id: None,
+            idempotency_key: None,
+        },
+    )
+    .unwrap();
+
+    // Transition batch to recalled via F2.07 lifecycle
+    update_batch_status(
+        &conn,
+        &UpdateBatchStatusInput {
+            batch_id: batch_recalled.id.clone(),
+            status: BatchStatus::Recalled,
+        },
+    )
+    .unwrap();
+
+    // 1. Positive intake on recalled batch must be rejected
+    let err_rec = StockLedgerService::post_movement(
+        &mut conn,
+        &PostMovementInput {
+            branch_id: f.branch_id.clone(),
+            product_id: f.product_id.clone(),
+            variant_id: None,
+            location_id: f.location_id.clone(),
+            bin_id: None,
+            batch_id: Some(batch_recalled.id.clone()),
+            serial_id: None,
+            quantity_delta_milli: 1000,
+            reason: StockMovementReason::Adjustment,
+            source_type: None,
+            source_id: None,
+            user_id: None,
+            idempotency_key: None,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err_rec, StockLedgerError::InvalidBatch(_)));
+
+    // 2. Deduction on recalled batch (e.g. written off / disposed) is allowed
+    // and PRESERVES recalled status while quantity remains > 0
+    StockLedgerService::post_movement(
+        &mut conn,
+        &PostMovementInput {
+            branch_id: f.branch_id.clone(),
+            product_id: f.product_id.clone(),
+            variant_id: None,
+            location_id: f.location_id.clone(),
+            bin_id: None,
+            batch_id: Some(batch_recalled.id.clone()),
+            serial_id: None,
+            quantity_delta_milli: -2500,
+            reason: StockMovementReason::Loss,
+            source_type: None,
+            source_id: None,
+            user_id: None,
+            idempotency_key: None,
+        },
+    )
+    .unwrap();
+
+    let (qty_recalled, status_recalled): (i64, String) = conn
+        .query_row(
+            "SELECT quantity_milli, status FROM product_batches WHERE id = ?1",
+            [&batch_recalled.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(qty_recalled, 3500);
+    assert_eq!(status_recalled, "recalled"); // Status preserved!
+}
+
+#[test]
+fn test_readers_support_persisted_sales_and_historical_reasons() {
+    let mut conn = setup_test_db();
+    let f = setup_fixtures(&conn);
+
+    // Directly insert historical movements (e.g. from commands/sales.rs or pre-020 system)
+    conn.execute(
+        "INSERT INTO stock_movements (
+            id, branch_id, product_id, variant_id, quantity_delta, quantity_before,
+            quantity_after, reason, source_type, source_id, quantity_delta_milli,
+            quantity_before_milli, quantity_after_milli, created_at
+        ) VALUES (
+            'mov_sale_001', ?1, ?2, NULL, -2.5, 10.0, 7.5, 'sale', 'sale', 'REC-101',
+            -2500, 10000, 7500, datetime('now')
+        )",
+        params![f.branch_id, f.product_id],
+    )
+    .unwrap();
+
+    conn.execute(
+        "INSERT INTO stock_movements (
+            id, branch_id, product_id, variant_id, quantity_delta, quantity_before,
+            quantity_after, reason, source_type, source_id, quantity_delta_milli,
+            quantity_before_milli, quantity_after_milli, created_at
+        ) VALUES (
+            'mov_refund_001', ?1, ?2, NULL, 1.0, 7.5, 8.5, 'refund', 'sale', 'REF-202',
+            1000, 7500, 8500, datetime('now')
+        )",
+        params![f.branch_id, f.product_id],
+    )
+    .unwrap();
+
+    // 1. Proves a persisted 'sale' movement can be read by list_stock_movements
+    let movements = StockLedgerService::list_movements(
+        &conn,
+        &StockMovementFilter {
+            branch_id: f.branch_id.clone(),
+            product_id: Some(f.product_id.clone()),
+            variant_id: None,
+            location_id: None,
+            bin_id: None,
+            batch_id: None,
+            serial_id: None,
+            reason: None,
+            limit: None,
+            offset: None,
+        },
+    )
+    .unwrap();
+
+    let sale_mov = movements.iter().find(|m| m.id == "mov_sale_001").expect("must find sale movement");
+    assert_eq!(sale_mov.reason, StockMovementReason::Sale);
+    assert_eq!(sale_mov.quantity_delta_milli, -2500);
+
+    let refund_mov = movements.iter().find(|m| m.id == "mov_refund_001").expect("must find refund movement");
+    assert_eq!(refund_mov.reason, StockMovementReason::Refund);
+    assert_eq!(refund_mov.quantity_delta_milli, 1000);
+
+    // 2. Proves a persisted 'sale' movement can be read by get_stock_movement_by_id
+    let single = StockLedgerService::get_movement(&conn, &f.branch_id, "mov_sale_001")
+        .unwrap()
+        .expect("must find movement by id");
+    assert_eq!(single.reason, StockMovementReason::Sale);
+    assert_eq!(single.source_type.as_deref(), Some("sale"));
+    assert_eq!(single.source_id.as_deref(), Some("REC-101"));
+}
+
+#[test]
+fn test_readers_fallback_on_unsupported_or_corrupt_persisted_reason() {
+    let mut conn = setup_test_db();
+    let f = setup_fixtures(&conn);
+
+    // Insert movement with arbitrary/corrupt reason text
+    conn.execute(
+        "INSERT INTO stock_movements (
+            id, branch_id, product_id, variant_id, quantity_delta, quantity_before,
+            quantity_after, reason, quantity_delta_milli, quantity_before_milli,
+            quantity_after_milli, created_at
+        ) VALUES (
+            'mov_corrupt_001', ?1, ?2, NULL, -1.0, 5.0, 4.0, 'corrupt_legacy_code',
+            -1000, 5000, 4000, datetime('now')
+        )",
+        params![f.branch_id, f.product_id],
+    )
+    .unwrap();
+
+    // 3. Proves unsupported/corrupt persisted text does not crash list_stock_movements or get_movement
+    let movements = StockLedgerService::list_movements(
+        &conn,
+        &StockMovementFilter {
+            branch_id: f.branch_id.clone(),
+            product_id: Some(f.product_id.clone()),
+            variant_id: None,
+            location_id: None,
+            bin_id: None,
+            batch_id: None,
+            serial_id: None,
+            reason: None,
+            limit: None,
+            offset: None,
+        },
+    )
+    .unwrap();
+
+    let corrupt_mov = movements.iter().find(|m| m.id == "mov_corrupt_001").expect("must find corrupt movement");
+    assert_eq!(corrupt_mov.reason, StockMovementReason::Other("corrupt_legacy_code".to_string()));
+    assert_eq!(corrupt_mov.reason.as_str(), "corrupt_legacy_code");
+
+    let single = StockLedgerService::get_movement(&conn, &f.branch_id, "mov_corrupt_001")
+        .unwrap()
+        .expect("must find movement by id");
+    assert_eq!(single.reason, StockMovementReason::Other("corrupt_legacy_code".to_string()));
+}
+
+#[test]
+fn test_post_movement_rejects_sale_and_historical_reasons() {
+    let mut conn = setup_test_db();
+    let f = setup_fixtures(&conn);
+
+    // 4. Proves post_movement still rejects 'sale', 'refund', 'transfer', and arbitrary reasons as F2.11 mutation reasons
+    assert!(StockMovementReason::from_str("sale").is_err());
+    assert!(StockMovementReason::from_str("refund").is_err());
+    assert!(StockMovementReason::from_str("transfer").is_err());
+    assert!(StockMovementReason::from_str("purchase_receipt").is_err());
+
+    let err = StockLedgerService::post_movement(
+        &mut conn,
+        &PostMovementInput {
+            branch_id: f.branch_id.clone(),
+            product_id: f.product_id.clone(),
+            variant_id: None,
+            location_id: f.location_id.clone(),
+            bin_id: None,
+            batch_id: None,
+            serial_id: None,
+            quantity_delta_milli: -1000,
+            reason: StockMovementReason::Sale,
+            source_type: Some("pos_sale".into()),
+            source_id: Some("SALE-001".into()),
+            user_id: None,
+            idempotency_key: None,
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, StockLedgerError::InvalidReason(_)));
+
+    let err_other = StockLedgerService::post_movement(
+        &mut conn,
+        &PostMovementInput {
+            branch_id: f.branch_id.clone(),
+            product_id: f.product_id.clone(),
+            variant_id: None,
+            location_id: f.location_id.clone(),
+            bin_id: None,
+            batch_id: None,
+            serial_id: None,
+            quantity_delta_milli: -1000,
+            reason: StockMovementReason::Other("corrupt".to_string()),
+            source_type: None,
+            source_id: None,
+            user_id: None,
+            idempotency_key: None,
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(err_other, StockLedgerError::InvalidReason(_)));
 }
 
 // =========================================================================
