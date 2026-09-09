@@ -199,7 +199,10 @@ pub fn list_stock_movements_impl(
         .execute(conn)
         .map_err(|e| format!("Branch scope unauthorized: {e}"))?;
 
-    let reason = request.reason.as_deref().map(StockMovementReason::from_persisted_str);
+    let reason = request
+        .reason
+        .as_deref()
+        .map(StockMovementReason::from_persisted_str);
 
     let filter = StockMovementFilter {
         branch_id: request.branch_id,

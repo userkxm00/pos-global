@@ -1251,11 +1251,17 @@ fn test_readers_support_persisted_sales_and_historical_reasons() {
     )
     .unwrap();
 
-    let sale_mov = movements.iter().find(|m| m.id == "mov_sale_001").expect("must find sale movement");
+    let sale_mov = movements
+        .iter()
+        .find(|m| m.id == "mov_sale_001")
+        .expect("must find sale movement");
     assert_eq!(sale_mov.reason, StockMovementReason::Sale);
     assert_eq!(sale_mov.quantity_delta_milli, -2500);
 
-    let refund_mov = movements.iter().find(|m| m.id == "mov_refund_001").expect("must find refund movement");
+    let refund_mov = movements
+        .iter()
+        .find(|m| m.id == "mov_refund_001")
+        .expect("must find refund movement");
     assert_eq!(refund_mov.reason, StockMovementReason::Refund);
     assert_eq!(refund_mov.quantity_delta_milli, 1000);
 
@@ -1305,14 +1311,23 @@ fn test_readers_fallback_on_unsupported_or_corrupt_persisted_reason() {
     )
     .unwrap();
 
-    let corrupt_mov = movements.iter().find(|m| m.id == "mov_corrupt_001").expect("must find corrupt movement");
-    assert_eq!(corrupt_mov.reason, StockMovementReason::Other("corrupt_legacy_code".to_string()));
+    let corrupt_mov = movements
+        .iter()
+        .find(|m| m.id == "mov_corrupt_001")
+        .expect("must find corrupt movement");
+    assert_eq!(
+        corrupt_mov.reason,
+        StockMovementReason::Other("corrupt_legacy_code".to_string())
+    );
     assert_eq!(corrupt_mov.reason.as_str(), "corrupt_legacy_code");
 
     let single = StockLedgerService::get_movement(&conn, &f.branch_id, "mov_corrupt_001")
         .unwrap()
         .expect("must find movement by id");
-    assert_eq!(single.reason, StockMovementReason::Other("corrupt_legacy_code".to_string()));
+    assert_eq!(
+        single.reason,
+        StockMovementReason::Other("corrupt_legacy_code".to_string())
+    );
 }
 
 #[test]
