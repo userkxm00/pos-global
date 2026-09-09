@@ -1865,7 +1865,11 @@ fn test_serial_registration_starts_reserved_and_ledger_firewall_intact() {
         },
     )
     .expect("create serial");
-    assert_eq!(inst.status, SerialStatus::Reserved, "New serial registration must start as Reserved per ADR-0013");
+    assert_eq!(
+        inst.status,
+        SerialStatus::Reserved,
+        "New serial registration must start as Reserved per ADR-0013"
+    );
 
     // 2. Reserved -> InStock transition supported
     let in_stock = update_serial_status(
@@ -1906,7 +1910,10 @@ fn test_serial_registration_starts_reserved_and_ledger_firewall_intact() {
     let movement_count: i64 = conn
         .query_row("SELECT count(*) FROM stock_movements", [], |r| r.get(0))
         .expect("count movements");
-    assert_eq!(movement_count, 0, "F2.08 registration must create zero stock movements");
+    assert_eq!(
+        movement_count, 0,
+        "F2.08 registration must create zero stock movements"
+    );
 
     // 5. Zero inventory records created/mutated by F2.08 registration
     let inv_count: i64 = conn
@@ -1916,5 +1923,8 @@ fn test_serial_registration_starts_reserved_and_ledger_firewall_intact() {
             |r| r.get(0),
         )
         .expect("count inventory");
-    assert_eq!(inv_count, 0, "F2.08 registration must not mutate inventory balances");
+    assert_eq!(
+        inv_count, 0,
+        "F2.08 registration must not mutate inventory balances"
+    );
 }

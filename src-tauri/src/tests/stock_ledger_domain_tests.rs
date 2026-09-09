@@ -11,8 +11,13 @@
 // - Legacy pre-020 untouched unallocated stock
 // - Serialized concurrency with Arc<Mutex<Connection>>
 
-use crate::batch::{create_batch, update_batch_status, BatchStatus, CreateBatchInput, UpdateBatchStatusInput};
-use crate::serial::{create_serial_instance, update_serial_status, CreateSerialInstanceInput, UpdateSerialStatusInput};
+use crate::batch::{
+    create_batch, update_batch_status, BatchStatus, CreateBatchInput, UpdateBatchStatusInput,
+};
+use crate::serial::{
+    create_serial_instance, update_serial_status, CreateSerialInstanceInput,
+    UpdateSerialStatusInput,
+};
 use crate::stock_ledger::{
     compute_request_hash, LocationInventoryFilter, PostMovementInput, StockLedgerError,
     StockLedgerService, StockMovementFilter, StockMovementReason,
@@ -140,8 +145,9 @@ fn test_opening_balance_positive_accepted_and_balances_updated() {
     assert_eq!(movement.quantity_after_milli, Some(5000));
     assert_eq!(movement.reason, StockMovementReason::OpeningBalance);
 
-    let balance = StockLedgerService::get_balance(&conn, &f.branch_id, &f.product_id, Some(&f.variant_id))
-        .expect("get balance");
+    let balance =
+        StockLedgerService::get_balance(&conn, &f.branch_id, &f.product_id, Some(&f.variant_id))
+            .expect("get balance");
     assert_eq!(balance.aggregate_quantity_milli, 5000);
     assert_eq!(balance.allocated_spatial_milli, 5000);
     assert_eq!(balance.unallocated_milli, 0);
@@ -180,7 +186,9 @@ fn test_opening_balance_zero_and_negative_rejected() {
     assert!(matches!(err, StockLedgerError::InvalidQuantity(_)));
 
     // No rows written
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0)).unwrap();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(count, 0);
 }
 
@@ -256,7 +264,9 @@ fn test_adjustment_positive_and_negative_within_balance() {
     assert_eq!(m2.quantity_before_milli, Some(13000));
     assert_eq!(m2.quantity_after_milli, Some(9000));
 
-    let balance = StockLedgerService::get_balance(&conn, &f.branch_id, &f.product_id, Some(&f.variant_id)).unwrap();
+    let balance =
+        StockLedgerService::get_balance(&conn, &f.branch_id, &f.product_id, Some(&f.variant_id))
+            .unwrap();
     assert_eq!(balance.aggregate_quantity_milli, 9000);
     assert_eq!(balance.allocated_spatial_milli, 9000);
     assert_eq!(balance.unallocated_milli, 0);
@@ -514,8 +524,12 @@ fn test_atomic_rollback_on_failed_mutation() {
     )
     .unwrap();
 
-    let movements_before: i64 = conn.query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0)).unwrap();
-    let keys_before: i64 = conn.query_row("SELECT COUNT(*) FROM idempotency_keys", [], |r| r.get(0)).unwrap();
+    let movements_before: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0))
+        .unwrap();
+    let keys_before: i64 = conn
+        .query_row("SELECT COUNT(*) FROM idempotency_keys", [], |r| r.get(0))
+        .unwrap();
 
     // Now issue a movement that will fail due to insufficient stock (-10,000)
     let err = StockLedgerService::post_movement(
@@ -541,8 +555,12 @@ fn test_atomic_rollback_on_failed_mutation() {
     assert!(matches!(err, StockLedgerError::InsufficientStock { .. }));
 
     // Verify complete rollback: no new stock movement, no new idempotency key
-    let movements_after: i64 = conn.query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0)).unwrap();
-    let keys_after: i64 = conn.query_row("SELECT COUNT(*) FROM idempotency_keys", [], |r| r.get(0)).unwrap();
+    let movements_after: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0))
+        .unwrap();
+    let keys_after: i64 = conn
+        .query_row("SELECT COUNT(*) FROM idempotency_keys", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(movements_after, movements_before);
     assert_eq!(keys_after, keys_before);
 
@@ -553,7 +571,10 @@ fn test_atomic_rollback_on_failed_mutation() {
             |r| r.get(0),
         )
         .unwrap();
-    assert!(!failed_key_exists, "Failed mutation must not persist an idempotency key");
+    assert!(
+        !failed_key_exists,
+        "Failed mutation must not persist an idempotency key"
+    );
 
     // Inventory and spatial balances remain untouched at 5,000
     let bal = StockLedgerService::get_balance(&conn, &f.branch_id, &f.product_id, None).unwrap();
@@ -591,16 +612,57 @@ fn test_movement_row_matches_exact_before_delta_after_fields() {
     assert_eq!(m1.quantity_after_milli, Some(7500));
 
     // Verify in database directly
-    let (delta_milli, delta_real, before_milli, before_real, after_milli, after_real, reason, src_type, src_id, loc_id, bin_id, usr_id): (
-        i64, f64, Option<i64>, Option<f64>, Option<i64>, Option<f64>, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>
-    ) = conn.query_row(
-        "SELECT quantity_delta_milli, quantity_delta, quantity_before_milli, quantity_before,
+    let (
+        delta_milli,
+        delta_real,
+        before_milli,
+        before_real,
+        after_milli,
+        after_real,
+        reason,
+        src_type,
+        src_id,
+        loc_id,
+        bin_id,
+        usr_id,
+    ): (
+        i64,
+        f64,
+        Option<i64>,
+        Option<f64>,
+        Option<i64>,
+        Option<f64>,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT quantity_delta_milli, quantity_delta, quantity_before_milli, quantity_before,
                 quantity_after_milli, quantity_after, reason, source_type, source_id,
                 location_id, bin_id, user_id
          FROM stock_movements WHERE id = ?1",
-        [&m1.id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?)),
-    ).unwrap();
+            [&m1.id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                    r.get(8)?,
+                    r.get(9)?,
+                    r.get(10)?,
+                    r.get(11)?,
+                ))
+            },
+        )
+        .unwrap();
 
     assert_eq!(delta_milli, 7500);
     assert!((delta_real - 7.5).abs() < 1e-6);
@@ -676,7 +738,8 @@ fn test_spatial_balance_and_unallocated_balance_calculation() {
     )
     .unwrap();
 
-    let balance = StockLedgerService::get_balance(&conn, &f.branch_id, &f.product_id, None).unwrap();
+    let balance =
+        StockLedgerService::get_balance(&conn, &f.branch_id, &f.product_id, None).unwrap();
     assert_eq!(balance.aggregate_quantity_milli, 13000);
     assert_eq!(balance.allocated_spatial_milli, 13000);
     assert_eq!(balance.unallocated_milli, 0);
@@ -1190,7 +1253,10 @@ fn test_serial_lifecycle_firewall_blocks_direct_status_bypass() {
     )
     .unwrap_err();
 
-    assert!(matches!(err, crate::serial::SerialError::InvalidStatusTransition(_)));
+    assert!(matches!(
+        err,
+        crate::serial::SerialError::InvalidStatusTransition(_)
+    ));
 }
 
 // =========================================================================
@@ -1228,7 +1294,9 @@ fn test_idempotent_replay_with_same_request_hash() {
     assert_eq!(m1.quantity_delta_milli, m2.quantity_delta_milli);
 
     // Exactly one movement row in DB
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0)).unwrap();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(count, 1);
 
     // Inventory only increased once by 4,000
@@ -1302,14 +1370,17 @@ fn test_immutable_stock_movement_update_and_delete_rejection() {
         "UPDATE stock_movements SET quantity_delta_milli = 99999 WHERE id = ?1",
         [&m.id],
     );
-    assert!(update_res.is_err(), "Trigger prevent_stock_movements_update must block UPDATE");
+    assert!(
+        update_res.is_err(),
+        "Trigger prevent_stock_movements_update must block UPDATE"
+    );
 
     // Direct DELETE on stock_movements must be aborted by trigger
-    let delete_res = conn.execute(
-        "DELETE FROM stock_movements WHERE id = ?1",
-        [&m.id],
+    let delete_res = conn.execute("DELETE FROM stock_movements WHERE id = ?1", [&m.id]);
+    assert!(
+        delete_res.is_err(),
+        "Trigger prevent_stock_movements_delete must block DELETE"
     );
-    assert!(delete_res.is_err(), "Trigger prevent_stock_movements_delete must block DELETE");
 }
 
 // =========================================================================
@@ -1351,7 +1422,8 @@ fn test_legacy_pre_020_stock_remains_untouched_and_unallocated() {
     assert_eq!(loc_inv_count, 0);
 
     // 2. StockLedgerService reports unallocated = 15,000 milli
-    let balance = StockLedgerService::get_balance(&conn, &branch_id, legacy_prod_id, None).unwrap();
+    let balance =
+        StockLedgerService::get_balance(&conn, &branch_id, legacy_prod_id, None).unwrap();
     assert_eq!(balance.aggregate_quantity_milli, 15000);
     assert_eq!(balance.allocated_spatial_milli, 0);
     assert_eq!(balance.unallocated_milli, 15000);
@@ -1420,6 +1492,7 @@ fn test_serialized_application_concurrency_with_arc_mutex() {
         .unwrap();
     assert_eq!(movement_count, 1);
 
-    let bal = StockLedgerService::get_balance(&conn_guard, &f.branch_id, &f.product_id, None).unwrap();
+    let bal =
+        StockLedgerService::get_balance(&conn_guard, &f.branch_id, &f.product_id, None).unwrap();
     assert_eq!(bal.aggregate_quantity_milli, 10000);
 }

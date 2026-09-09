@@ -103,7 +103,10 @@ fn test_migration_020_fresh_application_and_idempotency() {
             |row| row.get(0),
         )
         .expect("request_hash check");
-    assert!(hash_col_exists, "idempotency_keys must contain request_hash column");
+    assert!(
+        hash_col_exists,
+        "idempotency_keys must contain request_hash column"
+    );
 
     // Verify re-running full init_database is idempotent
     crate::db::init_database(&conn).expect("init_database must be idempotent");
@@ -130,7 +133,10 @@ fn test_database_composite_foreign_key_location_branch_mismatch_rejected() {
          VALUES ('inv_1', ?1, 'loc_a', ?2, 1000)",
         params![branch_b, product_id],
     );
-    assert!(err.is_err(), "mismatched (location_id, branch_id) must be rejected by foreign key");
+    assert!(
+        err.is_err(),
+        "mismatched (location_id, branch_id) must be rejected by foreign key"
+    );
 }
 
 #[test]
@@ -170,7 +176,10 @@ fn test_database_composite_foreign_key_bin_location_mismatch_rejected() {
          VALUES ('inv_bad', ?1, 'loc_2', 'bin_z1', ?2, 1000)",
         params![branch_id, product_id],
     );
-    assert!(err.is_err(), "mismatched (bin_id, location_id) must be rejected by composite foreign key");
+    assert!(
+        err.is_err(),
+        "mismatched (bin_id, location_id) must be rejected by composite foreign key"
+    );
 }
 
 #[test]
@@ -200,7 +209,10 @@ fn test_location_inventory_non_negative_check_constraint() {
          VALUES ('inv_neg', ?1, 'loc_1', ?2, -1)",
         params![branch_id, product_id],
     );
-    assert!(err.is_err(), "negative quantity_milli must violate CHECK constraint");
+    assert!(
+        err.is_err(),
+        "negative quantity_milli must violate CHECK constraint"
+    );
 }
 
 #[test]
@@ -242,7 +254,10 @@ fn test_location_inventory_partial_unique_indexes_prevent_duplicates() {
          VALUES ('c1_dup', ?1, 'loc_1', ?2, 600)",
         params![branch_id, product_id],
     );
-    assert!(err.is_err(), "duplicate c1 (no bin, no var, no batch) must be rejected");
+    assert!(
+        err.is_err(),
+        "duplicate c1 (no bin, no var, no batch) must be rejected"
+    );
 
     // Case 2: bin, no var, no batch
     conn.execute(
@@ -256,7 +271,10 @@ fn test_location_inventory_partial_unique_indexes_prevent_duplicates() {
          VALUES ('c2_dup', ?1, 'loc_1', 'bin_1', ?2, 600)",
         params![branch_id, product_id],
     );
-    assert!(err.is_err(), "duplicate c2 (bin, no var, no batch) must be rejected");
+    assert!(
+        err.is_err(),
+        "duplicate c2 (bin, no var, no batch) must be rejected"
+    );
 
     // Case 3: no bin, var, no batch
     conn.execute(
@@ -270,7 +288,10 @@ fn test_location_inventory_partial_unique_indexes_prevent_duplicates() {
          VALUES ('c3_dup', ?1, 'loc_1', ?2, ?3, 600)",
         params![branch_id, product_id, variant_id],
     );
-    assert!(err.is_err(), "duplicate c3 (no bin, var, no batch) must be rejected");
+    assert!(
+        err.is_err(),
+        "duplicate c3 (no bin, var, no batch) must be rejected"
+    );
 
     // Case 8: bin, var, batch
     conn.execute(
@@ -284,7 +305,10 @@ fn test_location_inventory_partial_unique_indexes_prevent_duplicates() {
          VALUES ('c8_dup', ?1, 'loc_1', 'bin_1', ?2, ?3, 'batch_1', 600)",
         params![branch_id, product_id, variant_id],
     );
-    assert!(err.is_err(), "duplicate c8 (bin, var, batch) must be rejected");
+    assert!(
+        err.is_err(),
+        "duplicate c8 (bin, var, batch) must be rejected"
+    );
 }
 
 #[test]
@@ -305,18 +329,27 @@ fn test_stock_movements_immutability_triggers() {
         "UPDATE stock_movements SET quantity_delta_milli = 2000 WHERE id = 'mov_immut'",
         [],
     );
-    assert!(err_update.is_err(), "UPDATE on stock_movements must be aborted by trigger");
+    assert!(
+        err_update.is_err(),
+        "UPDATE on stock_movements must be aborted by trigger"
+    );
     let err_msg = err_update.unwrap_err().to_string();
-    assert!(err_msg.contains("stock_movements records are immutable"), "expected trigger error message, got: {err_msg}");
+    assert!(
+        err_msg.contains("stock_movements records are immutable"),
+        "expected trigger error message, got: {err_msg}"
+    );
 
     // DELETE must be aborted by trigger
-    let err_delete = conn.execute(
-        "DELETE FROM stock_movements WHERE id = 'mov_immut'",
-        [],
+    let err_delete = conn.execute("DELETE FROM stock_movements WHERE id = 'mov_immut'", []);
+    assert!(
+        err_delete.is_err(),
+        "DELETE on stock_movements must be aborted by trigger"
     );
-    assert!(err_delete.is_err(), "DELETE on stock_movements must be aborted by trigger");
     let del_msg = err_delete.unwrap_err().to_string();
-    assert!(del_msg.contains("stock_movements records are immutable"), "expected trigger error message, got: {del_msg}");
+    assert!(
+        del_msg.contains("stock_movements records are immutable"),
+        "expected trigger error message, got: {del_msg}"
+    );
 }
 
 #[test]
@@ -370,5 +403,8 @@ fn test_upgrade_from_019_to_020_preserves_legacy_state() {
     let loc_inv_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM location_inventory", [], |r| r.get(0))
         .expect("query loc inv count");
-    assert_eq!(loc_inv_count, 0, "legacy upgrade must not fabricate location_inventory rows");
+    assert_eq!(
+        loc_inv_count, 0,
+        "legacy upgrade must not fabricate location_inventory rows"
+    );
 }

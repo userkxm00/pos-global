@@ -118,8 +118,7 @@ pub fn post_stock_movement_impl(
         .map_err(|e| format!("Branch scope unauthorized: {e}"))?;
 
     // 3. Parse and validate movement reason string into domain enum
-    let reason = StockMovementReason::from_str(&request.reason)
-        .map_err(map_stock_ledger_error)?;
+    let reason = StockMovementReason::from_str(&request.reason).map_err(map_stock_ledger_error)?;
 
     // 4. Construct domain input DTO with user_id bound to the authenticated session
     let input = PostMovementInput {
@@ -184,8 +183,7 @@ pub fn list_location_inventory_impl(
         batch_id: request.batch_id,
     };
 
-    StockLedgerService::list_location_inventory(conn, &filter)
-        .map_err(map_stock_ledger_error)
+    StockLedgerService::list_location_inventory(conn, &filter).map_err(map_stock_ledger_error)
 }
 
 /// Lists historical stock movement ledger records with branch-scoped access.
@@ -219,8 +217,7 @@ pub fn list_stock_movements_impl(
         offset: request.offset,
     };
 
-    StockLedgerService::list_movements(conn, &filter)
-        .map_err(map_stock_ledger_error)
+    StockLedgerService::list_movements(conn, &filter).map_err(map_stock_ledger_error)
 }
 
 /// Retrieves a single stock movement by ID scoped to branch.
@@ -237,8 +234,7 @@ pub fn get_stock_movement_impl(
         .execute(conn)
         .map_err(|e| format!("Branch scope unauthorized: {e}"))?;
 
-    StockLedgerService::get_movement(conn, branch_id, id)
-        .map_err(map_stock_ledger_error)
+    StockLedgerService::get_movement(conn, branch_id, id).map_err(map_stock_ledger_error)
 }
 
 // =========================================================================

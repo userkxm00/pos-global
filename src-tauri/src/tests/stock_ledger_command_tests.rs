@@ -172,8 +172,7 @@ fn test_command_unauthorized_write_fails_with_inventory_adjust_error() {
     };
 
     // Cashier lacks Permission::InventoryAdjust -> rejected with Permission denied
-    let err = post_stock_movement_impl(&mut conn, &f.cashier_session_a, req)
-        .unwrap_err();
+    let err = post_stock_movement_impl(&mut conn, &f.cashier_session_a, req).unwrap_err();
 
     assert!(
         err.contains("Permission denied") || err.contains("inventory.adjust"),
@@ -181,7 +180,9 @@ fn test_command_unauthorized_write_fails_with_inventory_adjust_error() {
     );
 
     // Assert zero stock mutations occurred
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0)).unwrap();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(count, 0);
 }
 
@@ -205,8 +206,7 @@ fn test_command_unauthenticated_write_fails() {
         idempotency_key: None,
     };
 
-    let err = post_stock_movement_impl(&mut conn, "invalid-session-token", req)
-        .unwrap_err();
+    let err = post_stock_movement_impl(&mut conn, "invalid-session-token", req).unwrap_err();
 
     assert!(
         err.contains("session") || err.contains("Unauthorized"),
@@ -235,8 +235,7 @@ fn test_command_branch_mismatch_write_fails() {
         idempotency_key: None,
     };
 
-    let err = post_stock_movement_impl(&mut conn, &f.admin_session_b, req)
-        .unwrap_err();
+    let err = post_stock_movement_impl(&mut conn, &f.admin_session_b, req).unwrap_err();
 
     assert!(
         err.contains("Branch scope unauthorized") || err.contains("Permission denied"),
@@ -244,7 +243,9 @@ fn test_command_branch_mismatch_write_fails() {
     );
 
     // Verify no stock mutated in Branch A
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0)).unwrap();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(count, 0);
 }
 
@@ -316,13 +317,8 @@ fn test_command_authorized_read_succeeds() {
     assert_eq!(mov_list[0].id, m.id);
 
     // 4. get_stock_movement_impl
-    let single_mov = get_stock_movement_impl(
-        &conn,
-        &f.admin_session_a,
-        &f.branch_a,
-        &m.id,
-    )
-    .expect("get single movement succeeds");
+    let single_mov = get_stock_movement_impl(&conn, &f.admin_session_a, &f.branch_a, &m.id)
+        .expect("get single movement succeeds");
     assert!(single_mov.is_some());
     assert_eq!(single_mov.unwrap().id, m.id);
 }
@@ -354,7 +350,8 @@ fn test_command_authenticated_read_from_another_branch_is_rejected() {
     .unwrap();
 
     // User authenticated for Branch B attempts to read Branch A data
-    let err_bal = get_stock_balance_impl(&conn, &f.admin_session_b, &f.branch_a, &f.product_id, None);
+    let err_bal =
+        get_stock_balance_impl(&conn, &f.admin_session_b, &f.branch_a, &f.product_id, None);
     assert!(err_bal.is_err(), "Cross-branch balance read must fail");
 
     let err_loc = list_location_inventory_impl(
@@ -365,7 +362,10 @@ fn test_command_authenticated_read_from_another_branch_is_rejected() {
             ..Default::default()
         },
     );
-    assert!(err_loc.is_err(), "Cross-branch location inventory read must fail");
+    assert!(
+        err_loc.is_err(),
+        "Cross-branch location inventory read must fail"
+    );
 
     let err_mov = list_stock_movements_impl(
         &conn,
@@ -378,7 +378,10 @@ fn test_command_authenticated_read_from_another_branch_is_rejected() {
     assert!(err_mov.is_err(), "Cross-branch movement list must fail");
 
     let err_single = get_stock_movement_impl(&conn, &f.admin_session_b, &f.branch_a, &m.id);
-    assert!(err_single.is_err(), "Cross-branch single movement read must fail");
+    assert!(
+        err_single.is_err(),
+        "Cross-branch single movement read must fail"
+    );
 }
 
 #[test]
@@ -446,7 +449,10 @@ fn test_command_ipc_request_correctly_reaches_stock_ledger_service() {
     assert_eq!(movement.quantity_delta_milli, 6500);
     assert_eq!(movement.source_type.as_deref(), Some("custom_source"));
     assert_eq!(movement.source_id.as_deref(), Some("SRC-7711"));
-    assert!(movement.user_id.is_some(), "user_id must be populated from authenticated session");
+    assert!(
+        movement.user_id.is_some(),
+        "user_id must be populated from authenticated session"
+    );
 
     // Verify directly in DB that StockLedgerService processed it
     let (db_delta, db_reason): (i64, String) = conn
@@ -542,11 +548,19 @@ fn test_command_idempotent_repeated_ipc_request_returns_same_result_without_dupl
     assert_eq!(m1.quantity_delta_milli, m2.quantity_delta_milli);
 
     // Exactly 1 movement row in DB
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0)).unwrap();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(count, 1);
 
     // Stock only mutated once
-    let bal = get_stock_balance_impl(&conn, &f.manager_session_a, &f.branch_a, &f.product_id, None)
-        .unwrap();
+    let bal = get_stock_balance_impl(
+        &conn,
+        &f.manager_session_a,
+        &f.branch_a,
+        &f.product_id,
+        None,
+    )
+    .unwrap();
     assert_eq!(bal.aggregate_quantity_milli, 4000);
 }

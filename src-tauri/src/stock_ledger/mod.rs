@@ -488,9 +488,7 @@ pub fn post_stock_movement(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?
-        .ok_or_else(|| {
-            StockLedgerError::NotFound(format!("Location '{location_id}' not found"))
-        })?;
+        .ok_or_else(|| StockLedgerError::NotFound(format!("Location '{location_id}' not found")))?;
 
     if loc_branch != branch_id {
         return Err(StockLedgerError::BranchMismatch(format!(
@@ -868,7 +866,8 @@ pub fn post_stock_movement(
     }
 
     // 13. Append Immutable Stock Movement Ledger Entry
-    let movement_id: String = tx.query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?;
+    let movement_id: String =
+        tx.query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?;
 
     tx.execute(
         "INSERT INTO stock_movements (
@@ -1027,8 +1026,7 @@ pub fn list_location_inventory(
     query.push_str(" ORDER BY location_id ASC, product_id ASC, bin_id ASC");
 
     let mut stmt = conn.prepare(&query)?;
-    let rusqlite_params: Vec<&dyn rusqlite::ToSql> =
-        params_vec.iter().map(AsRef::as_ref).collect();
+    let rusqlite_params: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
 
     let rows = stmt.query_map(rusqlite_params.as_slice(), |row| {
         Ok(LocationInventory {
@@ -1061,7 +1059,8 @@ pub fn list_stock_movements(
                             quantity_before_milli, quantity_after_milli, reason,
                             source_type, source_id, location_id, bin_id, batch_id, serial_id,
                             user_id, created_at
-                     FROM stock_movements WHERE branch_id = ?1".to_string();
+                     FROM stock_movements WHERE branch_id = ?1"
+        .to_string();
     let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(filter.branch_id.clone())];
 
     if let Some(ref prod) = filter.product_id {
@@ -1105,8 +1104,7 @@ pub fn list_stock_movements(
     }
 
     let mut stmt = conn.prepare(&query)?;
-    let rusqlite_params: Vec<&dyn rusqlite::ToSql> =
-        params_vec.iter().map(AsRef::as_ref).collect();
+    let rusqlite_params: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
 
     let rows = stmt.query_map(rusqlite_params.as_slice(), |row| {
         let reason_str: String = row.get(7)?;
