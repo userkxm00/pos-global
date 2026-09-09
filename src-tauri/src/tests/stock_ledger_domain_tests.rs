@@ -1203,7 +1203,7 @@ fn test_quarantined_and_recalled_batch_preservation_on_stock_deduction() {
 
 #[test]
 fn test_readers_support_persisted_sales_and_historical_reasons() {
-    let mut conn = setup_test_db();
+    let conn = setup_test_db();
     let f = setup_fixtures(&conn);
 
     // Directly insert historical movements (e.g. from commands/sales.rs or pre-020 system)
@@ -1276,7 +1276,7 @@ fn test_readers_support_persisted_sales_and_historical_reasons() {
 
 #[test]
 fn test_readers_fallback_on_unsupported_or_corrupt_persisted_reason() {
-    let mut conn = setup_test_db();
+    let conn = setup_test_db();
     let f = setup_fixtures(&conn);
 
     // Insert movement with arbitrary/corrupt reason text
