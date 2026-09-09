@@ -989,3 +989,61 @@ fn test_get_batch_command_cross_branch_leakage_prevented() {
     let res = get_product_batch_impl(&conn, &session.id, &b2.id);
     assert!(res.is_err(), "Cross-branch batch access must fail closed");
 }
+
+#[test]
+fn test_create_batch_zero_quantity_starts_active_and_depleted_is_terminal() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Antibiotic", true);
+
+    // 1. Zero quantity batch starts Active
+    let zero_batch = create_test_batch(
+        &conn,
+        &product_id,
+        &branch_id,
+        "ZERO-LOT-01",
+        0,
+        Some("2099-12-31"),
+    )
+    .expect("create zero quantity batch");
+    assert_eq!(zero_batch.quantity_milli, 0);
+    assert_eq!(zero_batch.status, BatchStatus::Active, "Newly created zero-quantity batch must start as Active per ADR-0013");
+
+    // 2. Positive quantity batch starts Active
+    let pos_batch = create_test_batch(
+        &conn,
+        &product_id,
+        &branch_id,
+        "POS-LOT-01",
+        5000,
+        Some("2099-12-31"),
+    )
+    .expect("create positive quantity batch");
+    assert_eq!(pos_batch.quantity_milli, 5000);
+    assert_eq!(pos_batch.status, BatchStatus::Active, "Newly created positive-quantity batch must start as Active");
+
+    // 3. Depletion transition works
+    let depleted = update_batch_status(
+        &conn,
+        &UpdateBatchStatusInput {
+            batch_id: pos_batch.id.clone(),
+            status: BatchStatus::Depleted,
+        },
+    )
+    .expect("transition to depleted");
+    assert_eq!(depleted.status, BatchStatus::Depleted);
+
+    // 4. Depleted batch remains terminal (cannot be reopened/reactivated)
+    let err_reopen = update_batch_status(
+        &conn,
+        &UpdateBatchStatusInput {
+            batch_id: pos_batch.id,
+            status: BatchStatus::Active,
+        },
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err_reopen, BatchError::InvalidStatusTransition(msg) if msg.contains("Depleted batches are terminal")),
+        "Depleted batch must be terminal and cannot transition to Active"
+    );
+}

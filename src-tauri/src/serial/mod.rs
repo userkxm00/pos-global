@@ -92,6 +92,10 @@ pub struct SerializedInstance {
     pub sold_in_sale_id: Option<String>,
     /// Historical warranty expiration date if registered.
     pub warranty_expires_at: Option<String>,
+    /// Physical storage location ID where this unit is located (F2.11).
+    pub location_id: Option<String>,
+    /// Physical pick/put storage bin ID where this unit is located (F2.11).
+    pub bin_id: Option<String>,
     /// ISO-8601 creation timestamp.
     pub created_at: String,
     /// ISO-8601 last update timestamp.
@@ -514,7 +518,7 @@ pub fn map_sqlite_collision_error(e: rusqlite::Error) -> SerialError {
 // CRUD DOMAIN OPERATIONS
 // =========================================================================
 
-const SERIAL_COLUMNS: &str = "id, product_id, branch_id, variant_id, serial_number, imei, asset_tag, cost_price_minor, status, sold_in_sale_id, warranty_expires_at, created_at, updated_at";
+const SERIAL_COLUMNS: &str = "id, product_id, branch_id, variant_id, serial_number, imei, asset_tag, cost_price_minor, status, sold_in_sale_id, warranty_expires_at, location_id, bin_id, created_at, updated_at";
 
 fn row_to_instance(row: &rusqlite::Row) -> rusqlite::Result<SerializedInstance> {
     let status_str: String = row.get("status")?;
@@ -541,6 +545,8 @@ fn row_to_instance(row: &rusqlite::Row) -> rusqlite::Result<SerializedInstance> 
         status,
         sold_in_sale_id: row.get("sold_in_sale_id")?,
         warranty_expires_at: row.get("warranty_expires_at")?,
+        location_id: row.get("location_id")?,
+        bin_id: row.get("bin_id")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
@@ -575,12 +581,15 @@ pub fn create_serial_instance(
         norm_asset_tag.as_deref(),
     )?;
 
+    // F2.11 ADR-0013: Serial registration is identity registration, not stock intake.
+    // Newly registered serials start as 'reserved'. Stock intake into 'in_stock'
+    // is owned by F2.11 StockLedgerService alongside exact +1000 quantity mutation.
     let sql = format!(
         "INSERT INTO serial_numbers (
             product_id, branch_id, variant_id,
             serial_number, imei, asset_tag, cost_price_minor,
             status, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'in_stock', datetime('now'), datetime('now'))
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'reserved', datetime('now'), datetime('now'))
         RETURNING {SERIAL_COLUMNS}"
     );
 
@@ -691,6 +700,20 @@ pub fn update_serial_status(
     }
 
     validate_status_transition(current.status, input.status)?;
+
+    // F2.11 Ledger Authority Firewall:
+    // If a serial is in_stock and has a physical location_id (i.e. is ledger-owned spatial stock),
+    // direct outbound status mutations (e.g. to defective, disposed, sold, recalled)
+    // represent physical stock exits that must be processed through StockLedgerService
+    // to record stock movements and mutate aggregate/spatial balances.
+    if current.status == SerialStatus::InStock
+        && current.location_id.is_some()
+        && input.status != SerialStatus::InStock
+    {
+        return Err(SerialError::Validation(
+            "Direct outbound status mutation of ledger-owned in-stock serial is blocked; use StockLedgerService".to_string(),
+        ));
+    }
 
     let sql = format!(
         "UPDATE serial_numbers

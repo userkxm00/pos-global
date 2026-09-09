@@ -544,11 +544,10 @@ pub fn create_batch(
         &batch_number,
     )?;
 
-    let initial_status = if input.quantity_milli == 0 {
-        BatchStatus::Depleted
-    } else {
-        BatchStatus::Active
-    };
+    // F2.11 ADR-0013: A newly registered batch is an identity/metadata record.
+    // Newly registered batches with zero quantity begin as 'active' (not 'depleted'),
+    // because 'depleted' is strictly terminal and F2.11 stock intake owns quantity additions.
+    let initial_status = BatchStatus::Active;
 
     let insert_res = conn.execute(
         "INSERT INTO product_batches (
