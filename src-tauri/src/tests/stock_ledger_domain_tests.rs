@@ -15,17 +15,17 @@ use crate::batch::{
     create_batch, update_batch_status, BatchStatus, CreateBatchInput, UpdateBatchStatusInput,
 };
 use crate::serial::{
-    create_serial_instance, update_serial_status, CreateSerialInstanceInput,
+    create_serial_instance, update_serial_status, CreateSerialInput, SerialStatus,
     UpdateSerialStatusInput,
 };
 use crate::stock_ledger::{
-    compute_request_hash, LocationInventoryFilter, PostMovementInput, StockLedgerError,
-    StockLedgerService, StockMovementFilter, StockMovementReason,
+    LocationInventoryFilter, PostMovementInput, StockLedgerError, StockLedgerService,
+    StockMovementReason,
 };
 use crate::tests::test_helpers::{
     apply_migrations_up_to, create_test_org_and_branch, setup_test_db, setup_test_db_up_to,
 };
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -848,7 +848,7 @@ fn test_batch_consistency_and_lifecycle() {
     // 1. Create batch via F2.07 metadata (quantity = 0, starts active)
     let batch = create_batch(
         &conn,
-        CreateBatchInput {
+        &CreateBatchInput {
             product_id: f.product_id.clone(),
             branch_id: f.branch_id.clone(),
             variant_id: Some(f.variant_id.clone()),
@@ -988,7 +988,7 @@ fn test_quarantined_and_recalled_batch_preservation_on_stock_deduction() {
     // Create batch & intake 5,000 milli while active
     let batch = create_batch(
         &conn,
-        CreateBatchInput {
+        &CreateBatchInput {
             product_id: f.product_id.clone(),
             branch_id: f.branch_id.clone(),
             variant_id: None,
@@ -1098,7 +1098,7 @@ fn test_serial_consistency_exact_delta_and_physical_location() {
     // 1. Create serial: registers as reserved with location_id = NULL
     let serial = create_serial_instance(
         &conn,
-        CreateSerialInstanceInput {
+        &CreateSerialInput {
             product_id: f.product_id.clone(),
             branch_id: f.branch_id.clone(),
             variant_id: Some(f.variant_id.clone()),
@@ -1110,7 +1110,7 @@ fn test_serial_consistency_exact_delta_and_physical_location() {
     )
     .unwrap();
 
-    assert_eq!(serial.status, "reserved");
+    assert_eq!(serial.status, SerialStatus::Reserved);
     assert_eq!(serial.location_id, None);
     assert_eq!(serial.bin_id, None);
 
@@ -1209,7 +1209,7 @@ fn test_serial_lifecycle_firewall_blocks_direct_status_bypass() {
 
     let serial = create_serial_instance(
         &conn,
-        CreateSerialInstanceInput {
+        &CreateSerialInput {
             product_id: f.product_id.clone(),
             branch_id: f.branch_id.clone(),
             variant_id: None,
@@ -1247,16 +1247,14 @@ fn test_serial_lifecycle_firewall_blocks_direct_status_bypass() {
     let err = update_serial_status(
         &conn,
         &UpdateSerialStatusInput {
-            serial_id: serial.id.clone(),
-            status: "defective".to_string(),
+            id: serial.id.clone(),
+            branch_id: f.branch_id.clone(),
+            status: SerialStatus::Defective,
         },
     )
     .unwrap_err();
 
-    assert!(matches!(
-        err,
-        crate::serial::SerialError::InvalidStatusTransition(_)
-    ));
+    assert!(matches!(err, crate::serial::SerialError::Validation(_)));
 }
 
 // =========================================================================
@@ -1390,7 +1388,7 @@ fn test_immutable_stock_movement_update_and_delete_rejection() {
 #[test]
 fn test_legacy_pre_020_stock_remains_untouched_and_unallocated() {
     let conn = setup_test_db_up_to("019_locations_bins");
-    let (org_id, branch_id) = create_test_org_and_branch(&conn);
+    let (_org_id, branch_id) = create_test_org_and_branch(&conn);
 
     let legacy_prod_id = "prod_legacy_01";
     conn.execute(

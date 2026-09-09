@@ -2,7 +2,7 @@
 // ADR-0013: Sole authority for inventory quantity mutations, spatial stock balances,
 // immutable audit ledger, exact unit serial transitions, batch lifecycle, and idempotency.
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::str::FromStr;

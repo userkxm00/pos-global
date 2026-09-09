@@ -355,7 +355,7 @@ fn test_stock_movements_immutability_triggers() {
 #[test]
 fn test_upgrade_from_019_to_020_preserves_legacy_state() {
     let conn = setup_test_db_up_to("019_locations_bins");
-    let (org_id, branch_id) = create_test_org_and_branch(&conn);
+    let (_org_id, branch_id) = create_test_org_and_branch(&conn);
     let (product_id, _) = seed_catalog_fixture(&conn);
 
     // Seed pre-020 aggregate inventory
