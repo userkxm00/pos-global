@@ -1422,8 +1422,7 @@ fn test_legacy_pre_020_stock_remains_untouched_and_unallocated() {
     assert_eq!(loc_inv_count, 0);
 
     // 2. StockLedgerService reports unallocated = 15,000 milli
-    let balance =
-        StockLedgerService::get_balance(&conn, &branch_id, legacy_prod_id, None).unwrap();
+    let balance = StockLedgerService::get_balance(&conn, &branch_id, legacy_prod_id, None).unwrap();
     assert_eq!(balance.aggregate_quantity_milli, 15000);
     assert_eq!(balance.allocated_spatial_milli, 0);
     assert_eq!(balance.unallocated_milli, 15000);
