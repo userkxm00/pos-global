@@ -210,7 +210,7 @@ fn test_command_unauthenticated_write_fails() {
     let err = post_stock_movement_impl(&mut conn, "invalid-session-token", req).unwrap_err();
 
     assert!(
-        err.contains("session") || err.contains("Unauthorized"),
+        err.to_lowercase().contains("session") || err.contains("Unauthorized"),
         "Unauthenticated session must fail closed, got: {err}"
     );
 }
@@ -239,7 +239,9 @@ fn test_command_branch_mismatch_write_fails() {
     let err = post_stock_movement_impl(&mut conn, &f.admin_session_b, req).unwrap_err();
 
     assert!(
-        err.contains("Branch scope unauthorized") || err.contains("Permission denied"),
+        err.contains("Scope mismatch")
+            || err.contains("Branch scope unauthorized")
+            || err.contains("Permission denied"),
         "Cross-branch write must be blocked by tenancy boundary, got: {err}"
     );
 

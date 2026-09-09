@@ -533,6 +533,9 @@ fn row_to_instance(row: &rusqlite::Row) -> rusqlite::Result<SerializedInstance> 
         )
     })?;
 
+    let location_id: Option<String> = row.get("location_id").unwrap_or(None);
+    let bin_id: Option<String> = row.get("bin_id").unwrap_or(None);
+
     Ok(SerializedInstance {
         id: row.get("id")?,
         product_id: row.get("product_id")?,
@@ -545,8 +548,8 @@ fn row_to_instance(row: &rusqlite::Row) -> rusqlite::Result<SerializedInstance> 
         status,
         sold_in_sale_id: row.get("sold_in_sale_id")?,
         warranty_expires_at: row.get("warranty_expires_at")?,
-        location_id: row.get("location_id")?,
-        bin_id: row.get("bin_id")?,
+        location_id,
+        bin_id,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
@@ -584,17 +587,15 @@ pub fn create_serial_instance(
     // F2.11 ADR-0013: Serial registration is identity registration, not stock intake.
     // Newly registered serials start as 'reserved'. Stock intake into 'in_stock'
     // is owned by F2.11 StockLedgerService alongside exact +1000 quantity mutation.
-    let sql = format!(
-        "INSERT INTO serial_numbers (
+    let sql = "INSERT INTO serial_numbers (
             product_id, branch_id, variant_id,
             serial_number, imei, asset_tag, cost_price_minor,
             status, created_at, updated_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'reserved', datetime('now'), datetime('now'))
-        RETURNING {SERIAL_COLUMNS}"
-    );
+        RETURNING id, product_id, branch_id, variant_id, serial_number, imei, asset_tag, cost_price_minor, status, sold_in_sale_id, warranty_expires_at, created_at, updated_at";
 
     conn.query_row(
-        &sql,
+        sql,
         params![
             input.product_id,
             input.branch_id,

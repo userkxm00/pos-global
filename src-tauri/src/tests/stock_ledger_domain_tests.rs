@@ -50,11 +50,18 @@ fn setup_fixtures(conn: &Connection) -> TestFixtures {
     let variant_id = "var_ledger_01";
 
     conn.execute(
-        "INSERT INTO products (id, name, base_price, is_active)
-         VALUES (?1, 'Ledger Test Product', 25.0, 1)",
+        "INSERT INTO products (id, name, base_price, is_active, requires_serial)
+         VALUES (?1, 'Ledger Test Product', 25.0, 1, 1)",
         [product_id],
     )
     .expect("product created");
+
+    conn.execute(
+        "INSERT OR REPLACE INTO product_capabilities (product_id, capability_id, enabled)
+         SELECT ?1, id, 1 FROM capabilities WHERE code = 'BATCH'",
+        [product_id],
+    )
+    .expect("batch capability added");
 
     conn.execute(
         "INSERT INTO product_variants (id, product_id, sku, is_active)
@@ -587,6 +594,13 @@ fn test_atomic_rollback_on_failed_mutation() {
 fn test_movement_row_matches_exact_before_delta_after_fields() {
     let mut conn = setup_test_db();
     let f = setup_fixtures(&conn);
+
+    conn.execute(
+        "INSERT INTO users (id, organization_id, email, password_hash, role)
+         VALUES ('usr_auditor', ?1, 'auditor@example.com', 'hash', 'admin')",
+        [&f.org_id],
+    )
+    .unwrap();
 
     let m1 = StockLedgerService::post_movement(
         &mut conn,
