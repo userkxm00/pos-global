@@ -20,12 +20,12 @@ use crate::serial::{
 };
 use crate::stock_ledger::{
     LocationInventoryFilter, PostMovementInput, StockLedgerError, StockLedgerService,
-    StockMovementReason,
+    StockMovementFilter, StockMovementReason,
 };
 use crate::tests::test_helpers::{
     apply_migrations_up_to, create_test_org_and_branch, setup_test_db, setup_test_db_up_to,
 };
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
