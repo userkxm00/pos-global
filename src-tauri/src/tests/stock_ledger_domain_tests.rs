@@ -583,6 +583,7 @@ fn test_atomic_rollback_on_failed_mutation() {
 }
 
 #[test]
+#[allow(clippy::type_complexity)]
 fn test_movement_row_matches_exact_before_delta_after_fields() {
     let mut conn = setup_test_db();
     let f = setup_fixtures(&conn);
