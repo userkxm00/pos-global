@@ -239,10 +239,12 @@ fn test_command_branch_mismatch_write_fails() {
     let err = post_stock_movement_impl(&mut conn, &f.admin_session_b, req).unwrap_err();
 
     assert!(
-        err.contains("Scope mismatch")
-            || err.contains("Branch scope unauthorized")
-            || err.contains("Permission denied"),
-        "Cross-branch write must be blocked by tenancy boundary, got: {err}"
+        err.contains("Scope mismatch"),
+        "Cross-branch write must be blocked by tenancy boundary with Scope mismatch, got: {err}"
+    );
+    assert!(
+        err.contains(&f.branch_a) && err.contains(&f.branch_b),
+        "Scope mismatch error must detail expected and actual branches: {err}"
     );
 
     // Verify no stock mutated in Branch A

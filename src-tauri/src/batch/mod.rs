@@ -349,9 +349,9 @@ fn validate_batch_quantities(
     quantity_milli: i64,
     cost_price_minor: Option<i64>,
 ) -> Result<(), BatchError> {
-    if quantity_milli < 0 {
+    if quantity_milli != 0 {
         return Err(BatchError::Validation(
-            "Batch quantity cannot be negative".into(),
+            "Batch registration is metadata-only and requires quantity_milli = 0. Stock intake must be performed via StockLedgerService".into(),
         ));
     }
     if let Some(cost) = cost_price_minor {

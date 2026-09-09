@@ -413,22 +413,22 @@ pub fn post_stock_movement(
     let norm_variant_id = input
         .variant_id
         .as_deref()
-        .map(|s| s.trim())
+        .map(str::trim)
         .filter(|s| !s.is_empty());
     let norm_bin_id = input
         .bin_id
         .as_deref()
-        .map(|s| s.trim())
+        .map(str::trim)
         .filter(|s| !s.is_empty());
     let norm_batch_id = input
         .batch_id
         .as_deref()
-        .map(|s| s.trim())
+        .map(str::trim)
         .filter(|s| !s.is_empty());
     let norm_serial_id = input
         .serial_id
         .as_deref()
-        .map(|s| s.trim())
+        .map(str::trim)
         .filter(|s| !s.is_empty());
 
     // Basic non-empty string validations
@@ -989,7 +989,7 @@ pub fn post_stock_movement(
         id: movement_id,
         branch_id: branch_id.to_string(),
         product_id: product_id.to_string(),
-        variant_id: norm_variant_id.map(|s| s.to_string()),
+        variant_id: norm_variant_id.map(ToString::to_string),
         quantity_delta_milli: delta,
         quantity_before_milli: Some(agg_before),
         quantity_after_milli: Some(agg_after),
@@ -997,9 +997,9 @@ pub fn post_stock_movement(
         source_type: input.source_type.clone(),
         source_id: input.source_id.clone(),
         location_id: Some(location_id.to_string()),
-        bin_id: norm_bin_id.map(|s| s.to_string()),
-        batch_id: norm_batch_id.map(|s| s.to_string()),
-        serial_id: norm_serial_id.map(|s| s.to_string()),
+        bin_id: norm_bin_id.map(ToString::to_string),
+        batch_id: norm_batch_id.map(ToString::to_string),
+        serial_id: norm_serial_id.map(ToString::to_string),
         user_id: input.user_id.clone(),
         created_at,
     };
@@ -1033,7 +1033,7 @@ pub fn get_stock_balance(
 ) -> Result<StockBalanceSummary, StockLedgerError> {
     let clean_branch = branch_id.trim();
     let clean_prod = product_id.trim();
-    let norm_var = variant_id.map(|s| s.trim()).filter(|s| !s.is_empty());
+    let norm_var = variant_id.map(str::trim).filter(|s| !s.is_empty());
 
     let agg_qty: i64 = conn
         .query_row(
@@ -1059,7 +1059,7 @@ pub fn get_stock_balance(
     Ok(StockBalanceSummary {
         branch_id: clean_branch.to_string(),
         product_id: clean_prod.to_string(),
-        variant_id: norm_var.map(|s| s.to_string()),
+        variant_id: norm_var.map(ToString::to_string),
         aggregate_quantity_milli: agg_qty,
         allocated_spatial_milli: allocated_spatial,
         unallocated_milli: unallocated,

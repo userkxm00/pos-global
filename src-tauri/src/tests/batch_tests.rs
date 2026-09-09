@@ -4,6 +4,9 @@
 use crate::batch::*;
 use crate::commands::batch::{create_product_batch_impl, get_product_batch_impl};
 use crate::product::{create_product, CreateProductInput};
+use crate::stock_ledger::{
+    PostMovementInput, StockLedgerError, StockLedgerService, StockMovementReason,
+};
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_hierarchy, create_test_user_with_creds,
     setup_test_db, setup_test_db_up_to,
@@ -68,19 +71,30 @@ fn create_test_batch(
     quantity_milli: i64,
     expiry_date: Option<&str>,
 ) -> Result<ProductBatch, BatchError> {
-    create_batch(
+    let mut b = create_batch(
         conn,
         &CreateBatchInput {
             product_id: product_id.to_string(),
             branch_id: branch_id.to_string(),
             variant_id: None,
             batch_number: batch_number.to_string(),
-            quantity_milli,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: expiry_date.map(ToString::to_string),
         },
-    )
+    )?;
+
+    if quantity_milli != 0 {
+        conn.execute(
+            "UPDATE product_batches SET quantity_milli = ?1 WHERE id = ?2",
+            params![quantity_milli, b.id],
+        )
+        .map_err(|e| BatchError::Database(e.to_string()))?;
+        b.quantity_milli = quantity_milli;
+    }
+
+    Ok(b)
 }
 
 // =========================================================================
@@ -413,7 +427,7 @@ fn test_batch_creation_manufactured_date_after_expiry_rejected() {
             branch_id,
             variant_id: None,
             batch_number: "YOG-01".into(),
-            quantity_milli: 5000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: Some("2099-05-10".into()),
             expiry_date: Some("2099-05-01".into()),
@@ -456,16 +470,38 @@ fn test_batch_number_normalization_and_bounds() {
     .unwrap_err();
     assert!(matches!(err_long, BatchError::Validation(msg) if msg.contains("maximum length")));
 
-    let err_qty = create_test_batch(
+    // Post-F2.11: create_batch rejects non-zero quantities (both negative and positive)
+    let err_qty_neg = create_batch(
         &conn,
-        &product_id,
-        &branch_id,
-        "BREAD-01",
-        -500,
-        Some("2099-01-01"),
+        &CreateBatchInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            batch_number: "BREAD-01".into(),
+            quantity_milli: -500,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: Some("2099-01-01".into()),
+        },
     )
     .unwrap_err();
-    assert!(matches!(err_qty, BatchError::Validation(msg) if msg.contains("negative")));
+    assert!(matches!(err_qty_neg, BatchError::Validation(msg) if msg.contains("metadata-only")));
+
+    let err_qty_pos = create_batch(
+        &conn,
+        &CreateBatchInput {
+            product_id,
+            branch_id,
+            variant_id: None,
+            batch_number: "BREAD-01".into(),
+            quantity_milli: 500,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: Some("2099-01-01".into()),
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err_qty_pos, BatchError::Validation(msg) if msg.contains("metadata-only")));
 }
 
 #[test]
@@ -513,7 +549,7 @@ fn test_batch_duplicate_variant_number_case_insensitive_rejected() {
             branch_id: branch_id.clone(),
             variant_id: Some(variant_id.clone()),
             batch_number: "LOT-RED-01".into(),
-            quantity_milli: 5000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -529,7 +565,7 @@ fn test_batch_duplicate_variant_number_case_insensitive_rejected() {
             branch_id: branch_id.clone(),
             variant_id: Some(variant_id),
             batch_number: "lot-red-01".into(),
-            quantity_milli: 3000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -556,7 +592,7 @@ fn test_batch_same_number_allowed_for_different_variants() {
             branch_id: branch_id.clone(),
             variant_id: Some(var1),
             batch_number: "SEASON-2026".into(),
-            quantity_milli: 10000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -571,7 +607,7 @@ fn test_batch_same_number_allowed_for_different_variants() {
             branch_id,
             variant_id: Some(var2),
             batch_number: "SEASON-2026".into(),
-            quantity_milli: 10000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: None,
@@ -646,7 +682,7 @@ fn test_batch_creation_variant_mismatch_rejected() {
             branch_id,
             variant_id: Some(variant_b),
             batch_number: "BATCH-MISMATCH".into(),
-            quantity_milli: 1000,
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
             expiry_date: Some("2099-01-01".into()),
@@ -933,7 +969,7 @@ fn test_create_batch_command_authorized_and_unauthenticated() {
         branch_id: branch_id.clone(),
         variant_id: None,
         batch_number: "HONEY-01".into(),
-        quantity_milli: 1000,
+        quantity_milli: 0,
         cost_price_minor: None,
         manufactured_date: None,
         expiry_date: Some("2099-01-01".into()),
@@ -992,18 +1028,23 @@ fn test_get_batch_command_cross_branch_leakage_prevented() {
 
 #[test]
 fn test_create_batch_zero_quantity_starts_active_and_depleted_is_terminal() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let (_, branch_id) = create_test_org_and_branch(&conn);
     let product_id = make_test_product(&conn, "Antibiotic", true);
 
-    // 1. Zero quantity batch starts Active
-    let zero_batch = create_test_batch(
+    // 1. Proof 1: create_batch(quantity_milli = 0) succeeds and starts Active
+    let zero_batch = create_batch(
         &conn,
-        &product_id,
-        &branch_id,
-        "ZERO-LOT-01",
-        0,
-        Some("2099-12-31"),
+        &CreateBatchInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            batch_number: "ZERO-LOT-01".into(),
+            quantity_milli: 0,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: Some("2099-12-31".into()),
+        },
     )
     .expect("create zero quantity batch");
     assert_eq!(zero_batch.quantity_milli, 0);
@@ -1013,39 +1054,133 @@ fn test_create_batch_zero_quantity_starts_active_and_depleted_is_terminal() {
         "Newly created zero-quantity batch must start as Active per ADR-0013"
     );
 
-    // 2. Positive quantity batch starts Active
-    let pos_batch = create_test_batch(
+    // 2. Proof 2: create_batch(quantity_milli > 0) is rejected
+    let err_pos = create_batch(
         &conn,
-        &product_id,
-        &branch_id,
-        "POS-LOT-01",
-        5000,
-        Some("2099-12-31"),
-    )
-    .expect("create positive quantity batch");
-    assert_eq!(pos_batch.quantity_milli, 5000);
-    assert_eq!(
-        pos_batch.status,
-        BatchStatus::Active,
-        "Newly created positive-quantity batch must start as Active"
-    );
-
-    // 3. Depletion transition works
-    let depleted = update_batch_status(
-        &conn,
-        &UpdateBatchStatusInput {
-            batch_id: pos_batch.id.clone(),
-            status: BatchStatus::Depleted,
+        &CreateBatchInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            batch_number: "POS-LOT-REJECT".into(),
+            quantity_milli: 5000,
+            cost_price_minor: None,
+            manufactured_date: None,
+            expiry_date: Some("2099-12-31".into()),
         },
     )
-    .expect("transition to depleted");
-    assert_eq!(depleted.status, BatchStatus::Depleted);
+    .unwrap_err();
+    assert!(
+        matches!(err_pos, BatchError::Validation(ref msg) if msg.contains("metadata-only") && msg.contains("StockLedgerService")),
+        "create_batch with quantity_milli > 0 must be rejected as metadata-only, got: {err_pos:?}"
+    );
 
-    // 4. Depleted batch remains terminal (cannot be reopened/reactivated)
+    // Set up location for StockLedgerService movements
+    let loc_id = "loc_batch_contract";
+    conn.execute(
+        "INSERT INTO locations (id, branch_id, name, code, location_type, is_active)
+         VALUES (?1, ?2, 'Contract Test Location', 'LOC-CT', 'warehouse', 1)",
+        params![loc_id, &branch_id],
+    )
+    .expect("create test location");
+
+    // 3. Proof 3: F2.11 positive batch intake through StockLedgerService still works
+    let intake_input = PostMovementInput {
+        branch_id: branch_id.clone(),
+        product_id: product_id.clone(),
+        variant_id: None,
+        location_id: loc_id.to_string(),
+        bin_id: None,
+        batch_id: Some(zero_batch.id.clone()),
+        serial_id: None,
+        quantity_delta_milli: 5000,
+        reason: StockMovementReason::OpeningBalance,
+        source_type: Some("intake_proof".into()),
+        source_id: None,
+        user_id: None,
+        idempotency_key: None,
+    };
+    let movement = StockLedgerService::post_movement(&mut conn, &intake_input)
+        .expect("positive batch intake through StockLedgerService succeeds");
+    assert_eq!(movement.quantity_delta_milli, 5000);
+
+    // 4. Proof 4: F2.11 intake updates inventory + spatial ledger + batch quantity atomically
+    let inv_qty: i64 = conn
+        .query_row(
+            "SELECT quantity_milli FROM inventory WHERE branch_id = ?1 AND product_id = ?2",
+            params![&branch_id, &product_id],
+            |r| r.get(0),
+        )
+        .expect("query inventory");
+    assert_eq!(
+        inv_qty, 5000,
+        "inventory aggregate must be updated atomically"
+    );
+
+    let loc_qty: i64 = conn
+        .query_row(
+            "SELECT quantity_milli FROM location_inventory WHERE branch_id = ?1 AND location_id = ?2 AND product_id = ?3 AND batch_id = ?4",
+            params![&branch_id, loc_id, &product_id, &zero_batch.id],
+            |r| r.get(0),
+        )
+        .expect("query location_inventory");
+    assert_eq!(
+        loc_qty, 5000,
+        "location_inventory spatial record must be updated atomically"
+    );
+
+    let (batch_qty, batch_status): (i64, String) = conn
+        .query_row(
+            "SELECT quantity_milli, status FROM product_batches WHERE id = ?1",
+            params![&zero_batch.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("query batch");
+    assert_eq!(
+        batch_qty, 5000,
+        "product_batches quantity must be updated to 5000 atomically"
+    );
+    assert_eq!(
+        batch_status, "active",
+        "batch must remain active after positive intake"
+    );
+
+    // 5. Proof 5: depleted remains terminal
+    // A) Deduct to 0 via StockLedgerService -> batch transitions automatically to depleted
+    let deduct_input = PostMovementInput {
+        branch_id: branch_id.clone(),
+        product_id: product_id.clone(),
+        variant_id: None,
+        location_id: loc_id.to_string(),
+        bin_id: None,
+        batch_id: Some(zero_batch.id.clone()),
+        serial_id: None,
+        quantity_delta_milli: -5000,
+        reason: StockMovementReason::Adjustment,
+        source_type: Some("deduct_proof".into()),
+        source_id: None,
+        user_id: None,
+        idempotency_key: None,
+    };
+    StockLedgerService::post_movement(&mut conn, &deduct_input)
+        .expect("batch deduction to 0 balance succeeds");
+
+    let post_deduct_status: String = conn
+        .query_row(
+            "SELECT status FROM product_batches WHERE id = ?1",
+            params![&zero_batch.id],
+            |r| r.get(0),
+        )
+        .expect("query batch status after full deduction");
+    assert_eq!(
+        post_deduct_status, "depleted",
+        "batch reaching 0 balance must become depleted"
+    );
+
+    // B) Re-activating depleted batch via update_batch_status must be rejected
     let err_reopen = update_batch_status(
         &conn,
         &UpdateBatchStatusInput {
-            batch_id: pos_batch.id,
+            batch_id: zero_batch.id.clone(),
             status: BatchStatus::Active,
         },
     )
@@ -1053,5 +1188,13 @@ fn test_create_batch_zero_quantity_starts_active_and_depleted_is_terminal() {
     assert!(
         matches!(err_reopen, BatchError::InvalidStatusTransition(msg) if msg.contains("Depleted batches are terminal")),
         "Depleted batch must be terminal and cannot transition to Active"
+    );
+
+    // C) Attempting stock intake into depleted batch via StockLedgerService must be rejected
+    let err_intake_depleted =
+        StockLedgerService::post_movement(&mut conn, &intake_input).unwrap_err();
+    assert!(
+        matches!(err_intake_depleted, StockLedgerError::InvalidBatch(ref msg) if msg.contains("depleted") || msg.contains("terminal")),
+        "StockLedgerService must reject intake into depleted batch: {err_intake_depleted:?}"
     );
 }

@@ -99,10 +99,9 @@ pub fn post_stock_movement_impl(
     session_id: &str,
     request: PostMovementRequest,
 ) -> Result<StockMovement, String> {
-    let session = require_session(conn, session_id).map_err(|e| e.to_string())?;
-
-    // 1. Authorize: Write requires Permission::InventoryAdjust scoped to the branch
-    require_scoped_permission(
+    // 1. Authorize: Write requires Permission::InventoryAdjust scoped to the branch.
+    // Enforces active session, branch tenancy boundary, and InventoryAdjust permission fail-closed.
+    let session = require_scoped_permission(
         conn,
         session_id,
         Permission::InventoryAdjust,
@@ -111,13 +110,7 @@ pub fn post_stock_movement_impl(
     )
     .map_err(|e| e.to_string())?;
 
-    // 2. Validate branch scope tenancy boundary: user session must be authorized for requested branch
-    AuthorizeRequest::new(session_id)
-        .with_branch_scope(&request.branch_id)
-        .execute(conn)
-        .map_err(|e| format!("Branch scope unauthorized: {e}"))?;
-
-    // 3. Parse and validate movement reason string into domain enum
+    // 2. Parse and validate movement reason string into domain enum
     let reason = StockMovementReason::from_str(&request.reason).map_err(map_stock_ledger_error)?;
 
     // 4. Construct domain input DTO with user_id bound to the authenticated session
