@@ -768,6 +768,12 @@ pub fn post_stock_movement(
                         "opening_balance cannot be outbound".to_string(),
                     ))
                 }
+                _ => {
+                    return Err(StockLedgerError::InvalidReason(format!(
+                        "Reason '{}' is not an authorized outbound mutation reason",
+                        input.reason
+                    )))
+                }
             }
         }
     }
