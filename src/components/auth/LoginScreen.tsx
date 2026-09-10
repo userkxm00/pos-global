@@ -1,7 +1,7 @@
 // Accessible, tokenized LoginScreen supporting Online Supabase & Local POS Sign-In
 // F1.13 — Authentication screens and session lifecycle
 
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../context/AuthContext'
 import { useShell } from '../../context/ShellContext'
@@ -20,6 +20,12 @@ export const LoginScreen: React.FC = () => {
   const [apiError, setApiError] = useState<string | null>(
     authStatus === 'expired' ? 'auth.sessionExpiredNotice' : null,
   )
+
+  const activeInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    activeInputRef.current?.focus()
+  }, [authMode])
 
   const handleModeChange = (mode: 'online' | 'local') => {
     setAuthMode(mode)
@@ -140,6 +146,7 @@ export const LoginScreen: React.FC = () => {
               </label>
               <input
                 id="auth-email-input"
+                ref={activeInputRef}
                 type="email"
                 className={`form-input ${errors.email ? 'form-input--error' : ''}`}
                 placeholder={t('auth.emailPlaceholder')}
@@ -149,7 +156,6 @@ export const LoginScreen: React.FC = () => {
                 aria-invalid={Boolean(errors.email)}
                 aria-describedby={errors.email ? 'auth-email-error' : undefined}
                 autoComplete="email"
-                autoFocus
                 required
               />
               {errors.email && (
@@ -165,6 +171,7 @@ export const LoginScreen: React.FC = () => {
               </label>
               <input
                 id="auth-username-input"
+                ref={activeInputRef}
                 type="text"
                 className={`form-input ${errors.username ? 'form-input--error' : ''}`}
                 placeholder={t('auth.usernamePlaceholder')}
@@ -174,7 +181,6 @@ export const LoginScreen: React.FC = () => {
                 aria-invalid={Boolean(errors.username)}
                 aria-describedby={errors.username ? 'auth-username-error' : undefined}
                 autoComplete="username"
-                autoFocus
                 required
               />
               {errors.username && (
