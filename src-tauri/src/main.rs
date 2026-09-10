@@ -19,6 +19,7 @@ mod permission;
 mod product;
 mod register;
 mod serial;
+pub mod stock_ledger;
 #[cfg(test)]
 mod tests;
 mod unit;
@@ -163,6 +164,11 @@ fn main() {
             commands::location::update_bin,
             commands::location::deactivate_bin,
             commands::location::reactivate_bin,
+            commands::stock_ledger::post_stock_movement,
+            commands::stock_ledger::get_stock_balance,
+            commands::stock_ledger::list_location_inventory,
+            commands::stock_ledger::list_stock_movements,
+            commands::stock_ledger::get_stock_movement,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

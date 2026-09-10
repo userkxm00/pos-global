@@ -349,9 +349,9 @@ fn validate_batch_quantities(
     quantity_milli: i64,
     cost_price_minor: Option<i64>,
 ) -> Result<(), BatchError> {
-    if quantity_milli < 0 {
+    if quantity_milli != 0 {
         return Err(BatchError::Validation(
-            "Batch quantity cannot be negative".into(),
+            "Batch registration is metadata-only and requires quantity_milli = 0. Stock intake must be performed via StockLedgerService".into(),
         ));
     }
     if let Some(cost) = cost_price_minor {
@@ -544,11 +544,10 @@ pub fn create_batch(
         &batch_number,
     )?;
 
-    let initial_status = if input.quantity_milli == 0 {
-        BatchStatus::Depleted
-    } else {
-        BatchStatus::Active
-    };
+    // F2.11 ADR-0013: A newly registered batch is an identity/metadata record.
+    // Newly registered batches with zero quantity begin as 'active' (not 'depleted'),
+    // because 'depleted' is strictly terminal and F2.11 stock intake owns quantity additions.
+    let initial_status = BatchStatus::Active;
 
     let insert_res = conn.execute(
         "INSERT INTO product_batches (

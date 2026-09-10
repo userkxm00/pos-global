@@ -366,7 +366,7 @@ fn test_serial_only_identifier() {
     assert_eq!(instance.serial_number.as_deref(), Some("PC-2026-X99"));
     assert!(instance.imei.is_none());
     assert!(instance.asset_tag.is_none());
-    assert_eq!(instance.status, SerialStatus::InStock);
+    assert_eq!(instance.status, SerialStatus::Reserved);
 }
 
 #[test]
@@ -1127,6 +1127,20 @@ fn test_lifecycle_status_transitions() {
     )
     .expect("create");
 
+    assert_eq!(inst.status, SerialStatus::Reserved);
+
+    // Reserved -> InStock
+    let s_instock = update_serial_status(
+        &conn,
+        &UpdateSerialStatusInput {
+            id: inst.id.clone(),
+            branch_id: branch_id.clone(),
+            status: SerialStatus::InStock,
+        },
+    )
+    .expect("in_stock");
+    assert_eq!(s_instock.status, SerialStatus::InStock);
+
     // InStock -> Reserved
     let s_reserved = update_serial_status(
         &conn,
@@ -1417,12 +1431,12 @@ fn test_update_serial_status_ipc_command() {
         &UpdateSerialStatusInput {
             id: inst.id,
             branch_id,
-            status: SerialStatus::Reserved,
+            status: SerialStatus::InStock,
         },
     )
     .expect("update status");
 
-    assert_eq!(updated.status, SerialStatus::Reserved);
+    assert_eq!(updated.status, SerialStatus::InStock);
 }
 
 #[test]
@@ -1637,11 +1651,11 @@ fn test_update_serial_status_auth_and_leakage_order() {
         &UpdateSerialStatusInput {
             id: inst_b1.id,
             branch_id: branch_1,
-            status: SerialStatus::Reserved,
+            status: SerialStatus::InStock,
         },
     )
     .expect("authorized update succeeds");
-    assert_eq!(updated.status, SerialStatus::Reserved);
+    assert_eq!(updated.status, SerialStatus::InStock);
 }
 
 #[test]
@@ -1829,4 +1843,88 @@ fn test_create_serial_instance_canonical_id_generation() {
         )
         .expect("query persisted serial");
     assert_eq!(persisted_sn.as_deref(), Some("CANONICAL-ID-SN-001"));
+}
+
+#[test]
+fn test_serial_registration_starts_reserved_and_ledger_firewall_intact() {
+    let conn = setup_test_db();
+    let (_, branch_id) = create_test_org_and_branch(&conn);
+    let product_id = make_test_product(&conn, "Precision Scanner", true);
+
+    // 1. Newly registered serial starts as Reserved (ADR-0013 identity registration)
+    let inst = create_serial_instance(
+        &conn,
+        &CreateSerialInput {
+            product_id: product_id.clone(),
+            branch_id: branch_id.clone(),
+            variant_id: None,
+            serial_number: Some("SCAN-RESERVED-01".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: Some(150000),
+        },
+    )
+    .expect("create serial");
+    assert_eq!(
+        inst.status,
+        SerialStatus::Reserved,
+        "New serial registration must start as Reserved per ADR-0013"
+    );
+
+    // 2. Reserved -> InStock transition supported
+    let in_stock = update_serial_status(
+        &conn,
+        &UpdateSerialStatusInput {
+            id: inst.id.clone(),
+            branch_id: branch_id.clone(),
+            status: SerialStatus::InStock,
+        },
+    )
+    .expect("transition Reserved to InStock");
+    assert_eq!(in_stock.status, SerialStatus::InStock);
+
+    // 3. InStock -> Defective -> InStock transition supported
+    let defective = update_serial_status(
+        &conn,
+        &UpdateSerialStatusInput {
+            id: inst.id.clone(),
+            branch_id: branch_id.clone(),
+            status: SerialStatus::Defective,
+        },
+    )
+    .expect("transition InStock to Defective");
+    assert_eq!(defective.status, SerialStatus::Defective);
+
+    let restored = update_serial_status(
+        &conn,
+        &UpdateSerialStatusInput {
+            id: inst.id.clone(),
+            branch_id: branch_id.clone(),
+            status: SerialStatus::InStock,
+        },
+    )
+    .expect("transition Defective to InStock");
+    assert_eq!(restored.status, SerialStatus::InStock);
+
+    // 4. Zero stock movements created by F2.08 registration
+    let movement_count: i64 = conn
+        .query_row("SELECT count(*) FROM stock_movements", [], |r| r.get(0))
+        .expect("count movements");
+    assert_eq!(
+        movement_count, 0,
+        "F2.08 registration must create zero stock movements"
+    );
+
+    // 5. Zero inventory records created/mutated by F2.08 registration
+    let inv_count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM inventory WHERE product_id = ?1",
+            params![product_id],
+            |r| r.get(0),
+        )
+        .expect("count inventory");
+    assert_eq!(
+        inv_count, 0,
+        "F2.08 registration must not mutate inventory balances"
+    );
 }

@@ -59,15 +59,26 @@ jobs:
         run: npx --no-install tauri icon src-tauri/app-icon.svg
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@711afc95f818c1e7c7b527b2d34c6925a825d206
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - name: Check Rust
         run: cargo check --manifest-path src-tauri/Cargo.toml
       - name: Run Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-      - name: Run Rust and migration tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Run Rust and migration tests (cargo test)
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov --manifest-path src-tauri/Cargo.toml --lcov --output-path coverage/rust-lcov.info
+          sed -i "s|$(pwd)/||g" coverage/rust-lcov.info
+      - name: Upload Rust coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage
+          path: coverage/rust-lcov.info
+          if-no-files-found: error
 
   secret-scan:
     runs-on: ubuntu-latest
@@ -166,6 +177,7 @@ jobs:
 
   sonarqube:
     name: SonarQube Cloud
+    needs: [rust, frontend]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -184,6 +196,16 @@ jobs:
         run: |
           npm install --ignore-scripts
           npm test
+      - name: Download Rust coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-coverage
+          path: coverage
+      - name: Verify coverage files
+        run: |
+          ls -la coverage/
+          head -n 5 coverage/lcov.info || true
+          head -n 5 coverage/rust-lcov.info || true
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
         env:
