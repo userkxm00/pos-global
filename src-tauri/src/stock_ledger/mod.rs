@@ -664,6 +664,36 @@ fn validate_location_and_bin(
     Ok(())
 }
 
+fn validate_batch_status_intake(status: &str, delta_milli: i64) -> Result<(), StockLedgerError> {
+    match status {
+        "depleted" => Err(StockLedgerError::InvalidBatch(
+            "Depleted batch is terminal and cannot accept stock intake or movements".to_string(),
+        )),
+        "recalled" if delta_milli > 0 => Err(StockLedgerError::InvalidBatch(
+            "Recalled batch cannot accept positive stock intake".to_string(),
+        )),
+        "quarantined" if delta_milli > 0 => Err(StockLedgerError::InvalidBatch(
+            "Quarantined batch cannot accept positive stock intake".to_string(),
+        )),
+        "active" | "recalled" | "quarantined" => Ok(()),
+        other => Err(StockLedgerError::InvalidBatch(format!(
+            "Unrecognized batch status '{other}'"
+        ))),
+    }
+}
+
+fn derive_batch_status(current_status: &str, new_qty: i64) -> &'static str {
+    if current_status == "recalled" {
+        "recalled"
+    } else if new_qty == 0 {
+        "depleted"
+    } else if current_status == "quarantined" {
+        "quarantined"
+    } else {
+        "active"
+    }
+}
+
 fn validate_and_compute_batch_state(
     tx: &rusqlite::Transaction<'_>,
     ctx: &NormalizedMovementContext<'_>,
@@ -706,30 +736,7 @@ fn validate_and_compute_batch_state(
         )));
     }
 
-    match b_status.as_str() {
-        "depleted" => {
-            return Err(StockLedgerError::InvalidBatch(
-                "Depleted batch is terminal and cannot accept stock intake or movements"
-                    .to_string(),
-            ));
-        }
-        "recalled" if ctx.delta_milli > 0 => {
-            return Err(StockLedgerError::InvalidBatch(
-                "Recalled batch cannot accept positive stock intake".to_string(),
-            ));
-        }
-        "quarantined" if ctx.delta_milli > 0 => {
-            return Err(StockLedgerError::InvalidBatch(
-                "Quarantined batch cannot accept positive stock intake".to_string(),
-            ));
-        }
-        "active" | "recalled" | "quarantined" => {}
-        other => {
-            return Err(StockLedgerError::InvalidBatch(format!(
-                "Unrecognized batch status '{other}'"
-            )));
-        }
-    }
+    validate_batch_status_intake(&b_status, ctx.delta_milli)?;
 
     let new_qty = b_qty.checked_add(ctx.delta_milli).ok_or_else(|| {
         StockLedgerError::Validation("Batch quantity arithmetic overflow".to_string())
@@ -742,17 +749,66 @@ fn validate_and_compute_batch_state(
         });
     }
 
-    let new_status = if b_status == "recalled" {
-        "recalled"
-    } else if new_qty == 0 {
-        "depleted"
-    } else if b_status == "quarantined" {
-        "quarantined"
-    } else {
-        "active"
-    };
+    let new_status = derive_batch_status(&b_status, new_qty);
 
     Ok(Some((new_qty, new_status)))
+}
+
+fn validate_serial_quantity(delta: i64) -> Result<(), StockLedgerError> {
+    if delta > 0 && delta != 1000 {
+        return Err(StockLedgerError::InvalidQuantity(
+            "Serialized positive stock movement must be exactly +1000 milli (1 unit)".to_string(),
+        ));
+    }
+    if delta < 0 && delta != -1000 {
+        return Err(StockLedgerError::InvalidQuantity(
+            "Serialized negative stock movement must be exactly -1000 milli (1 unit)".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn map_serial_outbound_status(
+    reason: &StockMovementReason,
+) -> Result<&'static str, StockLedgerError> {
+    match reason {
+        StockMovementReason::Damage => Ok("defective"),
+        StockMovementReason::Loss => Ok("disposed"),
+        StockMovementReason::Adjustment => Ok("reserved"),
+        StockMovementReason::OpeningBalance => Err(StockLedgerError::InvalidReason(
+            "opening_balance cannot be outbound".to_string(),
+        )),
+        _ => Err(StockLedgerError::InvalidReason(format!(
+            "Reason '{reason}' is not an authorized outbound mutation reason"
+        ))),
+    }
+}
+
+fn validate_serial_outbound_state(
+    s_status: &str,
+    s_loc: Option<&str>,
+    s_bin: Option<&str>,
+    ctx: &NormalizedMovementContext<'_>,
+    reason: &StockMovementReason,
+) -> Result<&'static str, StockLedgerError> {
+    if s_status != "in_stock" {
+        return Err(StockLedgerError::InvalidSerial(format!(
+            "Cannot deduct serial in status '{s_status}'. Expected 'in_stock'"
+        )));
+    }
+    if s_loc != Some(ctx.location_id) {
+        return Err(StockLedgerError::InvalidSerial(format!(
+            "Serial current location '{:?}' does not match requested location '{}'",
+            s_loc, ctx.location_id
+        )));
+    }
+    if ctx.bin_id.is_some() && s_bin != ctx.bin_id {
+        return Err(StockLedgerError::InvalidSerial(format!(
+            "Serial current bin '{:?}' does not match requested bin '{:?}'",
+            s_bin, ctx.bin_id
+        )));
+    }
+    map_serial_outbound_status(reason)
 }
 
 fn validate_and_compute_serial_state(
@@ -764,17 +820,7 @@ fn validate_and_compute_serial_state(
         return Ok(None);
     };
 
-    let delta = ctx.delta_milli;
-    if delta > 0 && delta != 1000 {
-        return Err(StockLedgerError::InvalidQuantity(
-            "Serialized positive stock movement must be exactly +1000 milli (1 unit)".to_string(),
-        ));
-    }
-    if delta < 0 && delta != -1000 {
-        return Err(StockLedgerError::InvalidQuantity(
-            "Serialized negative stock movement must be exactly -1000 milli (1 unit)".to_string(),
-        ));
-    }
+    validate_serial_quantity(ctx.delta_milli)?;
 
     let (s_prod, s_branch, s_var, s_status, s_loc, s_bin): (
         String,
@@ -811,7 +857,7 @@ fn validate_and_compute_serial_state(
         )));
     }
 
-    if delta == 1000 {
+    if ctx.delta_milli == 1000 {
         if s_status != "reserved" && s_status != "defective" {
             return Err(StockLedgerError::InvalidSerial(format!(
                 "Cannot intake serial in status '{s_status}'. Permitted: reserved, defective"
@@ -819,40 +865,14 @@ fn validate_and_compute_serial_state(
         }
         Ok(Some("in_stock"))
     } else {
-        if s_status != "in_stock" {
-            return Err(StockLedgerError::InvalidSerial(format!(
-                "Cannot deduct serial in status '{s_status}'. Expected 'in_stock'"
-            )));
-        }
-        if s_loc.as_deref() != Some(ctx.location_id) {
-            return Err(StockLedgerError::InvalidSerial(format!(
-                "Serial current location '{:?}' does not match requested location '{}'",
-                s_loc, ctx.location_id
-            )));
-        }
-        if ctx.bin_id.is_some() && s_bin.as_deref() != ctx.bin_id {
-            return Err(StockLedgerError::InvalidSerial(format!(
-                "Serial current bin '{:?}' does not match requested bin '{:?}'",
-                s_bin, ctx.bin_id
-            )));
-        }
-
-        let target_status = match reason {
-            StockMovementReason::Damage => "defective",
-            StockMovementReason::Loss => "disposed",
-            StockMovementReason::Adjustment => "reserved",
-            StockMovementReason::OpeningBalance => {
-                return Err(StockLedgerError::InvalidReason(
-                    "opening_balance cannot be outbound".to_string(),
-                ))
-            }
-            _ => {
-                return Err(StockLedgerError::InvalidReason(format!(
-                    "Reason '{reason}' is not an authorized outbound mutation reason"
-                )))
-            }
-        };
-        Ok(Some(target_status))
+        let target = validate_serial_outbound_state(
+            &s_status,
+            s_loc.as_deref(),
+            s_bin.as_deref(),
+            ctx,
+            reason,
+        )?;
+        Ok(Some(target))
     }
 }
 
