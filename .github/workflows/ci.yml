@@ -61,7 +61,7 @@ jobs:
         with:
           components: rustfmt, clippy, llvm-tools-preview
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@711afc95f818c1e7c7b527b2d34c6925a825d206
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - name: Check Rust

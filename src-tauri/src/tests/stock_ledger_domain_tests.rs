@@ -19,8 +19,8 @@ use crate::serial::{
     UpdateSerialStatusInput,
 };
 use crate::stock_ledger::{
-    LocationInventoryFilter, PostMovementInput, StockLedgerError, StockLedgerService,
-    StockMovementFilter, StockMovementReason,
+    compute_request_hash, LocationInventoryFilter, PostMovementInput, StockLedgerError,
+    StockLedgerService, StockMovementFilter, StockMovementReason,
 };
 use crate::tests::test_helpers::{
     apply_migrations_up_to, create_test_org_and_branch, setup_test_db, setup_test_db_up_to,
@@ -1921,4 +1921,243 @@ fn test_stock_movement_reason_semantics_and_directionality() {
     assert!(StockMovementReason::Loss.validate_delta(-100).is_ok());
     assert!(StockMovementReason::Loss.validate_delta(100).is_err());
     assert!(StockMovementReason::Loss.validate_delta(0).is_err());
+}
+
+#[test]
+fn test_canonical_hash_collision_resistance_across_field_boundaries() {
+    let req1 = PostMovementInput {
+        branch_id: "branch_a".to_string(),
+        product_id: "prod|variant_id=var1".to_string(),
+        variant_id: None,
+        location_id: "loc_01".to_string(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: StockMovementReason::OpeningBalance,
+        source_type: None,
+        source_id: None,
+        user_id: None,
+        idempotency_key: None,
+    };
+
+    let req2 = PostMovementInput {
+        branch_id: "branch_a".to_string(),
+        product_id: "prod".to_string(),
+        variant_id: Some("var1".to_string()),
+        location_id: "loc_01".to_string(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: StockMovementReason::OpeningBalance,
+        source_type: None,
+        source_id: None,
+        user_id: None,
+        idempotency_key: None,
+    };
+
+    let hash1 = compute_request_hash(&req1);
+    let hash2 = compute_request_hash(&req2);
+    assert_ne!(
+        hash1, hash2,
+        "Field boundary shift must produce distinct hashes"
+    );
+}
+
+#[test]
+fn test_canonical_hash_whitespace_distinct_persisted_metadata_does_not_replay() {
+    let mut conn = setup_test_db();
+    let f = setup_fixtures(&conn);
+
+    let key = "idem-whitespace-check-01".to_string();
+
+    let req1 = PostMovementInput {
+        branch_id: f.branch_id.clone(),
+        product_id: f.product_id.clone(),
+        variant_id: None,
+        location_id: f.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: StockMovementReason::OpeningBalance,
+        source_type: Some("manual_intake".to_string()),
+        source_id: Some("REF-100 ".to_string()), // Trailing whitespace
+        user_id: None,
+        idempotency_key: Some(key.clone()),
+    };
+
+    let m1 = StockLedgerService::post_movement(&mut conn, &req1).expect("first post succeeds");
+    assert_eq!(m1.source_id.as_deref(), Some("REF-100 "));
+
+    let req2 = PostMovementInput {
+        branch_id: f.branch_id.clone(),
+        product_id: f.product_id.clone(),
+        variant_id: None,
+        location_id: f.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 1000,
+        reason: StockMovementReason::OpeningBalance,
+        source_type: Some("manual_intake".to_string()),
+        source_id: Some("REF-100".to_string()), // Untrimmed vs trimmed
+        user_id: None,
+        idempotency_key: Some(key),
+    };
+
+    // Submitting req2 with the same key must produce IdempotencyConflict, NOT replay m1
+    let err = StockLedgerService::post_movement(&mut conn, &req2).unwrap_err();
+    assert!(
+        matches!(err, StockLedgerError::IdempotencyConflict(_)),
+        "Expected IdempotencyConflict but got: {:?}",
+        err
+    );
+}
+
+#[test]
+fn test_canonical_hash_identical_canonical_requests_replay_successfully() {
+    let mut conn = setup_test_db();
+    let f = setup_fixtures(&conn);
+
+    let key = "idem-exact-replay-01".to_string();
+
+    let req = PostMovementInput {
+        branch_id: format!("  {}  ", f.branch_id), // leading/trailing spaces on normalized fields
+        product_id: f.product_id.clone(),
+        variant_id: None,
+        location_id: f.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 2000,
+        reason: StockMovementReason::OpeningBalance,
+        source_type: Some("reconciliation".to_string()),
+        source_id: Some("REC-200".to_string()),
+        user_id: None,
+        idempotency_key: Some(key.clone()),
+    };
+
+    let m1 = StockLedgerService::post_movement(&mut conn, &req).expect("first post succeeds");
+
+    // Second post with identical logical and normalized values
+    let m2 = StockLedgerService::post_movement(&mut conn, &req).expect("replay succeeds");
+
+    assert_eq!(m1.id, m2.id);
+    assert_eq!(m1.quantity_delta_milli, m2.quantity_delta_milli);
+
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stock_movements", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn test_canonical_hash_same_key_different_request_hash_produces_conflict() {
+    let mut conn = setup_test_db();
+    let f = setup_fixtures(&conn);
+
+    let key = "idem-conflict-key-01".to_string();
+
+    let req1 = PostMovementInput {
+        branch_id: f.branch_id.clone(),
+        product_id: f.product_id.clone(),
+        variant_id: None,
+        location_id: f.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 3000,
+        reason: StockMovementReason::OpeningBalance,
+        source_type: None,
+        source_id: None,
+        user_id: None,
+        idempotency_key: Some(key.clone()),
+    };
+
+    StockLedgerService::post_movement(&mut conn, &req1).expect("first post succeeds");
+
+    let req2 = PostMovementInput {
+        branch_id: f.branch_id.clone(),
+        product_id: f.product_id.clone(),
+        variant_id: None,
+        location_id: f.location_id.clone(),
+        bin_id: None,
+        batch_id: None,
+        serial_id: None,
+        quantity_delta_milli: 4000, // Different quantity
+        reason: StockMovementReason::OpeningBalance,
+        source_type: None,
+        source_id: None,
+        user_id: None,
+        idempotency_key: Some(key),
+    };
+
+    let err = StockLedgerService::post_movement(&mut conn, &req2).unwrap_err();
+    assert!(matches!(err, StockLedgerError::IdempotencyConflict(_)));
+}
+
+#[test]
+fn test_list_movements_purchase_historical_alias_filter() {
+    let conn = setup_test_db();
+    let f = setup_fixtures(&conn);
+
+    // Insert legacy rows directly into stock_movements with reason='purchase' and reason='purchase_receipt'
+    let id_purchase = "mov_hist_purchase_01";
+    let id_receipt = "mov_hist_receipt_02";
+    let id_sale = "mov_hist_sale_03";
+
+    conn.execute(
+        "INSERT INTO stock_movements (
+            id, branch_id, product_id, variant_id,
+            quantity_delta, quantity_delta_milli,
+            quantity_before, quantity_before_milli,
+            quantity_after, quantity_after_milli,
+            reason, source_type, source_id,
+            location_id, bin_id, batch_id, serial_id, user_id,
+            created_at
+         ) VALUES
+         (?1, ?4, ?5, NULL, 5.0, 5000, 0.0, 0, 5.0, 5000, 'purchase', 'po', 'PO-1', ?6, NULL, NULL, NULL, NULL, '2026-01-01 10:00:00'),
+         (?2, ?4, ?5, NULL, 3.0, 3000, 5.0, 5000, 8.0, 8000, 'purchase_receipt', 'po', 'PO-2', ?6, NULL, NULL, NULL, NULL, '2026-01-02 10:00:00'),
+         (?3, ?4, ?5, NULL, -1.0, -1000, 8.0, 8000, 7.0, 7000, 'sale', 'pos', 'ORD-1', ?6, NULL, NULL, NULL, NULL, '2026-01-03 10:00:00')",
+        params![id_purchase, id_receipt, id_sale, f.branch_id, f.product_id, f.location_id],
+    )
+    .expect("inserted historical movements");
+
+    // 1. Filter for PurchaseReceipt must match BOTH 'purchase' and 'purchase_receipt'
+    let purchase_filter = StockMovementFilter {
+        branch_id: f.branch_id.clone(),
+        reason: Some(StockMovementReason::PurchaseReceipt),
+        ..Default::default()
+    };
+    let purchase_results = StockLedgerService::list_movements(&conn, &purchase_filter)
+        .expect("list purchase movements");
+
+    assert_eq!(purchase_results.len(), 2);
+    let returned_ids: Vec<String> = purchase_results.into_iter().map(|m| m.id).collect();
+    assert!(returned_ids.contains(&id_purchase.to_string()));
+    assert!(returned_ids.contains(&id_receipt.to_string()));
+    assert!(!returned_ids.contains(&id_sale.to_string()));
+
+    // 2. Filter for Sale must return only the sale row
+    let sale_filter = StockMovementFilter {
+        branch_id: f.branch_id.clone(),
+        reason: Some(StockMovementReason::Sale),
+        ..Default::default()
+    };
+    let sale_results =
+        StockLedgerService::list_movements(&conn, &sale_filter).expect("list sale movements");
+    assert_eq!(sale_results.len(), 1);
+    assert_eq!(sale_results[0].id, id_sale);
+
+    // 3. Filter for OpeningBalance must return empty
+    let opening_filter = StockMovementFilter {
+        branch_id: f.branch_id.clone(),
+        reason: Some(StockMovementReason::OpeningBalance),
+        ..Default::default()
+    };
+    let opening_results =
+        StockLedgerService::list_movements(&conn, &opening_filter).expect("list opening movements");
+    assert_eq!(opening_results.len(), 0);
 }

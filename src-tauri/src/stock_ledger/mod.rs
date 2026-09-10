@@ -323,25 +323,61 @@ impl From<serde_json::Error> for StockLedgerError {
 // =========================================================================
 
 /// Computes a canonical SHA-256 hash across all request fields that materially
-/// determine the persisted stock movement outcome.
+/// determine the persisted stock movement outcome. Uses deterministic structured JSON serialization
+/// to guarantee collision resistance across field boundaries and hashes the exact normalized values
+/// persisted by the transaction boundary.
 pub fn compute_request_hash(input: &PostMovementInput) -> String {
-    let canonical = format!(
-        "branch_id={}|product_id={}|variant_id={}|location_id={}|bin_id={}|batch_id={}|serial_id={}|quantity_delta_milli={}|reason={}|source_type={}|source_id={}|user_id={}",
-        input.branch_id.trim(),
-        input.product_id.trim(),
-        input.variant_id.as_deref().unwrap_or("").trim(),
-        input.location_id.trim(),
-        input.bin_id.as_deref().unwrap_or("").trim(),
-        input.batch_id.as_deref().unwrap_or("").trim(),
-        input.serial_id.as_deref().unwrap_or("").trim(),
-        input.quantity_delta_milli,
-        input.reason.as_str(),
-        input.source_type.as_deref().unwrap_or("").trim(),
-        input.source_id.as_deref().unwrap_or("").trim(),
-        input.user_id.as_deref().unwrap_or("").trim(),
-    );
+    #[derive(Serialize)]
+    struct CanonicalMovementPayload<'a> {
+        branch_id: &'a str,
+        product_id: &'a str,
+        variant_id: Option<&'a str>,
+        location_id: &'a str,
+        bin_id: Option<&'a str>,
+        batch_id: Option<&'a str>,
+        serial_id: Option<&'a str>,
+        quantity_delta_milli: i64,
+        reason: &'a str,
+        source_type: Option<&'a str>,
+        source_id: Option<&'a str>,
+        user_id: Option<&'a str>,
+    }
+
+    let payload = CanonicalMovementPayload {
+        branch_id: input.branch_id.trim(),
+        product_id: input.product_id.trim(),
+        variant_id: input
+            .variant_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        location_id: input.location_id.trim(),
+        bin_id: input
+            .bin_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        batch_id: input
+            .batch_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        serial_id: input
+            .serial_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        quantity_delta_milli: input.quantity_delta_milli,
+        reason: input.reason.as_str(),
+        source_type: input.source_type.as_deref(),
+        source_id: input.source_id.as_deref(),
+        user_id: input.user_id.as_deref(),
+    };
+
+    let canonical_bytes =
+        serde_json::to_vec(&payload).expect("canonical request serialization is infallible");
     let mut hasher = Sha256::new();
-    hasher.update(canonical.as_bytes());
+    hasher.update(&canonical_bytes);
     format!("{:x}", hasher.finalize())
 }
 
@@ -1161,8 +1197,16 @@ pub fn list_stock_movements(
         query.push_str(&format!(" AND serial_id = ?{}", params_vec.len()));
     }
     if let Some(ref reason) = filter.reason {
-        params_vec.push(Box::new(reason.as_str().to_string()));
-        query.push_str(&format!(" AND reason = ?{}", params_vec.len()));
+        if matches!(reason, StockMovementReason::PurchaseReceipt) {
+            let p1 = params_vec.len() + 1;
+            let p2 = params_vec.len() + 2;
+            params_vec.push(Box::new("purchase".to_string()));
+            params_vec.push(Box::new("purchase_receipt".to_string()));
+            query.push_str(&format!(" AND reason IN (?{p1}, ?{p2})"));
+        } else {
+            params_vec.push(Box::new(reason.as_str().to_string()));
+            query.push_str(&format!(" AND reason = ?{}", params_vec.len()));
+        }
     }
 
     query.push_str(" ORDER BY created_at DESC, id DESC");
