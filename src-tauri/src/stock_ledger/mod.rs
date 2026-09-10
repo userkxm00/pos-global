@@ -433,96 +433,120 @@ impl StockLedgerService {
 }
 
 // =========================================================================
-// ATOMIC MOVEMENT MUTATION ENGINE
+// ATOMIC MOVEMENT MUTATION ENGINE (REFACTORED COHESIVE HELPERS)
 // =========================================================================
 
-/// Primary atomic stock movement mutation engine.
-/// Executes within a single transaction boundary:
-/// Idempotency -> Validation -> Aggregate -> Spatial -> Batch/Serial -> Movement -> Commit.
-pub fn post_stock_movement(
-    conn: &mut Connection,
-    input: &PostMovementInput,
-) -> Result<StockMovement, StockLedgerError> {
-    let branch_id = input.branch_id.trim();
-    let product_id = input.product_id.trim();
-    let location_id = input.location_id.trim();
-    let norm_variant_id = input
-        .variant_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let norm_bin_id = input
-        .bin_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let norm_batch_id = input
-        .batch_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let norm_serial_id = input
-        .serial_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+struct NormalizedMovementContext<'a> {
+    branch_id: &'a str,
+    product_id: &'a str,
+    location_id: &'a str,
+    variant_id: Option<&'a str>,
+    bin_id: Option<&'a str>,
+    batch_id: Option<&'a str>,
+    serial_id: Option<&'a str>,
+    delta_milli: i64,
+}
 
-    // Basic non-empty string validations
-    if branch_id.is_empty() {
+impl<'a> NormalizedMovementContext<'a> {
+    fn from_input(input: &'a PostMovementInput) -> Self {
+        Self {
+            branch_id: input.branch_id.trim(),
+            product_id: input.product_id.trim(),
+            location_id: input.location_id.trim(),
+            variant_id: input
+                .variant_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            bin_id: input
+                .bin_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            batch_id: input
+                .batch_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            serial_id: input
+                .serial_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            delta_milli: input.quantity_delta_milli,
+        }
+    }
+}
+
+fn validate_basic_input(
+    input: &PostMovementInput,
+    ctx: &NormalizedMovementContext<'_>,
+) -> Result<(), StockLedgerError> {
+    if ctx.branch_id.is_empty() {
         return Err(StockLedgerError::Validation(
             "branch_id cannot be empty".to_string(),
         ));
     }
-    if product_id.is_empty() {
+    if ctx.product_id.is_empty() {
         return Err(StockLedgerError::Validation(
             "product_id cannot be empty".to_string(),
         ));
     }
-    if location_id.is_empty() {
+    if ctx.location_id.is_empty() {
         return Err(StockLedgerError::Validation(
             "location_id cannot be empty".to_string(),
         ));
     }
+    input.reason.validate_delta(ctx.delta_milli)?;
+    Ok(())
+}
 
-    // Directional and non-zero delta validation
-    input.reason.validate_delta(input.quantity_delta_milli)?;
+fn check_idempotency(
+    tx: &rusqlite::Transaction<'_>,
+    input: &PostMovementInput,
+    request_hash: &str,
+) -> Result<Option<StockMovement>, StockLedgerError> {
+    let Some(ref key) = input.idempotency_key else {
+        return Ok(None);
+    };
 
-    let request_hash = compute_request_hash(input);
-
-    let tx = conn.transaction()?;
-
-    // 1. Idempotency check inside the transaction boundary
-    if let Some(ref key) = input.idempotency_key {
-        let clean_key = key.trim();
-        if clean_key.is_empty() {
-            return Err(StockLedgerError::Validation(
-                "idempotency_key cannot be empty or whitespace".to_string(),
-            ));
-        }
-
-        let existing: Option<(Option<String>, Option<String>)> = tx
-            .query_row(
-                "SELECT request_hash, result_json FROM idempotency_keys WHERE key = ?1",
-                params![clean_key],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-
-        if let Some((stored_hash, result_json)) = existing {
-            if stored_hash.as_deref() == Some(&request_hash) {
-                if let Some(json) = result_json {
-                    let cached_movement: StockMovement = serde_json::from_str(&json)?;
-                    return Ok(cached_movement);
-                }
-            } else {
-                return Err(StockLedgerError::IdempotencyConflict(format!(
-                    "Idempotency key '{clean_key}' already used with different request parameters"
-                )));
-            }
-        }
+    let clean_key = key.trim();
+    if clean_key.is_empty() {
+        return Err(StockLedgerError::Validation(
+            "idempotency_key cannot be empty or whitespace".to_string(),
+        ));
     }
 
-    // 2. Validate Branch
+    let existing: Option<(Option<String>, Option<String>)> = tx
+        .query_row(
+            "SELECT request_hash, result_json FROM idempotency_keys WHERE key = ?1",
+            params![clean_key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+
+    let Some((stored_hash, result_json)) = existing else {
+        return Ok(None);
+    };
+
+    if stored_hash.as_deref() != Some(request_hash) {
+        return Err(StockLedgerError::IdempotencyConflict(format!(
+            "Idempotency key '{clean_key}' already used with different request parameters"
+        )));
+    }
+
+    if let Some(json) = result_json {
+        let cached_movement: StockMovement = serde_json::from_str(&json)?;
+        Ok(Some(cached_movement))
+    } else {
+        Ok(None)
+    }
+}
+
+fn validate_branch(
+    tx: &rusqlite::Transaction<'_>,
+    branch_id: &str,
+) -> Result<(), StockLedgerError> {
     let branch_active: bool = tx
         .query_row(
             "SELECT is_active FROM branches WHERE id = ?1",
@@ -540,8 +564,14 @@ pub fn post_stock_movement(
             "Branch '{branch_id}' is inactive"
         )));
     }
+    Ok(())
+}
 
-    // 3. Validate Product
+fn validate_product_and_variant(
+    tx: &rusqlite::Transaction<'_>,
+    product_id: &str,
+    norm_variant_id: Option<&str>,
+) -> Result<(), StockLedgerError> {
     let product_active: bool = tx
         .query_row(
             "SELECT is_active FROM products WHERE id = ?1",
@@ -560,7 +590,6 @@ pub fn post_stock_movement(
         )));
     }
 
-    // 4. Validate Variant
     if let Some(vid) = norm_variant_id {
         let (v_product_id, v_active, v_deleted): (String, i64, Option<String>) = tx
             .query_row(
@@ -582,8 +611,15 @@ pub fn post_stock_movement(
             )));
         }
     }
+    Ok(())
+}
 
-    // 5. Validate Location and Bin
+fn validate_location_and_bin(
+    tx: &rusqlite::Transaction<'_>,
+    branch_id: &str,
+    location_id: &str,
+    norm_bin_id: Option<&str>,
+) -> Result<(), StockLedgerError> {
     let (loc_branch, loc_active): (String, i64) = tx
         .query_row(
             "SELECT branch_id, is_active FROM locations WHERE id = ?1",
@@ -625,216 +661,223 @@ pub fn post_stock_movement(
             )));
         }
     }
+    Ok(())
+}
 
-    // 6. Validate Batch (if specified)
-    let mut batch_new_qty_and_status: Option<(i64, &'static str)> = None;
-    if let Some(batch_id) = norm_batch_id {
-        let (b_prod, b_branch, b_var, b_qty, b_status): (
-            String,
-            String,
-            Option<String>,
-            i64,
-            String,
-        ) = tx
-            .query_row(
-                "SELECT product_id, branch_id, variant_id, quantity_milli, status FROM product_batches WHERE id = ?1",
-                params![batch_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-            )
-            .optional()?
-            .ok_or_else(|| StockLedgerError::NotFound(format!("Batch '{batch_id}' not found")))?;
+fn validate_and_compute_batch_state(
+    tx: &rusqlite::Transaction<'_>,
+    ctx: &NormalizedMovementContext<'_>,
+) -> Result<Option<(i64, &'static str)>, StockLedgerError> {
+    let Some(batch_id) = ctx.batch_id else {
+        return Ok(None);
+    };
 
-        if b_prod != product_id {
+    let (b_prod, b_branch, b_var, b_qty, b_status): (
+        String,
+        String,
+        Option<String>,
+        i64,
+        String,
+    ) = tx
+        .query_row(
+            "SELECT product_id, branch_id, variant_id, quantity_milli, status FROM product_batches WHERE id = ?1",
+            params![batch_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        )
+        .optional()?
+        .ok_or_else(|| StockLedgerError::NotFound(format!("Batch '{batch_id}' not found")))?;
+
+    if b_prod != ctx.product_id {
+        return Err(StockLedgerError::InvalidBatch(format!(
+            "Batch '{batch_id}' belongs to product '{b_prod}', not '{}'",
+            ctx.product_id
+        )));
+    }
+    if b_branch != ctx.branch_id {
+        return Err(StockLedgerError::BranchMismatch(format!(
+            "Batch '{batch_id}' belongs to branch '{b_branch}', not '{}'",
+            ctx.branch_id
+        )));
+    }
+    if b_var.as_deref() != ctx.variant_id {
+        return Err(StockLedgerError::VariantMismatch(format!(
+            "Batch variant '{:?}' does not match requested variant '{:?}'",
+            b_var, ctx.variant_id
+        )));
+    }
+
+    match b_status.as_str() {
+        "depleted" => {
+            return Err(StockLedgerError::InvalidBatch(
+                "Depleted batch is terminal and cannot accept stock intake or movements"
+                    .to_string(),
+            ));
+        }
+        "recalled" if ctx.delta_milli > 0 => {
+            return Err(StockLedgerError::InvalidBatch(
+                "Recalled batch cannot accept positive stock intake".to_string(),
+            ));
+        }
+        "quarantined" if ctx.delta_milli > 0 => {
+            return Err(StockLedgerError::InvalidBatch(
+                "Quarantined batch cannot accept positive stock intake".to_string(),
+            ));
+        }
+        "active" | "recalled" | "quarantined" => {}
+        other => {
             return Err(StockLedgerError::InvalidBatch(format!(
-                "Batch '{batch_id}' belongs to product '{b_prod}', not '{product_id}'"
+                "Unrecognized batch status '{other}'"
             )));
         }
-        if b_branch != branch_id {
-            return Err(StockLedgerError::BranchMismatch(format!(
-                "Batch '{batch_id}' belongs to branch '{b_branch}', not '{branch_id}'"
-            )));
-        }
-        if b_var.as_deref() != norm_variant_id {
-            return Err(StockLedgerError::VariantMismatch(format!(
-                "Batch variant '{:?}' does not match requested variant '{:?}'",
-                b_var, norm_variant_id
-            )));
-        }
-
-        let delta = input.quantity_delta_milli;
-
-        // Batch lifecycle and terminal checks
-        match b_status.as_str() {
-            "depleted" => {
-                return Err(StockLedgerError::InvalidBatch(
-                    "Depleted batch is terminal and cannot accept stock intake or movements"
-                        .to_string(),
-                ));
-            }
-            "recalled" => {
-                if delta > 0 {
-                    return Err(StockLedgerError::InvalidBatch(
-                        "Recalled batch cannot accept positive stock intake".to_string(),
-                    ));
-                }
-            }
-            "quarantined" => {
-                if delta > 0 {
-                    return Err(StockLedgerError::InvalidBatch(
-                        "Quarantined batch cannot accept positive stock intake".to_string(),
-                    ));
-                }
-            }
-            "active" => {}
-            other => {
-                return Err(StockLedgerError::InvalidBatch(format!(
-                    "Unrecognized batch status '{other}'"
-                )));
-            }
-        }
-
-        let new_qty = b_qty.checked_add(delta).ok_or_else(|| {
-            StockLedgerError::Validation("Batch quantity arithmetic overflow".to_string())
-        })?;
-
-        if new_qty < 0 {
-            return Err(StockLedgerError::InsufficientStock {
-                requested_milli: -delta,
-                available_milli: b_qty,
-            });
-        }
-
-        let new_status = if b_status == "recalled" {
-            "recalled"
-        } else if new_qty == 0 {
-            "depleted"
-        } else if b_status == "quarantined" {
-            "quarantined"
-        } else {
-            "active"
-        };
-        batch_new_qty_and_status = Some((new_qty, new_status));
     }
 
-    // 7. Validate Serial (if specified)
-    let mut serial_target_status: Option<&'static str> = None;
-    if let Some(serial_id) = norm_serial_id {
-        let delta = input.quantity_delta_milli;
-        if delta > 0 && delta != 1000 {
-            return Err(StockLedgerError::InvalidQuantity(
-                "Serialized positive stock movement must be exactly +1000 milli (1 unit)"
-                    .to_string(),
-            ));
-        }
-        if delta < 0 && delta != -1000 {
-            return Err(StockLedgerError::InvalidQuantity(
-                "Serialized negative stock movement must be exactly -1000 milli (1 unit)"
-                    .to_string(),
-            ));
-        }
+    let new_qty = b_qty.checked_add(ctx.delta_milli).ok_or_else(|| {
+        StockLedgerError::Validation("Batch quantity arithmetic overflow".to_string())
+    })?;
 
-        let (s_prod, s_branch, s_var, s_status, s_loc, s_bin): (
-            String,
-            String,
-            Option<String>,
-            String,
-            Option<String>,
-            Option<String>,
-        ) = tx
-            .query_row(
-                "SELECT product_id, branch_id, variant_id, status, location_id, bin_id FROM serial_numbers WHERE id = ?1",
-                params![serial_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
-            )
-            .optional()?
-            .ok_or_else(|| StockLedgerError::NotFound(format!("Serial '{serial_id}' not found")))?;
+    if new_qty < 0 {
+        return Err(StockLedgerError::InsufficientStock {
+            requested_milli: -ctx.delta_milli,
+            available_milli: b_qty,
+        });
+    }
 
-        if s_prod != product_id {
+    let new_status = if b_status == "recalled" {
+        "recalled"
+    } else if new_qty == 0 {
+        "depleted"
+    } else if b_status == "quarantined" {
+        "quarantined"
+    } else {
+        "active"
+    };
+
+    Ok(Some((new_qty, new_status)))
+}
+
+fn validate_and_compute_serial_state(
+    tx: &rusqlite::Transaction<'_>,
+    ctx: &NormalizedMovementContext<'_>,
+    reason: &StockMovementReason,
+) -> Result<Option<&'static str>, StockLedgerError> {
+    let Some(serial_id) = ctx.serial_id else {
+        return Ok(None);
+    };
+
+    let delta = ctx.delta_milli;
+    if delta > 0 && delta != 1000 {
+        return Err(StockLedgerError::InvalidQuantity(
+            "Serialized positive stock movement must be exactly +1000 milli (1 unit)".to_string(),
+        ));
+    }
+    if delta < 0 && delta != -1000 {
+        return Err(StockLedgerError::InvalidQuantity(
+            "Serialized negative stock movement must be exactly -1000 milli (1 unit)".to_string(),
+        ));
+    }
+
+    let (s_prod, s_branch, s_var, s_status, s_loc, s_bin): (
+        String,
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+    ) = tx
+        .query_row(
+            "SELECT product_id, branch_id, variant_id, status, location_id, bin_id FROM serial_numbers WHERE id = ?1",
+            params![serial_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+        )
+        .optional()?
+        .ok_or_else(|| StockLedgerError::NotFound(format!("Serial '{serial_id}' not found")))?;
+
+    if s_prod != ctx.product_id {
+        return Err(StockLedgerError::InvalidSerial(format!(
+            "Serial '{serial_id}' belongs to product '{s_prod}', not '{}'",
+            ctx.product_id
+        )));
+    }
+    if s_branch != ctx.branch_id {
+        return Err(StockLedgerError::BranchMismatch(format!(
+            "Serial '{serial_id}' belongs to branch '{s_branch}', not '{}'",
+            ctx.branch_id
+        )));
+    }
+    if s_var.as_deref() != ctx.variant_id {
+        return Err(StockLedgerError::VariantMismatch(format!(
+            "Serial variant '{:?}' does not match requested variant '{:?}'",
+            s_var, ctx.variant_id
+        )));
+    }
+
+    if delta == 1000 {
+        if s_status != "reserved" && s_status != "defective" {
             return Err(StockLedgerError::InvalidSerial(format!(
-                "Serial '{serial_id}' belongs to product '{s_prod}', not '{product_id}'"
+                "Cannot intake serial in status '{s_status}'. Permitted: reserved, defective"
             )));
         }
-        if s_branch != branch_id {
-            return Err(StockLedgerError::BranchMismatch(format!(
-                "Serial '{serial_id}' belongs to branch '{s_branch}', not '{branch_id}'"
+        Ok(Some("in_stock"))
+    } else {
+        if s_status != "in_stock" {
+            return Err(StockLedgerError::InvalidSerial(format!(
+                "Cannot deduct serial in status '{s_status}'. Expected 'in_stock'"
             )));
         }
-        if s_var.as_deref() != norm_variant_id {
-            return Err(StockLedgerError::VariantMismatch(format!(
-                "Serial variant '{:?}' does not match requested variant '{:?}'",
-                s_var, norm_variant_id
+        if s_loc.as_deref() != Some(ctx.location_id) {
+            return Err(StockLedgerError::InvalidSerial(format!(
+                "Serial current location '{:?}' does not match requested location '{}'",
+                s_loc, ctx.location_id
+            )));
+        }
+        if ctx.bin_id.is_some() && s_bin.as_deref() != ctx.bin_id {
+            return Err(StockLedgerError::InvalidSerial(format!(
+                "Serial current bin '{:?}' does not match requested bin '{:?}'",
+                s_bin, ctx.bin_id
             )));
         }
 
-        if delta == 1000 {
-            // Inbound serialized movement: permitted sources are reserved and defective
-            if s_status != "reserved" && s_status != "defective" {
-                return Err(StockLedgerError::InvalidSerial(format!(
-                    "Cannot intake serial in status '{s_status}'. Permitted: reserved, defective"
-                )));
+        let target_status = match reason {
+            StockMovementReason::Damage => "defective",
+            StockMovementReason::Loss => "disposed",
+            StockMovementReason::Adjustment => "reserved",
+            StockMovementReason::OpeningBalance => {
+                return Err(StockLedgerError::InvalidReason(
+                    "opening_balance cannot be outbound".to_string(),
+                ))
             }
-            serial_target_status = Some("in_stock");
-        } else {
-            // Outbound serialized movement: item must currently be in_stock
-            if s_status != "in_stock" {
-                return Err(StockLedgerError::InvalidSerial(format!(
-                    "Cannot deduct serial in status '{s_status}'. Expected 'in_stock'"
-                )));
+            _ => {
+                return Err(StockLedgerError::InvalidReason(format!(
+                    "Reason '{reason}' is not an authorized outbound mutation reason"
+                )))
             }
-            // Coordinates must match
-            if s_loc.as_deref() != Some(location_id) {
-                return Err(StockLedgerError::InvalidSerial(format!(
-                    "Serial current location '{:?}' does not match requested location '{location_id}'",
-                    s_loc
-                )));
-            }
-            if norm_bin_id.is_some() && s_bin.as_deref() != norm_bin_id {
-                return Err(StockLedgerError::InvalidSerial(format!(
-                    "Serial current bin '{:?}' does not match requested bin '{:?}'",
-                    s_bin, norm_bin_id
-                )));
-            }
-
-            match input.reason {
-                StockMovementReason::Damage => serial_target_status = Some("defective"),
-                StockMovementReason::Loss => serial_target_status = Some("disposed"),
-                StockMovementReason::Adjustment => serial_target_status = Some("reserved"),
-                StockMovementReason::OpeningBalance => {
-                    return Err(StockLedgerError::InvalidReason(
-                        "opening_balance cannot be outbound".to_string(),
-                    ))
-                }
-                _ => {
-                    return Err(StockLedgerError::InvalidReason(format!(
-                        "Reason '{}' is not an authorized outbound mutation reason",
-                        input.reason
-                    )))
-                }
-            }
-        }
+        };
+        Ok(Some(target_status))
     }
+}
 
-    let delta = input.quantity_delta_milli;
-
-    // 8. Mutate Aggregate Inventory (`inventory` table)
+fn mutate_aggregate_inventory(
+    tx: &rusqlite::Transaction<'_>,
+    ctx: &NormalizedMovementContext<'_>,
+) -> Result<(i64, i64), StockLedgerError> {
     let agg_row: Option<(String, i64)> = tx
         .query_row(
             "SELECT id, quantity_milli FROM inventory
              WHERE branch_id = ?1 AND product_id = ?2
                AND (variant_id = ?3 OR (?3 IS NULL AND variant_id IS NULL))",
-            params![branch_id, product_id, norm_variant_id],
+            params![ctx.branch_id, ctx.product_id, ctx.variant_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
 
-    let (agg_before, agg_after) = match agg_row {
+    match agg_row {
         Some((inv_id, current_qty)) => {
-            let after = current_qty.checked_add(delta).ok_or_else(|| {
+            let after = current_qty.checked_add(ctx.delta_milli).ok_or_else(|| {
                 StockLedgerError::Validation("Aggregate inventory quantity overflow".to_string())
             })?;
             if after < 0 {
                 return Err(StockLedgerError::InsufficientStock {
-                    requested_milli: -delta,
+                    requested_milli: -ctx.delta_milli,
                     available_milli: current_qty,
                 });
             }
@@ -844,25 +887,30 @@ pub fn post_stock_movement(
                  WHERE id = ?2",
                 params![after, inv_id],
             )?;
-            (current_qty, after)
+            Ok((current_qty, after))
         }
         None => {
-            if delta < 0 {
+            if ctx.delta_milli < 0 {
                 return Err(StockLedgerError::InsufficientStock {
-                    requested_milli: -delta,
+                    requested_milli: -ctx.delta_milli,
                     available_milli: 0,
                 });
             }
             tx.execute(
                 "INSERT INTO inventory (id, branch_id, product_id, variant_id, quantity, quantity_milli, updated_at)
                  VALUES (lower(hex(randomblob(16))), ?1, ?2, ?3, ?4 / 1000.0, ?4, datetime('now'))",
-                params![branch_id, product_id, norm_variant_id, delta],
+                params![ctx.branch_id, ctx.product_id, ctx.variant_id, ctx.delta_milli],
             )?;
-            (0, delta)
+            Ok((0, ctx.delta_milli))
         }
-    };
+    }
+}
 
-    // 9. Mutate Spatial Inventory (`location_inventory` table)
+fn mutate_spatial_inventory(
+    tx: &rusqlite::Transaction<'_>,
+    ctx: &NormalizedMovementContext<'_>,
+    agg_after: i64,
+) -> Result<(), StockLedgerError> {
     let spatial_row: Option<(String, i64)> = tx
         .query_row(
             "SELECT id, quantity_milli FROM location_inventory
@@ -873,12 +921,12 @@ pub fn post_stock_movement(
                AND (variant_id = ?5 OR (?5 IS NULL AND variant_id IS NULL))
                AND (batch_id = ?6 OR (?6 IS NULL AND batch_id IS NULL))",
             params![
-                branch_id,
-                location_id,
-                product_id,
-                norm_bin_id,
-                norm_variant_id,
-                norm_batch_id
+                ctx.branch_id,
+                ctx.location_id,
+                ctx.product_id,
+                ctx.bin_id,
+                ctx.variant_id,
+                ctx.batch_id
             ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -886,12 +934,14 @@ pub fn post_stock_movement(
 
     match spatial_row {
         Some((loc_inv_id, current_spatial)) => {
-            let spatial_after = current_spatial.checked_add(delta).ok_or_else(|| {
-                StockLedgerError::Validation("Spatial inventory quantity overflow".to_string())
-            })?;
+            let spatial_after = current_spatial
+                .checked_add(ctx.delta_milli)
+                .ok_or_else(|| {
+                    StockLedgerError::Validation("Spatial inventory quantity overflow".to_string())
+                })?;
             if spatial_after < 0 {
                 return Err(StockLedgerError::InsufficientStock {
-                    requested_milli: -delta,
+                    requested_milli: -ctx.delta_milli,
                     available_milli: current_spatial,
                 });
             }
@@ -903,9 +953,9 @@ pub fn post_stock_movement(
             )?;
         }
         None => {
-            if delta < 0 {
+            if ctx.delta_milli < 0 {
                 return Err(StockLedgerError::InsufficientStock {
-                    requested_milli: -delta,
+                    requested_milli: -ctx.delta_milli,
                     available_milli: 0,
                 });
             }
@@ -914,26 +964,23 @@ pub fn post_stock_movement(
                     id, branch_id, location_id, product_id, bin_id, variant_id, batch_id, quantity_milli, created_at, updated_at
                  ) VALUES (lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'))",
                 params![
-                    branch_id,
-                    location_id,
-                    product_id,
-                    norm_bin_id,
-                    norm_variant_id,
-                    norm_batch_id,
-                    delta
+                    ctx.branch_id,
+                    ctx.location_id,
+                    ctx.product_id,
+                    ctx.bin_id,
+                    ctx.variant_id,
+                    ctx.batch_id,
+                    ctx.delta_milli
                 ],
             )?;
         }
     };
 
-    // 10. Spatial Unallocated Invariant Verification:
-    // allocated_spatial = SUM(location_inventory)
-    // unallocated = aggregate - allocated_spatial >= 0
     let allocated_spatial: i64 = tx.query_row(
         "SELECT COALESCE(SUM(quantity_milli), 0) FROM location_inventory
          WHERE branch_id = ?1 AND product_id = ?2
            AND (variant_id = ?3 OR (?3 IS NULL AND variant_id IS NULL))",
-        params![branch_id, product_id, norm_variant_id],
+        params![ctx.branch_id, ctx.product_id, ctx.variant_id],
         |row| row.get(0),
     )?;
 
@@ -943,10 +990,16 @@ pub fn post_stock_movement(
         )));
     }
 
-    // 11. Mutate Batch State
-    if let (Some(batch_id), Some((new_b_qty, new_b_status))) =
-        (norm_batch_id, batch_new_qty_and_status)
-    {
+    Ok(())
+}
+
+fn apply_batch_and_serial_mutations(
+    tx: &rusqlite::Transaction<'_>,
+    ctx: &NormalizedMovementContext<'_>,
+    batch_mutation: Option<(i64, &'static str)>,
+    serial_target_status: Option<&'static str>,
+) -> Result<(), StockLedgerError> {
+    if let (Some(batch_id), Some((new_b_qty, new_b_status))) = (ctx.batch_id, batch_mutation) {
         tx.execute(
             "UPDATE product_batches
              SET quantity_milli = ?1, status = ?2, updated_at = datetime('now')
@@ -955,14 +1008,13 @@ pub fn post_stock_movement(
         )?;
     }
 
-    // 12. Mutate Serial State
-    if let (Some(serial_id), Some(target_status)) = (norm_serial_id, serial_target_status) {
+    if let (Some(serial_id), Some(target_status)) = (ctx.serial_id, serial_target_status) {
         if target_status == "in_stock" {
             tx.execute(
                 "UPDATE serial_numbers
                  SET status = 'in_stock', location_id = ?1, bin_id = ?2, updated_at = datetime('now')
                  WHERE id = ?3",
-                params![location_id, norm_bin_id, serial_id],
+                params![ctx.location_id, ctx.bin_id, serial_id],
             )?;
         } else {
             tx.execute(
@@ -974,7 +1026,17 @@ pub fn post_stock_movement(
         }
     }
 
-    // 13. Append Immutable Stock Movement Ledger Entry
+    Ok(())
+}
+
+fn insert_ledger_and_record_idempotency(
+    tx: &rusqlite::Transaction<'_>,
+    ctx: &NormalizedMovementContext<'_>,
+    input: &PostMovementInput,
+    agg_before: i64,
+    agg_after: i64,
+    request_hash: &str,
+) -> Result<StockMovement, StockLedgerError> {
     let movement_id: String =
         tx.query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?;
 
@@ -998,19 +1060,19 @@ pub fn post_stock_movement(
         )",
         params![
             movement_id,
-            branch_id,
-            product_id,
-            norm_variant_id,
-            delta,
+            ctx.branch_id,
+            ctx.product_id,
+            ctx.variant_id,
+            ctx.delta_milli,
             agg_before,
             agg_after,
             input.reason.as_str(),
             input.source_type,
             input.source_id,
-            location_id,
-            norm_bin_id,
-            norm_batch_id,
-            norm_serial_id,
+            ctx.location_id,
+            ctx.bin_id,
+            ctx.batch_id,
+            ctx.serial_id,
             input.user_id,
         ],
     )?;
@@ -1023,24 +1085,23 @@ pub fn post_stock_movement(
 
     let movement = StockMovement {
         id: movement_id,
-        branch_id: branch_id.to_string(),
-        product_id: product_id.to_string(),
-        variant_id: norm_variant_id.map(ToString::to_string),
-        quantity_delta_milli: delta,
+        branch_id: ctx.branch_id.to_string(),
+        product_id: ctx.product_id.to_string(),
+        variant_id: ctx.variant_id.map(ToString::to_string),
+        quantity_delta_milli: ctx.delta_milli,
         quantity_before_milli: Some(agg_before),
         quantity_after_milli: Some(agg_after),
         reason: input.reason.clone(),
         source_type: input.source_type.clone(),
         source_id: input.source_id.clone(),
-        location_id: Some(location_id.to_string()),
-        bin_id: norm_bin_id.map(ToString::to_string),
-        batch_id: norm_batch_id.map(ToString::to_string),
-        serial_id: norm_serial_id.map(ToString::to_string),
+        location_id: Some(ctx.location_id.to_string()),
+        bin_id: ctx.bin_id.map(ToString::to_string),
+        batch_id: ctx.batch_id.map(ToString::to_string),
+        serial_id: ctx.serial_id.map(ToString::to_string),
         user_id: input.user_id.clone(),
         created_at,
     };
 
-    // 14. Persist Idempotency Record
     if let Some(ref key) = input.idempotency_key {
         let clean_key = key.trim();
         let result_json = serde_json::to_string(&movement)?;
@@ -1050,6 +1111,62 @@ pub fn post_stock_movement(
             params![clean_key, request_hash, result_json],
         )?;
     }
+
+    Ok(movement)
+}
+
+/// Primary atomic stock movement mutation engine.
+/// Executes within a single transaction boundary:
+/// Idempotency -> Validation -> Aggregate -> Spatial -> Batch/Serial -> Movement -> Commit.
+pub fn post_stock_movement(
+    conn: &mut Connection,
+    input: &PostMovementInput,
+) -> Result<StockMovement, StockLedgerError> {
+    let ctx = NormalizedMovementContext::from_input(input);
+    validate_basic_input(input, &ctx)?;
+
+    let request_hash = compute_request_hash(input);
+
+    let tx = conn.transaction()?;
+
+    // 1. Idempotency check inside transaction boundary
+    if let Some(cached) = check_idempotency(&tx, input, &request_hash)? {
+        return Ok(cached);
+    }
+
+    // 2. Validate Branch
+    validate_branch(&tx, ctx.branch_id)?;
+
+    // 3 & 4. Validate Product and Variant
+    validate_product_and_variant(&tx, ctx.product_id, ctx.variant_id)?;
+
+    // 5. Validate Location and Bin
+    validate_location_and_bin(&tx, ctx.branch_id, ctx.location_id, ctx.bin_id)?;
+
+    // 6. Validate Batch (if specified) & compute transition
+    let batch_mutation = validate_and_compute_batch_state(&tx, &ctx)?;
+
+    // 7. Validate Serial (if specified) & compute transition
+    let serial_target_status = validate_and_compute_serial_state(&tx, &ctx, &input.reason)?;
+
+    // 8. Mutate Aggregate Inventory
+    let (agg_before, agg_after) = mutate_aggregate_inventory(&tx, &ctx)?;
+
+    // 9 & 10. Mutate Spatial Inventory & verify unallocated invariant
+    mutate_spatial_inventory(&tx, &ctx, agg_after)?;
+
+    // 11 & 12. Mutate Batch and Serial States
+    apply_batch_and_serial_mutations(&tx, &ctx, batch_mutation, serial_target_status)?;
+
+    // 13 & 14. Append Movement Ledger Entry & persist Idempotency Record
+    let movement = insert_ledger_and_record_idempotency(
+        &tx,
+        &ctx,
+        input,
+        agg_before,
+        agg_after,
+        &request_hash,
+    )?;
 
     tx.commit()?;
 
