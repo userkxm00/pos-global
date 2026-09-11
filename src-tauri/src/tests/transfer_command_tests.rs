@@ -160,7 +160,7 @@ fn setup_command_fixtures(conn: &mut Connection) -> TransferCommandFixtures {
         batch_id: None,
         serial_id: None,
         quantity_delta_milli: 100_000,
-        reason: StockMovementReason::OpeningStock,
+        reason: StockMovementReason::OpeningBalance,
         source_type: None,
         source_id: None,
         user_id: None,
