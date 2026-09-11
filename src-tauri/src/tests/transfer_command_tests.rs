@@ -21,6 +21,7 @@ use rusqlite::Connection;
 // TEST FIXTURES & HELPERS
 // =========================================================================
 
+#[allow(dead_code)]
 struct TransferCommandFixtures {
     org_id: String,
     branch_a: String,
