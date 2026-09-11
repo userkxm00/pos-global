@@ -174,6 +174,7 @@ fn setup_transfer_fixtures(conn: &Connection) -> TwoBranchFixtures {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn seed_stock(
     conn: &mut Connection,
     branch_id: &str,
