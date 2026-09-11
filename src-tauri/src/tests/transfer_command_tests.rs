@@ -550,8 +550,8 @@ fn test_idempotency_key_propagation() {
     };
     let disp_first = dispatch_stock_transfer_impl(&mut conn, &f.admin_session_a, disp_req.clone())
         .expect("disp first");
-    let disp_replay = dispatch_stock_transfer_impl(&mut conn, &f.admin_session_a, disp_req)
-        .expect("disp replay");
+    let disp_replay =
+        dispatch_stock_transfer_impl(&mut conn, &f.admin_session_a, disp_req).expect("disp replay");
     assert_eq!(disp_first.id, disp_replay.id);
 }
 
@@ -614,8 +614,7 @@ fn test_domain_error_conversion() {
     };
     cancel_stock_transfer_impl(&mut conn, &f.admin_session_a, double_cancel.clone())
         .expect("cancelled first time");
-    let err =
-        cancel_stock_transfer_impl(&mut conn, &f.admin_session_a, double_cancel).unwrap_err();
+    let err = cancel_stock_transfer_impl(&mut conn, &f.admin_session_a, double_cancel).unwrap_err();
     assert!(
         err.contains("Invalid status transition"),
         "Expected Invalid status transition, got: {err}"

@@ -313,14 +313,9 @@ pub fn get_stock_transfer_impl(
     session_id: &str,
     id: &str,
 ) -> Result<Option<StockTransfer>, String> {
-    let session = require_scoped_permission(
-        conn,
-        session_id,
-        Permission::InventoryTransfer,
-        None,
-        None,
-    )
-    .map_err(|e| e.to_string())?;
+    let session =
+        require_scoped_permission(conn, session_id, Permission::InventoryTransfer, None, None)
+            .map_err(|e| e.to_string())?;
 
     let transfer = TransferService::get_transfer(conn, id).map_err(map_transfer_error)?;
 
@@ -342,14 +337,9 @@ pub fn list_stock_transfers_impl(
     session_id: &str,
     request: ListStockTransfersRequest,
 ) -> Result<Vec<StockTransfer>, String> {
-    let session = require_scoped_permission(
-        conn,
-        session_id,
-        Permission::InventoryTransfer,
-        None,
-        None,
-    )
-    .map_err(|e| e.to_string())?;
+    let session =
+        require_scoped_permission(conn, session_id, Permission::InventoryTransfer, None, None)
+            .map_err(|e| e.to_string())?;
 
     if let Some(ref b_id) = request.branch_id {
         if b_id != &session.branch_id {
