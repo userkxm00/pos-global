@@ -22,6 +22,7 @@ mod serial;
 pub mod stock_ledger;
 #[cfg(test)]
 mod tests;
+pub mod transfer;
 mod unit;
 mod user;
 mod variant;
