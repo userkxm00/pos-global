@@ -49,6 +49,8 @@ mod stock_ledger_migration_tests;
 mod tenant_isolation_tests;
 #[path = "test_helpers.rs"]
 mod test_helpers;
+#[path = "transfer_command_tests.rs"]
+mod transfer_command_tests;
 #[path = "transfer_tests.rs"]
 mod transfer_tests;
 #[path = "unit_tests.rs"]
