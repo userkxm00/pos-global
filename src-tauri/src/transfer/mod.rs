@@ -1025,7 +1025,7 @@ impl TransferService {
                         created_at, updated_at
                  FROM stock_transfers WHERE id = ?1",
                 params![input.transfer_id],
-                |row| map_transfer_row(row),
+                map_transfer_row,
             )
             .optional()?;
 
@@ -1183,7 +1183,7 @@ impl TransferService {
                         created_at, updated_at
                  FROM stock_transfers WHERE id = ?1",
                 params![input.transfer_id],
-                |row| map_transfer_row(row),
+                map_transfer_row,
             )
             .optional()?;
 
@@ -1365,7 +1365,7 @@ impl TransferService {
                         created_at, updated_at
                  FROM stock_transfers WHERE id = ?1",
                 params![input.transfer_id],
-                |row| map_transfer_row(row),
+                map_transfer_row,
             )
             .optional()?;
 
@@ -1671,7 +1671,7 @@ impl TransferService {
                         created_at, updated_at
                  FROM stock_transfers WHERE id = ?1",
                 params![id],
-                |row| map_transfer_row(row),
+                map_transfer_row,
             )
             .optional()?;
 
@@ -1743,7 +1743,7 @@ impl TransferService {
         let rusqlite_params: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(AsRef::as_ref).collect();
 
-        let rows = stmt.query_map(rusqlite_params.as_slice(), |row| map_transfer_row(row))?;
+        let rows = stmt.query_map(rusqlite_params.as_slice(), map_transfer_row)?;
 
         let mut transfers = Vec::new();
         for r in rows {

@@ -11,9 +11,9 @@
 // 9. Receive rollback across all mutations
 // 10. Concurrency & double dispatch race prevention
 
-use crate::batch::{create_batch, BatchStatus, CreateBatchInput};
+use crate::batch::{create_batch, CreateBatchInput};
 use crate::permission::{evaluate_user_permission, validate_scope, Permission, PermissionError};
-use crate::serial::{create_serial_instance, CreateSerialInput, SerialStatus};
+use crate::serial::{create_serial_instance, CreateSerialInput};
 use crate::stock_ledger::{
     PostMovementInput, StockLedgerError, StockLedgerService, StockMovementReason,
 };
@@ -22,19 +22,18 @@ use crate::tests::test_helpers::{
 };
 use crate::transfer::{
     CancelTransferInput, CreateTransferInput, CreateTransferItemInput, DispatchTransferInput,
-    InstantIntraBranchTransferInput, ReceiveTransferInput, TransferError, TransferFilter,
+    InstantIntraBranchTransferInput, ReceiveTransferInput, TransferError,
     TransferService, TransferStatus, TransferType,
 };
 use crate::user::session::create_local_session;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
-use std::thread;
 
 // =========================================================================
 // TEST FIXTURES & HELPERS
 // =========================================================================
 
+#[allow(dead_code)]
 struct TwoBranchFixtures {
     org_id: String,
     branch_a: String,
@@ -339,16 +338,15 @@ fn test_instant_intra_branch_relocation_100_percent_batch() {
     // Create a batch with exactly 5,000 milli
     let batch = create_batch(
         &conn,
-        CreateBatchInput {
+        &CreateBatchInput {
             branch_id: f.branch_a.clone(),
             product_id: f.product_id.clone(),
             variant_id: Some(f.variant_id.clone()),
             batch_number: "BATCH-100-INTRA".into(),
+            quantity_milli: 0,
             cost_price_minor: Some(150),
             manufactured_date: Some("2026-01-01".into()),
-            expiry_date: "2029-12-31".into(),
-            initial_quantity_milli: None,
-            status: Some(BatchStatus::Active),
+            expiry_date: Some("2029-12-31".into()),
         },
     )
     .expect("batch created");
@@ -623,14 +621,14 @@ fn test_serial_transfer_dispatch_and_receive() {
     // Create serial number instance in branch A
     let serial = create_serial_instance(
         &conn,
-        CreateSerialInput {
+        &CreateSerialInput {
             branch_id: f.branch_a.clone(),
             product_id: f.product_serial_id.clone(),
             variant_id: None,
-            serial_number: "SN-TRF-9999".into(),
-            initial_status: Some(SerialStatus::InStock),
-            location_id: Some(f.loc_a1.clone()),
-            bin_id: Some(f.bin_a1.clone()),
+            serial_number: Some("SN-TRF-9999".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
         },
     )
     .expect("serial created in stock");
@@ -754,17 +752,23 @@ fn test_serial_invalid_status_rejected() {
 
     let serial = create_serial_instance(
         &conn,
-        CreateSerialInput {
+        &CreateSerialInput {
             branch_id: f.branch_a.clone(),
             product_id: f.product_serial_id.clone(),
             variant_id: None,
-            serial_number: "SN-DEFECTIVE-01".into(),
-            initial_status: Some(SerialStatus::Defective),
-            location_id: Some(f.loc_a1.clone()),
-            bin_id: Some(f.bin_a1.clone()),
+            serial_number: Some("SN-DEFECTIVE-01".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
         },
     )
     .expect("serial created defective");
+
+    conn.execute(
+        "UPDATE serial_numbers SET status = 'defective' WHERE id = ?1",
+        params![serial.id],
+    )
+    .expect("set serial status to defective");
 
     let create_input = CreateTransferInput {
         transfer_type: TransferType::InterBranch,
@@ -797,14 +801,14 @@ fn test_serial_quantity_must_be_1000() {
 
     let serial = create_serial_instance(
         &conn,
-        CreateSerialInput {
+        &CreateSerialInput {
             branch_id: f.branch_a.clone(),
             product_id: f.product_serial_id.clone(),
             variant_id: None,
-            serial_number: "SN-QTY-FAIL-01".into(),
-            initial_status: Some(SerialStatus::InStock),
-            location_id: Some(f.loc_a1.clone()),
-            bin_id: Some(f.bin_a1.clone()),
+            serial_number: Some("SN-QTY-FAIL-01".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
         },
     )
     .expect("serial created");
@@ -845,36 +849,34 @@ fn test_batch_transfer_existing_destination_batch() {
     // Source batch in branch A
     let batch_a = create_batch(
         &conn,
-        CreateBatchInput {
+        &CreateBatchInput {
             branch_id: f.branch_a.clone(),
             product_id: f.product_id.clone(),
             variant_id: Some(f.variant_id.clone()),
             batch_number: "LOT-SHARED-01".into(),
+            quantity_milli: 0,
             cost_price_minor: Some(250),
             manufactured_date: Some("2025-06-01".into()),
-            expiry_date: "2028-12-31".into(),
-            initial_quantity_milli: None,
-            status: Some(BatchStatus::Active),
+            expiry_date: Some("2028-12-31".into()),
         },
     )
-    .expect("batch a created");
+    .expect("source batch created");
 
     // Destination batch in branch B (case-insensitive batch number match)
     let batch_b = create_batch(
         &conn,
-        CreateBatchInput {
+        &CreateBatchInput {
             branch_id: f.branch_b.clone(),
             product_id: f.product_id.clone(),
             variant_id: Some(f.variant_id.clone()),
             batch_number: "lot-shared-01".into(),
+            quantity_milli: 0,
             cost_price_minor: Some(250),
             manufactured_date: Some("2025-06-01".into()),
-            expiry_date: "2028-12-31".into(),
-            initial_quantity_milli: None,
-            status: Some(BatchStatus::Active),
+            expiry_date: Some("2028-12-31".into()),
         },
     )
-    .expect("batch b created");
+    .expect("destination batch created");
 
     // Seed stock in branch A (10,000 milli) and branch B (2,000 milli)
     seed_stock(
@@ -973,19 +975,18 @@ fn test_batch_transfer_new_destination_batch_created() {
 
     let batch_a = create_batch(
         &conn,
-        CreateBatchInput {
+        &CreateBatchInput {
             branch_id: f.branch_a.clone(),
             product_id: f.product_id.clone(),
             variant_id: Some(f.variant_id.clone()),
             batch_number: "LOT-BRAND-NEW-01".into(),
+            quantity_milli: 0,
             cost_price_minor: Some(780),
             manufactured_date: Some("2026-02-15".into()),
-            expiry_date: "2029-08-30".into(),
-            initial_quantity_milli: None,
-            status: Some(BatchStatus::Active),
+            expiry_date: Some("2029-08-30".into()),
         },
     )
-    .expect("batch a created");
+    .expect("source batch created");
 
     seed_stock(
         &mut conn,
@@ -1087,20 +1088,20 @@ fn test_batch_transfer_mismatches_fail_closed() {
 
     let batch_src = create_batch(
         &conn,
-        CreateBatchInput {
+        &CreateBatchInput {
             branch_id: f.branch_a.clone(),
             product_id: f.product_id.clone(),
             variant_id: Some(f.variant_id.clone()),
             batch_number: "LOT-MISMATCH-01".into(),
+            quantity_milli: 0,
             cost_price_minor: Some(100),
             manufactured_date: None,
-            expiry_date: "2027-01-01".into(),
-            initial_quantity_milli: None,
-            status: Some(BatchStatus::Active),
+            expiry_date: Some("2027-01-01".into()),
         },
     )
-    .expect("batch_src");
+    .expect("src batch created");
 
+    // Seed 10,000 milli in branch A
     seed_stock(
         &mut conn,
         &f.branch_a,
@@ -1110,25 +1111,24 @@ fn test_batch_transfer_mismatches_fail_closed() {
         Some(&f.bin_a1),
         Some(&batch_src.id),
         None,
-        5000,
+        10000,
     );
 
     // Destination batch with different expiry
     create_batch(
         &conn,
-        CreateBatchInput {
+        &CreateBatchInput {
             branch_id: f.branch_b.clone(),
             product_id: f.product_id.clone(),
             variant_id: Some(f.variant_id.clone()),
             batch_number: "LOT-MISMATCH-01".into(),
+            quantity_milli: 0,
             cost_price_minor: Some(100),
             manufactured_date: None,
-            expiry_date: "2029-01-01".into(), // Different expiry date!
-            initial_quantity_milli: None,
-            status: Some(BatchStatus::Active),
+            expiry_date: Some("2029-01-01".into()), // Different expiry date!
         },
     )
-    .expect("batch_dst_mismatched_expiry");
+    .expect("conflicting destination batch created");
 
     let transfer = TransferService::create_transfer(
         &mut conn,
@@ -1330,30 +1330,29 @@ fn test_validation_failures_tracked_entities_and_duplicates() {
 
     let batch = create_batch(
         &conn,
-        CreateBatchInput {
+        &CreateBatchInput {
             branch_id: f.branch_a.clone(),
             product_id: f.product_id.clone(),
             variant_id: Some(f.variant_id.clone()),
             batch_number: "LOT-VAL-01".into(),
+            quantity_milli: 0,
             cost_price_minor: None,
             manufactured_date: None,
-            expiry_date: "2030-01-01".into(),
-            initial_quantity_milli: None,
-            status: Some(BatchStatus::Active),
+            expiry_date: Some("2030-01-01".into()),
         },
     )
     .expect("batch");
 
     let serial = create_serial_instance(
         &conn,
-        CreateSerialInput {
+        &CreateSerialInput {
             branch_id: f.branch_a.clone(),
             product_id: f.product_serial_id.clone(),
             variant_id: None,
-            serial_number: "SN-VAL-01".into(),
-            initial_status: Some(SerialStatus::InStock),
-            location_id: Some(f.loc_a1.clone()),
-            bin_id: None,
+            serial_number: Some("SN-VAL-01".into()),
+            imei: None,
+            asset_tag: None,
+            cost_price_minor: None,
         },
     )
     .expect("serial");

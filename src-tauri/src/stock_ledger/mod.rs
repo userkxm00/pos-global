@@ -974,13 +974,13 @@ fn validate_and_compute_serial_state(
             ctx.product_id
         )));
     }
-    if *reason != StockMovementReason::Transfer || ctx.delta_milli < 0 {
-        if s_branch != ctx.branch_id {
-            return Err(StockLedgerError::BranchMismatch(format!(
-                "Serial '{serial_id}' belongs to branch '{s_branch}', not '{}'",
-                ctx.branch_id
-            )));
-        }
+    if (*reason != StockMovementReason::Transfer || ctx.delta_milli < 0)
+        && s_branch != ctx.branch_id
+    {
+        return Err(StockLedgerError::BranchMismatch(format!(
+            "Serial '{serial_id}' belongs to branch '{s_branch}', not '{}'",
+            ctx.branch_id
+        )));
     }
     if s_var.as_deref() != ctx.variant_id {
         return Err(StockLedgerError::VariantMismatch(format!(
