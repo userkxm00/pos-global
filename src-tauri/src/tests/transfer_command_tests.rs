@@ -609,13 +609,13 @@ fn test_domain_error_conversion() {
         "Expected Entity not found, got: {err}"
     );
 
-    // 3. Invalid Status Transition mapping
-    let double_cancel = CancelStockTransferRequest {
+    // 3. Invalid Status Transition mapping (attempt to dispatch an already cancelled transfer)
+    let bad_dispatch = DispatchStockTransferRequest {
         transfer_id: transfer.id.clone(),
+        idempotency_key: None,
     };
-    cancel_stock_transfer_impl(&mut conn, &f.admin_session_a, double_cancel.clone())
-        .expect("cancelled first time");
-    let err = cancel_stock_transfer_impl(&mut conn, &f.admin_session_a, double_cancel).unwrap_err();
+    let err =
+        dispatch_stock_transfer_impl(&mut conn, &f.admin_session_a, bad_dispatch).unwrap_err();
     assert!(
         err.contains("Invalid status transition"),
         "Expected Invalid status transition, got: {err}"
