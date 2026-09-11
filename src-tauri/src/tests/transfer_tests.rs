@@ -2002,10 +2002,18 @@ fn test_dispatch_and_receive_idempotency() {
     )
     .expect("created");
 
+    let user_02 = "usr_transfer_admin_02".to_string();
+    conn.execute(
+        "INSERT INTO users (id, branch_id, full_name, username, role, is_active)
+         VALUES (?1, ?2, 'Transfer Admin 2', 'trf_admin2', 'admin', 1)",
+        params![user_02, f.branch_a],
+    )
+    .expect("admin user 2 created");
+
     // 1. Dispatch Idempotency
     let mut dispatch_input = DispatchTransferInput {
         transfer_id: transfer.id.clone(),
-        user_id: Some("user_01".into()),
+        user_id: Some(f.user_id.clone()),
         idempotency_key: Some("idem-disp-01".into()),
     };
 
@@ -2022,7 +2030,7 @@ fn test_dispatch_and_receive_idempotency() {
     );
 
     // Dispatch conflict
-    dispatch_input.user_id = Some("user_02".into());
+    dispatch_input.user_id = Some(user_02.clone());
     let disp_conflict = TransferService::dispatch_transfer(&mut conn, &dispatch_input).unwrap_err();
     assert!(matches!(
         disp_conflict,
@@ -2034,7 +2042,7 @@ fn test_dispatch_and_receive_idempotency() {
         transfer_id: transfer.id.clone(),
         destination_location_id: None,
         destination_bin_id: None,
-        user_id: Some("user_01".into()),
+        user_id: Some(f.user_id.clone()),
         idempotency_key: Some("idem-recv-01".into()),
     };
 
@@ -2048,7 +2056,7 @@ fn test_dispatch_and_receive_idempotency() {
     assert_eq!(get_aggregate_stock(&conn, &f.branch_b, &f.product_id), 5000);
 
     // Receive conflict
-    receive_input.user_id = Some("user_02".into());
+    receive_input.user_id = Some(user_02);
     let recv_conflict = TransferService::receive_transfer(&mut conn, &receive_input).unwrap_err();
     assert!(matches!(
         recv_conflict,
@@ -2208,7 +2216,7 @@ fn test_concurrent_double_dispatch_single_winner() {
         &mut conn,
         &DispatchTransferInput {
             transfer_id: transfer_id.clone(),
-            user_id: Some("user_thread_1".into()),
+            user_id: Some(f.user_id.clone()),
             idempotency_key: None,
         },
     );
@@ -2219,7 +2227,7 @@ fn test_concurrent_double_dispatch_single_winner() {
         &mut conn,
         &DispatchTransferInput {
             transfer_id: transfer_id.clone(),
-            user_id: Some("user_thread_2".into()),
+            user_id: Some(f.user_id.clone()),
             idempotency_key: None,
         },
     );
