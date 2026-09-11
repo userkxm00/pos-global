@@ -1139,8 +1139,8 @@ fn test_batch_transfer_mismatches_fail_closed() {
             destination_branch_id: f.branch_b.clone(),
             source_location_id: f.loc_a1.clone(),
             destination_location_id: f.loc_b1.clone(),
-            source_bin_id: None,
-            destination_bin_id: None,
+            source_bin_id: Some(f.bin_a1.clone()),
+            destination_bin_id: Some(f.bin_b1.clone()),
             notes: None,
             items: vec![CreateTransferItemInput {
                 product_id: f.product_id.clone(),
@@ -1357,6 +1357,12 @@ fn test_validation_failures_tracked_entities_and_duplicates() {
         },
     )
     .expect("serial");
+
+    conn.execute(
+        "UPDATE serial_numbers SET status = 'in_stock' WHERE id = ?1",
+        params![serial.id],
+    )
+    .expect("in stock");
 
     // 1. Both batch_id and serial_id specified
     let err_both = TransferService::create_transfer(
@@ -1980,8 +1986,8 @@ fn test_dispatch_and_receive_idempotency() {
             destination_branch_id: f.branch_b.clone(),
             source_location_id: f.loc_a1.clone(),
             destination_location_id: f.loc_b1.clone(),
-            source_bin_id: None,
-            destination_bin_id: None,
+            source_bin_id: Some(f.bin_a1.clone()),
+            destination_bin_id: Some(f.bin_b1.clone()),
             notes: None,
             items: vec![CreateTransferItemInput {
                 product_id: f.product_id.clone(),
@@ -2079,8 +2085,8 @@ fn test_receive_rollback_on_failure() {
             destination_branch_id: f.branch_b.clone(),
             source_location_id: f.loc_a1.clone(),
             destination_location_id: f.loc_b1.clone(),
-            source_bin_id: None,
-            destination_bin_id: None,
+            source_bin_id: Some(f.bin_a1.clone()),
+            destination_bin_id: Some(f.bin_b1.clone()),
             notes: None,
             items: vec![CreateTransferItemInput {
                 product_id: f.product_id.clone(),
@@ -2179,8 +2185,8 @@ fn test_concurrent_double_dispatch_single_winner() {
             destination_branch_id: f.branch_b.clone(),
             source_location_id: f.loc_a1.clone(),
             destination_location_id: f.loc_b1.clone(),
-            source_bin_id: None,
-            destination_bin_id: None,
+            source_bin_id: Some(f.bin_a1.clone()),
+            destination_bin_id: Some(f.bin_b1.clone()),
             notes: None,
             items: vec![CreateTransferItemInput {
                 product_id: f.product_id.clone(),
