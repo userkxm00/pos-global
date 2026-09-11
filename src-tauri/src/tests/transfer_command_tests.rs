@@ -609,13 +609,46 @@ fn test_domain_error_conversion() {
         "Expected Entity not found, got: {err}"
     );
 
-    // 3. Invalid Status Transition mapping (attempt to dispatch an already cancelled transfer)
-    let bad_dispatch = DispatchStockTransferRequest {
-        transfer_id: transfer.id.clone(),
+    // 3. Invalid Status Transition mapping (attempt to dispatch an in-transit transfer)
+    let valid_create = CreateStockTransferRequest {
+        transfer_type: "inter_branch".to_string(),
+        source_branch_id: f.branch_a.clone(),
+        destination_branch_id: f.branch_b.clone(),
+        source_location_id: f.loc_a1.clone(),
+        destination_location_id: f.loc_b1.clone(),
+        source_bin_id: Some(f.bin_a1.clone()),
+        destination_bin_id: Some(f.bin_b1.clone()),
+        notes: None,
+        items: vec![CreateTransferItemInput {
+            product_id: f.product_id.clone(),
+            variant_id: None,
+            batch_id: None,
+            serial_id: None,
+            quantity_milli: 5000,
+        }],
         idempotency_key: None,
     };
-    let err =
-        dispatch_stock_transfer_impl(&mut conn, &f.admin_session_a, bad_dispatch).unwrap_err();
+    let trf2 =
+        create_stock_transfer_impl(&mut conn, &f.admin_session_a, valid_create).expect("created");
+    dispatch_stock_transfer_impl(
+        &mut conn,
+        &f.admin_session_a,
+        DispatchStockTransferRequest {
+            transfer_id: trf2.id.clone(),
+            idempotency_key: None,
+        },
+    )
+    .expect("first dispatch");
+
+    let err = dispatch_stock_transfer_impl(
+        &mut conn,
+        &f.admin_session_a,
+        DispatchStockTransferRequest {
+            transfer_id: trf2.id.clone(),
+            idempotency_key: None,
+        },
+    )
+    .unwrap_err();
     assert!(
         err.contains("Invalid status transition"),
         "Expected Invalid status transition, got: {err}"
