@@ -1204,18 +1204,18 @@ impl TransferService {
 
         let dest_location_id = input
             .destination_location_id
-            .as_deref()
-            .unwrap_or(&transfer_head.destination_location_id);
+            .clone()
+            .unwrap_or_else(|| transfer_head.destination_location_id.clone());
         let dest_bin_id = input
             .destination_bin_id
-            .as_deref()
-            .or(transfer_head.destination_bin_id.as_deref());
+            .clone()
+            .or_else(|| transfer_head.destination_bin_id.clone());
 
         validate_location_and_bin_ownership(
             &tx,
             &transfer_head.destination_branch_id,
-            dest_location_id,
-            dest_bin_id,
+            &dest_location_id,
+            dest_bin_id.as_deref(),
             "Destination",
         )?;
 
@@ -1223,7 +1223,7 @@ impl TransferService {
         if input.destination_location_id.is_some() || input.destination_bin_id.is_some() {
             tx.execute(
                 "UPDATE stock_transfers SET destination_location_id = ?1, destination_bin_id = ?2, updated_at = datetime('now') WHERE id = ?3",
-                params![dest_location_id, dest_bin_id, input.transfer_id],
+                params![&dest_location_id, &dest_bin_id, input.transfer_id],
             )?;
         }
 
@@ -1275,8 +1275,8 @@ impl TransferService {
                 branch_id: transfer_head.destination_branch_id.clone(),
                 product_id: item.product_id.clone(),
                 variant_id: item.variant_id.clone(),
-                location_id: dest_location_id.to_string(),
-                bin_id: dest_bin_id.map(ToString::to_string),
+                location_id: dest_location_id.clone(),
+                bin_id: dest_bin_id.clone(),
                 batch_id: dst_batch_id,
                 serial_id: item.serial_id.clone(),
                 quantity_delta_milli: item.quantity_milli,
@@ -1324,8 +1324,8 @@ impl TransferService {
         }
 
         let mut updated_transfer = transfer_head;
-        updated_transfer.destination_location_id = dest_location_id.to_string();
-        updated_transfer.destination_bin_id = dest_bin_id.map(ToString::to_string);
+        updated_transfer.destination_location_id = dest_location_id;
+        updated_transfer.destination_bin_id = dest_bin_id;
         updated_transfer.status = TransferStatus::Completed;
         updated_transfer.received_at = received_at;
         updated_transfer.received_by = input.user_id.clone();
