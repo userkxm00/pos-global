@@ -22,8 +22,8 @@ use crate::tests::test_helpers::{
 };
 use crate::transfer::{
     CancelTransferInput, CreateTransferInput, CreateTransferItemInput, DispatchTransferInput,
-    InstantIntraBranchTransferInput, ReceiveTransferInput, TransferError,
-    TransferService, TransferStatus, TransferType,
+    InstantIntraBranchTransferInput, ReceiveTransferInput, TransferError, TransferService,
+    TransferStatus, TransferType,
 };
 use crate::user::session::create_local_session;
 use rusqlite::{params, Connection, OptionalExtension};
