@@ -3,15 +3,19 @@
 // branch scope tenancy, DTO conversion, error mapping, and idempotency.
 
 use crate::commands::stock_ledger::{
-    get_stock_balance_impl, get_stock_movement_impl, list_location_inventory_impl,
-    list_stock_movements_impl, post_stock_movement_impl, LocationInventoryFilterRequest,
-    PostMovementRequest, StockMovementFilterRequest,
+    get_stock_balance, get_stock_balance_impl, get_stock_movement, get_stock_movement_impl,
+    list_location_inventory, list_location_inventory_impl, list_stock_movements,
+    list_stock_movements_impl, post_stock_movement, post_stock_movement_impl,
+    LocationInventoryFilterRequest, PostMovementRequest, StockMovementFilterRequest,
 };
+use crate::db::DbState;
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
 };
 use crate::user::session::create_local_session;
 use rusqlite::Connection;
+use std::sync::Mutex;
+use tauri::Manager;
 
 // =========================================================================
 // TEST FIXTURES & HELPERS
@@ -764,4 +768,82 @@ fn test_command_list_movements_with_filters_and_not_found() {
         get_stock_movement_impl(&conn, &f.admin_session_a, &f.branch_a, "nonexistent-mov-id")
             .unwrap();
     assert!(not_found.is_none());
+}
+
+#[tokio::test]
+async fn test_tauri_stock_ledger_command_wrappers_delegate_to_scoped_impls() {
+    let conn = setup_test_db();
+    let f = setup_command_fixtures(&conn);
+    let app = tauri::test::mock_app();
+    app.manage(DbState(Mutex::new(conn)));
+    let state = app.state::<DbState>();
+
+    let posted = post_stock_movement(
+        state.clone(),
+        f.manager_session_a.clone(),
+        PostMovementRequest {
+            branch_id: f.branch_a.clone(),
+            product_id: f.product_id.clone(),
+            variant_id: Some(f.variant_id.clone()),
+            location_id: f.location_id.clone(),
+            bin_id: Some(f.bin_id.clone()),
+            batch_id: None,
+            serial_id: None,
+            quantity_delta_milli: 5000,
+            reason: "opening_balance".to_string(),
+            source_type: None,
+            source_id: None,
+            idempotency_key: None,
+        },
+    )
+    .await
+    .expect("post wrapper should succeed");
+    assert_eq!(posted.quantity_delta_milli, 5000);
+
+    let balance = get_stock_balance(
+        state.clone(),
+        f.admin_session_a.clone(),
+        f.branch_a.clone(),
+        f.product_id.clone(),
+        Some(f.variant_id.clone()),
+    )
+    .await
+    .expect("balance wrapper should succeed");
+    assert_eq!(balance.aggregate_quantity_milli, 5000);
+    assert_eq!(balance.allocated_spatial_milli, 5000);
+    assert_eq!(balance.unallocated_milli, 0);
+
+    let locations = list_location_inventory(
+        state.clone(),
+        f.admin_session_a.clone(),
+        LocationInventoryFilterRequest {
+            branch_id: f.branch_a.clone(),
+            product_id: Some(f.product_id.clone()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("location inventory wrapper should succeed");
+    assert_eq!(locations.len(), 1);
+    assert_eq!(locations[0].quantity_milli, 5000);
+
+    let movements = list_stock_movements(
+        state.clone(),
+        f.admin_session_a.clone(),
+        StockMovementFilterRequest {
+            branch_id: f.branch_a.clone(),
+            product_id: Some(f.product_id.clone()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("movement list wrapper should succeed");
+    assert_eq!(movements.len(), 1);
+    assert_eq!(movements[0].id, posted.id);
+
+    let single = get_stock_movement(state, f.admin_session_a, f.branch_a, posted.id.clone())
+        .await
+        .expect("single movement wrapper should succeed")
+        .expect("posted movement should be found");
+    assert_eq!(single.id, posted.id);
 }
