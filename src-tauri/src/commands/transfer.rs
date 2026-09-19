@@ -159,35 +159,61 @@ pub fn create_stock_transfer_impl(
     TransferService::create_transfer(conn, &input).map_err(map_transfer_error)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferBranchScope {
+    Source,
+    Destination,
+}
+
+fn verify_scoped_transfer(
+    conn: &Connection,
+    session_id: &str,
+    transfer_id: &str,
+    scope: TransferBranchScope,
+) -> Result<crate::user::session::SessionContext, String> {
+    let session =
+        require_scoped_permission(conn, session_id, Permission::InventoryTransfer, None, None)
+            .map_err(|e| e.to_string())?;
+
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT source_branch_id, destination_branch_id FROM stock_transfers WHERE id = ?1",
+            params![transfer_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| format!("Database error: {e}"))?;
+
+    let Some((source_branch, destination_branch)) = row else {
+        return Err(map_transfer_error(TransferError::NotFound(format!(
+            "Transfer '{transfer_id}' not found"
+        ))));
+    };
+
+    let is_authorized = match scope {
+        TransferBranchScope::Source => source_branch == session.branch_id,
+        TransferBranchScope::Destination => destination_branch == session.branch_id,
+    };
+
+    if !is_authorized {
+        return Err("Scope mismatch: transfer is not accessible from session branch".to_string());
+    }
+
+    Ok(session)
+}
+
 /// Dispatches an inter-branch transfer with InventoryTransfer authorization scoped to source branch.
 pub fn dispatch_stock_transfer_impl(
     conn: &mut Connection,
     session_id: &str,
     request: DispatchStockTransferRequest,
 ) -> Result<StockTransfer, String> {
-    let source_branch_id: String = conn
-        .query_row(
-            "SELECT source_branch_id FROM stock_transfers WHERE id = ?1",
-            params![request.transfer_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| format!("Database error: {e}"))?
-        .ok_or_else(|| {
-            map_transfer_error(TransferError::NotFound(format!(
-                "Transfer '{}' not found",
-                request.transfer_id
-            )))
-        })?;
-
-    let session = require_scoped_permission(
+    let session = verify_scoped_transfer(
         conn,
         session_id,
-        Permission::InventoryTransfer,
-        None,
-        Some(&source_branch_id),
-    )
-    .map_err(|e| e.to_string())?;
+        &request.transfer_id,
+        TransferBranchScope::Source,
+    )?;
 
     let input = DispatchTransferInput {
         transfer_id: request.transfer_id,
@@ -204,29 +230,12 @@ pub fn receive_stock_transfer_impl(
     session_id: &str,
     request: ReceiveStockTransferRequest,
 ) -> Result<StockTransfer, String> {
-    let destination_branch_id: String = conn
-        .query_row(
-            "SELECT destination_branch_id FROM stock_transfers WHERE id = ?1",
-            params![request.transfer_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| format!("Database error: {e}"))?
-        .ok_or_else(|| {
-            map_transfer_error(TransferError::NotFound(format!(
-                "Transfer '{}' not found",
-                request.transfer_id
-            )))
-        })?;
-
-    let session = require_scoped_permission(
+    let session = verify_scoped_transfer(
         conn,
         session_id,
-        Permission::InventoryTransfer,
-        None,
-        Some(&destination_branch_id),
-    )
-    .map_err(|e| e.to_string())?;
+        &request.transfer_id,
+        TransferBranchScope::Destination,
+    )?;
 
     let input = ReceiveTransferInput {
         transfer_id: request.transfer_id,
@@ -245,29 +254,12 @@ pub fn cancel_stock_transfer_impl(
     session_id: &str,
     request: CancelStockTransferRequest,
 ) -> Result<StockTransfer, String> {
-    let source_branch_id: String = conn
-        .query_row(
-            "SELECT source_branch_id FROM stock_transfers WHERE id = ?1",
-            params![request.transfer_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| format!("Database error: {e}"))?
-        .ok_or_else(|| {
-            map_transfer_error(TransferError::NotFound(format!(
-                "Transfer '{}' not found",
-                request.transfer_id
-            )))
-        })?;
-
-    let session = require_scoped_permission(
+    let session = verify_scoped_transfer(
         conn,
         session_id,
-        Permission::InventoryTransfer,
-        None,
-        Some(&source_branch_id),
-    )
-    .map_err(|e| e.to_string())?;
+        &request.transfer_id,
+        TransferBranchScope::Source,
+    )?;
 
     let input = CancelTransferInput {
         transfer_id: request.transfer_id,
@@ -321,10 +313,9 @@ pub fn get_stock_transfer_impl(
 
     if let Some(ref t) = transfer {
         if t.source_branch_id != session.branch_id && t.destination_branch_id != session.branch_id {
-            return Err(format!(
-                "Scope mismatch: operation requires scope '{}' or '{}', but session has scope '{}'",
-                t.source_branch_id, t.destination_branch_id, session.branch_id
-            ));
+            return Err(
+                "Scope mismatch: transfer is not accessible from session branch".to_string(),
+            );
         }
     }
 

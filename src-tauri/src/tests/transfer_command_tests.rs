@@ -313,6 +313,14 @@ fn test_authorization_denial_branch_scope_mismatch() {
     };
     let err = dispatch_stock_transfer_impl(&mut conn, &f.admin_session_b, disp_req).unwrap_err();
     assert!(err.contains("Scope mismatch"), "Unexpected error: {err}");
+    assert!(
+        !err.contains(&f.branch_a),
+        "Leaked branch ID in error: {err}"
+    );
+    assert!(
+        !err.contains(&f.branch_b),
+        "Leaked branch ID in error: {err}"
+    );
 
     // Now dispatch properly from Branch A
     let disp_req_a = DispatchStockTransferRequest {
@@ -330,10 +338,26 @@ fn test_authorization_denial_branch_scope_mismatch() {
     };
     let err = receive_stock_transfer_impl(&mut conn, &f.admin_session_a, recv_req).unwrap_err();
     assert!(err.contains("Scope mismatch"), "Unexpected error: {err}");
+    assert!(
+        !err.contains(&f.branch_a),
+        "Leaked branch ID in error: {err}"
+    );
+    assert!(
+        !err.contains(&f.branch_b),
+        "Leaked branch ID in error: {err}"
+    );
 
     // 4. Get: Admin in Branch C (unrelated third branch) attempts to get transfer between A and B
     let err = get_stock_transfer_impl(&conn, &f.admin_session_c, &transfer.id).unwrap_err();
     assert!(err.contains("Scope mismatch"), "Unexpected error: {err}");
+    assert!(
+        !err.contains(&f.branch_a),
+        "Leaked branch ID in error: {err}"
+    );
+    assert!(
+        !err.contains(&f.branch_b),
+        "Leaked branch ID in error: {err}"
+    );
 
     // 5. List: Admin in Branch A attempts to list transfers with branch_id = Branch B
     let list_req = ListStockTransfersRequest {
@@ -347,6 +371,136 @@ fn test_authorization_denial_branch_scope_mismatch() {
     };
     let err = list_stock_transfers_impl(&conn, &f.admin_session_a, list_req).unwrap_err();
     assert!(err.contains("Scope mismatch"), "Unexpected error: {err}");
+}
+
+#[test]
+fn test_branch_scoped_lookup_security_and_leakage_prevention() {
+    let mut conn = setup_test_db();
+    let f = setup_command_fixtures(&mut conn);
+
+    // 1. Unknown transfer tests
+    let unknown_id = "nonexistent-transfer-9999";
+    let disp_unknown = DispatchStockTransferRequest {
+        transfer_id: unknown_id.to_string(),
+        idempotency_key: None,
+    };
+    let err =
+        dispatch_stock_transfer_impl(&mut conn, &f.admin_session_a, disp_unknown).unwrap_err();
+    assert!(
+        err.contains("Entity not found"),
+        "Expected NotFound, got: {err}"
+    );
+    assert!(!err.contains(&f.branch_a));
+    assert!(!err.contains(&f.branch_b));
+
+    let recv_unknown = ReceiveStockTransferRequest {
+        transfer_id: unknown_id.to_string(),
+        destination_location_id: None,
+        destination_bin_id: None,
+        idempotency_key: None,
+    };
+    let err = receive_stock_transfer_impl(&mut conn, &f.admin_session_b, recv_unknown).unwrap_err();
+    assert!(
+        err.contains("Entity not found"),
+        "Expected NotFound, got: {err}"
+    );
+    assert!(!err.contains(&f.branch_a));
+    assert!(!err.contains(&f.branch_b));
+
+    let cancel_unknown = CancelStockTransferRequest {
+        transfer_id: unknown_id.to_string(),
+    };
+    let err =
+        cancel_stock_transfer_impl(&mut conn, &f.admin_session_a, cancel_unknown).unwrap_err();
+    assert!(
+        err.contains("Entity not found"),
+        "Expected NotFound, got: {err}"
+    );
+    assert!(!err.contains(&f.branch_a));
+    assert!(!err.contains(&f.branch_b));
+
+    let get_unknown =
+        get_stock_transfer_impl(&conn, &f.admin_session_a, unknown_id).expect("get unknown");
+    assert!(get_unknown.is_none());
+
+    // 2. Create valid draft transfer originating at Branch A destined for Branch B
+    let create_req = CreateStockTransferRequest {
+        transfer_type: "inter_branch".to_string(),
+        source_branch_id: f.branch_a.clone(),
+        destination_branch_id: f.branch_b.clone(),
+        source_location_id: f.loc_a1.clone(),
+        destination_location_id: f.loc_b1.clone(),
+        source_bin_id: Some(f.bin_a1.clone()),
+        destination_bin_id: Some(f.bin_b1.clone()),
+        notes: Some("Security scoping test".into()),
+        items: vec![CreateTransferItemInput {
+            product_id: f.product_id.clone(),
+            variant_id: None,
+            batch_id: None,
+            serial_id: None,
+            quantity_milli: 1000,
+        }],
+        idempotency_key: None,
+    };
+    let draft = create_stock_transfer_impl(&mut conn, &f.admin_session_a, create_req)
+        .expect("created draft");
+
+    // 3. Out-of-scope branch actions must fail closed without leaking branch IDs
+    // Branch B tries to cancel draft belonging to Branch A
+    let cancel_other = CancelStockTransferRequest {
+        transfer_id: draft.id.clone(),
+    };
+    let err = cancel_stock_transfer_impl(&mut conn, &f.admin_session_b, cancel_other).unwrap_err();
+    assert!(
+        err.contains("Scope mismatch"),
+        "Expected scope mismatch, got: {err}"
+    );
+    assert!(!err.contains(&f.branch_a), "Leaked source branch ID: {err}");
+    assert!(!err.contains(&f.branch_b), "Leaked dest branch ID: {err}");
+
+    // Branch B tries to dispatch draft belonging to Branch A
+    let disp_other = DispatchStockTransferRequest {
+        transfer_id: draft.id.clone(),
+        idempotency_key: None,
+    };
+    let err = dispatch_stock_transfer_impl(&mut conn, &f.admin_session_b, disp_other).unwrap_err();
+    assert!(
+        err.contains("Scope mismatch"),
+        "Expected scope mismatch, got: {err}"
+    );
+    assert!(!err.contains(&f.branch_a), "Leaked source branch ID: {err}");
+    assert!(!err.contains(&f.branch_b), "Leaked dest branch ID: {err}");
+
+    // Branch C (unrelated) tries to get transfer
+    let err = get_stock_transfer_impl(&conn, &f.admin_session_c, &draft.id).unwrap_err();
+    assert!(
+        err.contains("Scope mismatch"),
+        "Expected scope mismatch, got: {err}"
+    );
+    assert!(!err.contains(&f.branch_a), "Leaked source branch ID: {err}");
+    assert!(!err.contains(&f.branch_b), "Leaked dest branch ID: {err}");
+
+    // 4. Authorized transfer behavior is preserved
+    // Branch A can read its own transfer
+    let transfer_a =
+        get_stock_transfer_impl(&conn, &f.admin_session_a, &draft.id).expect("read by source");
+    assert!(transfer_a.is_some());
+
+    // Branch B can read incoming transfer
+    let transfer_b =
+        get_stock_transfer_impl(&conn, &f.admin_session_b, &draft.id).expect("read by dest");
+    assert!(transfer_b.is_some());
+
+    // Branch A cancels its own draft transfer successfully
+    let cancelled = cancel_stock_transfer_impl(
+        &mut conn,
+        &f.admin_session_a,
+        CancelStockTransferRequest {
+            transfer_id: draft.id.clone(),
+        },
+    )
+    .expect("cancelled by source");
+    assert_eq!(cancelled.status, TransferStatus::Cancelled);
 }
 
 // =========================================================================

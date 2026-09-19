@@ -164,7 +164,7 @@ To prevent duplicate authorities or fragmented ledger logic:
     - Outbound: `in_stock -> transferred`
     - Inbound: `transferred -> in_stock`
     - Destination branch re-homing occurs inside the atomic receive transaction alongside destination location/bin assignment.
-  - This is explicitly recognized as a new narrow internal capability required by F2.12. (Do NOT implement the capability yet).
+  - This is explicitly recognized as a narrow internal capability required by F2.12.
 - Serials in `sold`, `defective`, `recalled`, or `disposed` status are strictly rejected from transfer dispatch.
 
 ---

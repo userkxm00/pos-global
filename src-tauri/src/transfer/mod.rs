@@ -343,17 +343,23 @@ fn check_idempotency(
     clean_key: &str,
     request_hash: &str,
 ) -> Result<Option<StockTransfer>, TransferError> {
-    let existing: Option<(Option<String>, Option<String>)> = tx
+    let existing: Option<(String, Option<String>, Option<String>)> = tx
         .query_row(
-            "SELECT request_hash, result_json FROM idempotency_keys WHERE key = ?1 AND operation = ?2",
-            params![clean_key, operation],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            "SELECT operation, request_hash, result_json FROM idempotency_keys WHERE key = ?1",
+            params![clean_key],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
 
-    let Some((stored_hash, result_json)) = existing else {
+    let Some((stored_op, stored_hash, result_json)) = existing else {
         return Ok(None);
     };
+
+    if stored_op != operation {
+        return Err(TransferError::IdempotencyConflict(format!(
+            "Idempotency key '{clean_key}' already used for different operation '{stored_op}' (attempted '{operation}')"
+        )));
+    }
 
     if stored_hash.as_deref() != Some(request_hash) {
         return Err(TransferError::IdempotencyConflict(format!(
@@ -717,6 +723,94 @@ fn map_transfer_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<(StockTransfer,
     Ok((transfer, id))
 }
 
+fn load_transfer_header(
+    conn: &Connection,
+    transfer_id: &str,
+) -> Result<StockTransfer, TransferError> {
+    let transfer_opt = conn
+        .query_row(
+            "SELECT id, transfer_number, transfer_type, source_branch_id, destination_branch_id,
+                    source_location_id, destination_location_id, source_bin_id, destination_bin_id,
+                    status, dispatched_at, dispatched_by, received_at, received_by, notes,
+                    created_at, updated_at
+             FROM stock_transfers WHERE id = ?1",
+            params![transfer_id],
+            map_transfer_row,
+        )
+        .optional()?;
+
+    transfer_opt
+        .map(|(t, _)| t)
+        .ok_or_else(|| TransferError::NotFound(format!("Transfer '{transfer_id}' not found")))
+}
+
+fn validate_and_dedup_items(
+    tx: &Transaction<'_>,
+    branch_id: &str,
+    items: &[CreateTransferItemInput],
+) -> Result<(), TransferError> {
+    let mut seen_serials = std::collections::HashSet::new();
+    for (idx, item) in items.iter().enumerate() {
+        if let Some(ref sid) = item.serial_id {
+            let trimmed_sid = sid.trim();
+            if !seen_serials.insert(trimmed_sid.to_string()) {
+                return Err(TransferError::Validation(format!(
+                    "Duplicate serial_id '{trimmed_sid}' in transfer items at index {idx}"
+                )));
+            }
+        }
+        validate_item_consistency(tx, branch_id, item, idx)?;
+    }
+    Ok(())
+}
+
+fn insert_transfer_item_record(
+    tx: &Transaction<'_>,
+    transfer_id: &str,
+    item: &CreateTransferItemInput,
+    received_quantity_milli: Option<i64>,
+) -> Result<StockTransferItem, rusqlite::Error> {
+    let item_id: String = tx.query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?;
+
+    tx.execute(
+        "INSERT INTO stock_transfer_items (
+            id, transfer_id, product_id, variant_id, batch_id, serial_id,
+            quantity_milli, received_quantity_milli, created_at
+         ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6,
+            ?7, ?8, datetime('now')
+         )",
+        params![
+            item_id,
+            transfer_id,
+            item.product_id,
+            item.variant_id,
+            item.batch_id,
+            item.serial_id,
+            item.quantity_milli,
+            received_quantity_milli,
+        ],
+    )?;
+
+    let item_created_at: String = tx.query_row(
+        "SELECT created_at FROM stock_transfer_items WHERE id = ?1",
+        params![item_id],
+        |r| r.get(0),
+    )?;
+
+    Ok(StockTransferItem {
+        id: item_id,
+        transfer_id: transfer_id.to_string(),
+        product_id: item.product_id.clone(),
+        variant_id: item.variant_id.clone(),
+        batch_id: item.batch_id.clone(),
+        serial_id: item.serial_id.clone(),
+        quantity_milli: item.quantity_milli,
+        received_quantity_milli,
+        created_at: item_created_at,
+    })
+}
+
 // =========================================================================
 // BATCH RESOLUTION / CONTINUITY ON RECEIPT
 // =========================================================================
@@ -808,6 +902,12 @@ impl TransferService {
         conn: &mut Connection,
         input: &CreateTransferInput,
     ) -> Result<StockTransfer, TransferError> {
+        if input.transfer_type == TransferType::IntraBranch {
+            return Err(TransferError::Validation(
+                "Intra-branch transfers cannot be created as drafts; use instant_intra_branch_transfer instead".into()
+            ));
+        }
+
         validate_topology(
             input.transfer_type,
             &input.source_branch_id,
@@ -816,7 +916,7 @@ impl TransferService {
 
         if input.items.is_empty() {
             return Err(TransferError::Validation(
-                "Transfer must contain at least one line item".into(),
+                "Transfer must contain at least one item".into(),
             ));
         }
 
@@ -860,19 +960,8 @@ impl TransferService {
             "Destination",
         )?;
 
-        // Validate each item and protect against duplicate serial_ids in the same payload
-        let mut seen_serials = std::collections::HashSet::new();
-        for (idx, item) in input.items.iter().enumerate() {
-            if let Some(ref sid) = item.serial_id {
-                let trimmed_sid = sid.trim();
-                if !seen_serials.insert(trimmed_sid.to_string()) {
-                    return Err(TransferError::Validation(format!(
-                        "Duplicate serial_id '{trimmed_sid}' in transfer items at index {idx}"
-                    )));
-                }
-            }
-            validate_item_consistency(&tx, &input.source_branch_id, item, idx)?;
-        }
+        // Validate items and serial uniqueness
+        validate_and_dedup_items(&tx, &input.source_branch_id, &input.items)?;
 
         let transfer_id: String =
             tx.query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?;
@@ -907,47 +996,9 @@ impl TransferService {
         )?;
 
         let mut persisted_items = Vec::with_capacity(input.items.len());
-
         for item in &input.items {
-            let item_id: String =
-                tx.query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?;
-
-            tx.execute(
-                "INSERT INTO stock_transfer_items (
-                    id, transfer_id, product_id, variant_id, batch_id, serial_id,
-                    quantity_milli, received_quantity_milli, created_at
-                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6,
-                    ?7, NULL, datetime('now')
-                 )",
-                params![
-                    item_id,
-                    transfer_id,
-                    item.product_id,
-                    item.variant_id,
-                    item.batch_id,
-                    item.serial_id,
-                    item.quantity_milli,
-                ],
-            )?;
-
-            let item_created_at: String = tx.query_row(
-                "SELECT created_at FROM stock_transfer_items WHERE id = ?1",
-                params![item_id],
-                |r| r.get(0),
-            )?;
-
-            persisted_items.push(StockTransferItem {
-                id: item_id,
-                transfer_id: transfer_id.clone(),
-                product_id: item.product_id.clone(),
-                variant_id: item.variant_id.clone(),
-                batch_id: item.batch_id.clone(),
-                serial_id: item.serial_id.clone(),
-                quantity_milli: item.quantity_milli,
-                received_quantity_milli: None,
-                created_at: item_created_at,
-            });
+            let record = insert_transfer_item_record(&tx, &transfer_id, item, None)?;
+            persisted_items.push(record);
         }
 
         let (created_at, updated_at): (String, String) = tx.query_row(
@@ -1016,32 +1067,13 @@ impl TransferService {
             }
         }
 
-        // Lock & fetch transfer
-        let transfer_opt = tx
-            .query_row(
-                "SELECT id, transfer_number, transfer_type, source_branch_id, destination_branch_id,
-                        source_location_id, destination_location_id, source_bin_id, destination_bin_id,
-                        status, dispatched_at, dispatched_by, received_at, received_by, notes,
-                        created_at, updated_at
-                 FROM stock_transfers WHERE id = ?1",
-                params![input.transfer_id],
-                map_transfer_row,
-            )
-            .optional()?;
-
-        let Some((transfer_head, _)) = transfer_opt else {
-            return Err(TransferError::NotFound(format!(
-                "Transfer '{}' not found",
-                input.transfer_id
-            )));
-        };
+        let transfer_head = load_transfer_header(&tx, &input.transfer_id)?;
 
         if transfer_head.transfer_type != TransferType::InterBranch {
             return Err(TransferError::InvalidStatusTransition {
                 current: transfer_head.status.as_str().into(),
                 attempted: "in_transit".into(),
-                reason: "Only inter_branch transfers can be dispatched into in_transit status"
-                    .into(),
+                reason: "Only inter-branch transfers can be dispatched".into(),
             });
         }
 
@@ -1053,32 +1085,7 @@ impl TransferService {
             });
         }
 
-        // Fetch items
-        let mut item_stmt = tx.prepare(
-            "SELECT id, transfer_id, product_id, variant_id, batch_id, serial_id,
-                    quantity_milli, received_quantity_milli, created_at
-             FROM stock_transfer_items WHERE transfer_id = ?1 ORDER BY created_at ASC",
-        )?;
-        let item_rows = item_stmt.query_map(params![input.transfer_id], |row| {
-            Ok(StockTransferItem {
-                id: row.get(0)?,
-                transfer_id: row.get(1)?,
-                product_id: row.get(2)?,
-                variant_id: row.get(3)?,
-                batch_id: row.get(4)?,
-                serial_id: row.get(5)?,
-                quantity_milli: row.get(6)?,
-                received_quantity_milli: row.get(7)?,
-                created_at: row.get(8)?,
-            })
-        })?;
-
-        let mut items = Vec::new();
-        for r in item_rows {
-            items.push(r?);
-        }
-        drop(item_stmt);
-
+        let items = load_transfer_items(&tx, &input.transfer_id)?;
         if items.is_empty() {
             return Err(TransferError::Validation(
                 "Cannot dispatch transfer with no line items".into(),
@@ -1174,32 +1181,21 @@ impl TransferService {
             }
         }
 
-        // Lock & fetch transfer
-        let transfer_opt = tx
-            .query_row(
-                "SELECT id, transfer_number, transfer_type, source_branch_id, destination_branch_id,
-                        source_location_id, destination_location_id, source_bin_id, destination_bin_id,
-                        status, dispatched_at, dispatched_by, received_at, received_by, notes,
-                        created_at, updated_at
-                 FROM stock_transfers WHERE id = ?1",
-                params![input.transfer_id],
-                map_transfer_row,
-            )
-            .optional()?;
-
-        let Some((transfer_head, _)) = transfer_opt else {
-            return Err(TransferError::NotFound(format!(
-                "Transfer '{}' not found",
-                input.transfer_id
-            )));
-        };
+        let transfer_head = load_transfer_header(&tx, &input.transfer_id)?;
 
         if transfer_head.status != TransferStatus::InTransit {
             return Err(TransferError::InvalidStatusTransition {
                 current: transfer_head.status.as_str().into(),
                 attempted: "completed".into(),
-                reason: "Only in_transit transfers can be received".into(),
+                reason: "Only in-transit transfers can be received".into(),
             });
+        }
+
+        let items = load_transfer_items(&tx, &input.transfer_id)?;
+        if items.is_empty() {
+            return Err(TransferError::Validation(
+                "Cannot receive transfer with no line items".into(),
+            ));
         }
 
         let dest_location_id = input
@@ -1225,38 +1221,6 @@ impl TransferService {
                 "UPDATE stock_transfers SET destination_location_id = ?1, destination_bin_id = ?2, updated_at = datetime('now') WHERE id = ?3",
                 params![&dest_location_id, &dest_bin_id, input.transfer_id],
             )?;
-        }
-
-        // Fetch items
-        let mut item_stmt = tx.prepare(
-            "SELECT id, transfer_id, product_id, variant_id, batch_id, serial_id,
-                    quantity_milli, received_quantity_milli, created_at
-             FROM stock_transfer_items WHERE transfer_id = ?1 ORDER BY created_at ASC",
-        )?;
-        let item_rows = item_stmt.query_map(params![input.transfer_id], |row| {
-            Ok(StockTransferItem {
-                id: row.get(0)?,
-                transfer_id: row.get(1)?,
-                product_id: row.get(2)?,
-                variant_id: row.get(3)?,
-                batch_id: row.get(4)?,
-                serial_id: row.get(5)?,
-                quantity_milli: row.get(6)?,
-                received_quantity_milli: row.get(7)?,
-                created_at: row.get(8)?,
-            })
-        })?;
-
-        let mut items = Vec::new();
-        for r in item_rows {
-            items.push(r?);
-        }
-        drop(item_stmt);
-
-        if items.is_empty() {
-            return Err(TransferError::Validation(
-                "Cannot receive transfer with no line items".into(),
-            ));
         }
 
         // Execute inbound ledger intake
@@ -1319,7 +1283,8 @@ impl TransferService {
         )?;
 
         // Update items in returned struct
-        for item in &mut items {
+        let mut updated_items = items;
+        for item in &mut updated_items {
             item.received_quantity_milli = Some(item.quantity_milli);
         }
 
@@ -1330,7 +1295,7 @@ impl TransferService {
         updated_transfer.received_at = received_at;
         updated_transfer.received_by = input.user_id.clone();
         updated_transfer.updated_at = updated_at;
-        updated_transfer.items = items;
+        updated_transfer.items = updated_items;
 
         if let Some(ref key) = input.idempotency_key {
             let clean_key = key.trim();
@@ -1477,19 +1442,8 @@ impl TransferService {
             "Destination",
         )?;
 
-        // Validate each item and protect against duplicate serial_ids in the same payload
-        let mut seen_serials = std::collections::HashSet::new();
-        for (idx, item) in input.items.iter().enumerate() {
-            if let Some(ref sid) = item.serial_id {
-                let trimmed_sid = sid.trim();
-                if !seen_serials.insert(trimmed_sid.to_string()) {
-                    return Err(TransferError::Validation(format!(
-                        "Duplicate serial_id '{trimmed_sid}' in transfer items at index {idx}"
-                    )));
-                }
-            }
-            validate_item_consistency(&tx, &input.branch_id, item, idx)?;
-        }
+        // Validate items and serial uniqueness
+        validate_and_dedup_items(&tx, &input.branch_id, &input.items)?;
 
         let transfer_id: String =
             tx.query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?;
@@ -1730,14 +1684,16 @@ impl TransferService {
 
         query.push_str(" ORDER BY created_at DESC");
 
-        let limit = filter.limit.unwrap_or(100).clamp(1, 1000);
-        params_vec.push(Box::new(limit));
-        query.push_str(&format!(" LIMIT ?{}", params_vec.len()));
-
-        if let Some(offset) = filter.offset {
-            params_vec.push(Box::new(offset.max(0)));
-            query.push_str(&format!(" OFFSET ?{}", params_vec.len()));
-        }
+        let page_limit = filter.limit.unwrap_or(100).clamp(1, 1000);
+        let page_offset = filter.offset.unwrap_or(0).max(0);
+        params_vec.push(Box::new(page_limit));
+        params_vec.push(Box::new(page_offset));
+        let num_params = params_vec.len();
+        query.push_str(&format!(
+            " LIMIT ?{} OFFSET ?{}",
+            num_params - 1,
+            num_params
+        ));
 
         let mut stmt = conn.prepare(&query)?;
         let rusqlite_params: Vec<&dyn rusqlite::ToSql> =

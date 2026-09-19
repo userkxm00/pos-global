@@ -28,6 +28,8 @@ use crate::transfer::{
 use crate::user::session::create_local_session;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::str::FromStr;
+use std::sync::{Arc, Barrier};
+use std::thread;
 
 // =========================================================================
 // TEST FIXTURES & HELPERS
@@ -2169,12 +2171,26 @@ fn test_receive_rollback_on_failure() {
 
 #[test]
 fn test_concurrent_double_dispatch_single_winner() {
-    let mut conn = setup_test_db();
-    let f = setup_transfer_fixtures(&conn);
+    let db_path = std::env::temp_dir().join(format!(
+        "pos_test_transfer_race_{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+
+    // 1. Initial file-backed SQLite database with WAL mode and busy timeout
+    let mut conn1 = Connection::open(&db_path).expect("open file db conn1");
+    conn1
+        .pragma_update(None, "journal_mode", "WAL")
+        .expect("enable WAL");
+    conn1
+        .pragma_update(None, "busy_timeout", 5000)
+        .expect("set busy_timeout");
+    crate::db::init_database(&conn1).expect("init db");
+
+    let f = setup_transfer_fixtures(&conn1);
 
     // Seed exactly enough stock for 1 transfer (10,000 milli)
     seed_stock(
-        &mut conn,
+        &mut conn1,
         &f.branch_a,
         &f.product_id,
         Some(&f.variant_id),
@@ -2186,7 +2202,7 @@ fn test_concurrent_double_dispatch_single_winner() {
     );
 
     let transfer = TransferService::create_transfer(
-        &mut conn,
+        &mut conn1,
         &CreateTransferInput {
             transfer_type: TransferType::InterBranch,
             source_branch_id: f.branch_a.clone(),
@@ -2211,46 +2227,262 @@ fn test_concurrent_double_dispatch_single_winner() {
 
     let transfer_id = transfer.id;
 
-    // First dispatch succeeds
-    let first = TransferService::dispatch_transfer(
-        &mut conn,
-        &DispatchTransferInput {
-            transfer_id: transfer_id.clone(),
-            user_id: Some(f.user_id.clone()),
-            idempotency_key: None,
-        },
-    );
-    assert!(first.is_ok());
+    // 2. Open independent connection for second thread
+    let mut conn2 = Connection::open(&db_path).expect("open file db conn2");
+    conn2
+        .pragma_update(None, "journal_mode", "WAL")
+        .expect("enable WAL");
+    conn2
+        .pragma_update(None, "busy_timeout", 5000)
+        .expect("set busy_timeout");
 
-    // Competing concurrent dispatch attempt against the same transfer fails closed
-    let second = TransferService::dispatch_transfer(
-        &mut conn,
-        &DispatchTransferInput {
-            transfer_id: transfer_id.clone(),
-            user_id: Some(f.user_id.clone()),
-            idempotency_key: None,
-        },
-    );
-    assert!(second.is_err());
-    assert!(matches!(
-        second.unwrap_err(),
-        TransferError::InvalidStatusTransition { .. }
-    ));
+    // 3. Concurrently race both dispatch attempts using a synchronization barrier
+    let barrier = Arc::new(Barrier::new(2));
+    let b1 = Arc::clone(&barrier);
+    let b2 = Arc::clone(&barrier);
 
-    // Source inventory deducted exactly once (10,000 -> 0), no double deduction, no negative stock
-    assert_eq!(get_aggregate_stock(&conn, &f.branch_a, &f.product_id), 0);
+    let tid1 = transfer_id.clone();
+    let uid1 = f.user_id.clone();
+    let h1 = thread::spawn(move || {
+        b1.wait();
+        TransferService::dispatch_transfer(
+            &mut conn1,
+            &DispatchTransferInput {
+                transfer_id: tid1,
+                user_id: Some(uid1),
+                idempotency_key: None,
+            },
+        )
+    });
+
+    let tid2 = transfer_id.clone();
+    let uid2 = f.user_id.clone();
+    let h2 = thread::spawn(move || {
+        b2.wait();
+        TransferService::dispatch_transfer(
+            &mut conn2,
+            &DispatchTransferInput {
+                transfer_id: tid2,
+                user_id: Some(uid2),
+                idempotency_key: None,
+            },
+        )
+    });
+
+    let res1 = h1.join().expect("thread 1 panic");
+    let res2 = h2.join().expect("thread 2 panic");
+
+    // 4. Exactly one succeeds, exactly one fails
+    let (winner, loser) = match (res1, res2) {
+        (Ok(w), Err(l)) => (w, l),
+        (Err(l), Ok(w)) => (w, l),
+        (Ok(_), Ok(_)) => panic!("Race violation: both dispatches succeeded!"),
+        (Err(e1), Err(e2)) => panic!("Both dispatches failed: e1={e1:?}, e2={e2:?}"),
+    };
+
+    assert_eq!(winner.status, TransferStatus::InTransit);
+    match loser {
+        TransferError::InvalidStatusTransition { .. } | TransferError::Database(_) => {}
+        other => panic!("Unexpected loser error: {other:?}"),
+    }
+
+    // 5. Verification on fresh connection:
+    let verif_conn = Connection::open(&db_path).expect("open verif conn");
+
+    // Final state = in_transit
+    let final_status: String = verif_conn
+        .query_row(
+            "SELECT status FROM stock_transfers WHERE id = ?1",
+            params![transfer_id],
+            |r| r.get(0),
+        )
+        .expect("final status");
+    assert_eq!(final_status, "in_transit");
+
+    // Exactly one outbound stock deduction (10,000 -> 0), no negative stock
     assert_eq!(
-        get_spatial_stock(&conn, &f.branch_a, &f.loc_a1, &f.product_id),
+        get_aggregate_stock(&verif_conn, &f.branch_a, &f.product_id),
+        0
+    );
+    assert_eq!(
+        get_spatial_stock(&verif_conn, &f.branch_a, &f.loc_a1, &f.product_id),
         0
     );
 
     // Exactly 1 outbound ledger movement exists
-    let movements: i64 = conn
+    let movements: i64 = verif_conn
         .query_row(
             "SELECT COUNT(*) FROM stock_movements WHERE source_id = ?1",
             params![transfer_id],
             |r| r.get(0),
         )
-        .expect("movements");
+        .expect("movements count");
     assert_eq!(movements, 1);
+
+    drop(verif_conn);
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(format!("{}-wal", db_path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", db_path.display()));
+}
+
+#[test]
+fn test_idempotency_global_key_cross_operation_and_conflict() {
+    let mut conn = setup_test_db();
+    let f = setup_transfer_fixtures(&conn);
+
+    seed_stock(
+        &mut conn,
+        &f.branch_a,
+        &f.product_id,
+        Some(&f.variant_id),
+        &f.loc_a1,
+        Some(&f.bin_a1),
+        None,
+        None,
+        50000,
+    );
+
+    let key = "global-shared-idempotency-key-01";
+
+    let mut create_input = CreateTransferInput {
+        transfer_type: TransferType::InterBranch,
+        source_branch_id: f.branch_a.clone(),
+        destination_branch_id: f.branch_b.clone(),
+        source_location_id: f.loc_a1.clone(),
+        destination_location_id: f.loc_b1.clone(),
+        source_bin_id: None,
+        destination_bin_id: None,
+        notes: Some("Initial notes".into()),
+        items: vec![CreateTransferItemInput {
+            product_id: f.product_id.clone(),
+            variant_id: Some(f.variant_id.clone()),
+            batch_id: None,
+            serial_id: None,
+            quantity_milli: 5000,
+        }],
+        user_id: Some(f.user_id.clone()),
+        idempotency_key: Some(key.into()),
+    };
+
+    // 1. Initial execution succeeds
+    let first = TransferService::create_transfer(&mut conn, &create_input).expect("first create");
+
+    // 2. Same key + same operation + same payload -> replay cached response
+    let replay = TransferService::create_transfer(&mut conn, &create_input).expect("replay create");
+    assert_eq!(first.id, replay.id);
+    assert_eq!(first.transfer_number, replay.transfer_number);
+
+    // 3. Same key + same operation + different payload -> IdempotencyConflict
+    create_input.notes = Some("Tampered notes".into());
+    let diff_payload_err = TransferService::create_transfer(&mut conn, &create_input).unwrap_err();
+    assert!(matches!(
+        diff_payload_err,
+        TransferError::IdempotencyConflict(_)
+    ));
+
+    // 4. Same key + different operation -> IdempotencyConflict
+    let dispatch_input = DispatchTransferInput {
+        transfer_id: first.id.clone(),
+        user_id: Some(f.user_id.clone()),
+        idempotency_key: Some(key.into()),
+    };
+    let diff_op_err = TransferService::dispatch_transfer(&mut conn, &dispatch_input).unwrap_err();
+    assert!(matches!(diff_op_err, TransferError::IdempotencyConflict(_)));
+}
+
+#[test]
+fn test_create_transfer_rejects_intra_branch_draft() {
+    let mut conn = setup_test_db();
+    let f = setup_transfer_fixtures(&conn);
+
+    seed_stock(
+        &mut conn,
+        &f.branch_a,
+        &f.product_id,
+        Some(&f.variant_id),
+        &f.loc_a1,
+        Some(&f.bin_a1),
+        None,
+        None,
+        20000,
+    );
+
+    // 1. Attempting to create an intra-branch transfer as a draft must be rejected
+    let intra_create_input = CreateTransferInput {
+        transfer_type: TransferType::IntraBranch,
+        source_branch_id: f.branch_a.clone(),
+        destination_branch_id: f.branch_a.clone(),
+        source_location_id: f.loc_a1.clone(),
+        destination_location_id: f.loc_a2.clone(),
+        source_bin_id: Some(f.bin_a1.clone()),
+        destination_bin_id: Some(f.bin_a2.clone()),
+        notes: Some("Invalid draft intra-branch".into()),
+        items: vec![CreateTransferItemInput {
+            product_id: f.product_id.clone(),
+            variant_id: Some(f.variant_id.clone()),
+            batch_id: None,
+            serial_id: None,
+            quantity_milli: 5000,
+        }],
+        user_id: Some(f.user_id.clone()),
+        idempotency_key: None,
+    };
+
+    let err = TransferService::create_transfer(&mut conn, &intra_create_input).unwrap_err();
+    match err {
+        TransferError::Validation(msg) => {
+            assert!(
+                msg.contains("instant_intra_branch_transfer"),
+                "Expected message directing caller to instant_intra_branch_transfer, got: {msg}"
+            );
+        }
+        other => panic!("Expected TransferError::Validation, got: {other:?}"),
+    }
+
+    // 2. Inter-branch creation remains completely valid
+    let inter_create_input = CreateTransferInput {
+        transfer_type: TransferType::InterBranch,
+        source_branch_id: f.branch_a.clone(),
+        destination_branch_id: f.branch_b.clone(),
+        source_location_id: f.loc_a1.clone(),
+        destination_location_id: f.loc_b1.clone(),
+        source_bin_id: Some(f.bin_a1.clone()),
+        destination_bin_id: Some(f.bin_b1.clone()),
+        notes: Some("Valid inter-branch draft".into()),
+        items: vec![CreateTransferItemInput {
+            product_id: f.product_id.clone(),
+            variant_id: Some(f.variant_id.clone()),
+            batch_id: None,
+            serial_id: None,
+            quantity_milli: 5000,
+        }],
+        user_id: Some(f.user_id.clone()),
+        idempotency_key: None,
+    };
+    let inter_transfer = TransferService::create_transfer(&mut conn, &inter_create_input)
+        .expect("inter-branch draft succeeds");
+    assert_eq!(inter_transfer.status, TransferStatus::Draft);
+
+    // 3. Instant intra-branch operation remains completely valid
+    let instant_input = InstantIntraBranchTransferInput {
+        branch_id: f.branch_a.clone(),
+        source_location_id: f.loc_a1.clone(),
+        destination_location_id: f.loc_a2.clone(),
+        source_bin_id: Some(f.bin_a1.clone()),
+        destination_bin_id: Some(f.bin_a2.clone()),
+        notes: Some("Valid instant intra-branch".into()),
+        items: vec![CreateTransferItemInput {
+            product_id: f.product_id.clone(),
+            variant_id: Some(f.variant_id.clone()),
+            batch_id: None,
+            serial_id: None,
+            quantity_milli: 5000,
+        }],
+        user_id: Some(f.user_id.clone()),
+        idempotency_key: None,
+    };
+    let instant_transfer =
+        TransferService::instant_intra_branch_transfer(&mut conn, &instant_input)
+            .expect("instant intra-branch succeeds");
+    assert_eq!(instant_transfer.status, TransferStatus::Completed);
 }
