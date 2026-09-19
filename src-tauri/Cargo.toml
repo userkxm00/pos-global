@@ -22,6 +22,11 @@ tokio = { version = "1", features = ["full"] }
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 
+[dev-dependencies]
+# Enables Tauri's mock runtime only for tests that exercise the real IPC command wrappers.
+# No production dependency/features are added by this test-only capability.
+tauri = { version = "2", features = ["test"] }
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]
 
