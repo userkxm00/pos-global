@@ -938,12 +938,8 @@ async fn test_tauri_transfer_command_wrappers_delegate_to_scoped_impls() {
     .expect("create wrapper should succeed");
     assert_eq!(created.status, TransferStatus::Draft);
 
-    let fetched = get_stock_transfer(
-        state.clone(),
-        f.admin_session_a.clone(),
-        created.id.clone(),
-    )
-    .await
+    let fetched =
+        get_stock_transfer(state.clone(), f.admin_session_a.clone(), created.id.clone()).await
     .expect("get wrapper should succeed")
     .expect("created transfer should exist");
     assert_eq!(fetched.id, created.id);
