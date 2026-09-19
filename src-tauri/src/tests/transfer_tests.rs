@@ -2483,7 +2483,6 @@ fn test_create_transfer_rejects_intra_branch_draft() {
     assert_eq!(instant_transfer.status, TransferStatus::Completed);
 }
 
-
 #[test]
 fn test_transfer_value_objects_and_error_conversions_cover_edge_paths() {
     assert_eq!(TransferType::IntraBranch.as_str(), "intra_branch");
@@ -2564,7 +2563,10 @@ fn test_transfer_value_objects_and_error_conversions_cover_edge_paths() {
     ];
     for error in explicit_mappings {
         let mapped: TransferError = error.into();
-        assert!(!matches!(mapped, TransferError::InvalidStatusTransition { .. }));
+        assert!(!matches!(
+            mapped,
+            TransferError::InvalidStatusTransition { .. }
+        ));
     }
 
     for error in [
