@@ -22,8 +22,8 @@ use crate::tests::test_helpers::{
 };
 use crate::transfer::{
     CancelTransferInput, CreateTransferInput, CreateTransferItemInput, DispatchTransferInput,
-    InstantIntraBranchTransferInput, ReceiveTransferInput, TransferError, TransferService,
-    TransferStatus, TransferType,
+    InstantIntraBranchTransferInput, ReceiveTransferInput, TransferError, TransferFilter,
+    TransferService, TransferStatus, TransferType,
 };
 use crate::user::session::create_local_session;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -2481,4 +2481,208 @@ fn test_create_transfer_rejects_intra_branch_draft() {
         TransferService::instant_intra_branch_transfer(&mut conn, &instant_input)
             .expect("instant intra-branch succeeds");
     assert_eq!(instant_transfer.status, TransferStatus::Completed);
+}
+
+#[test]
+fn test_transfer_value_objects_and_error_conversions_cover_edge_paths() {
+    assert_eq!(TransferType::IntraBranch.as_str(), "intra_branch");
+    assert_eq!(TransferType::InterBranch.as_str(), "inter_branch");
+    assert_eq!(
+        TransferType::from_str("  INTER_BRANCH ").expect("parse transfer type"),
+        TransferType::InterBranch
+    );
+    assert!(matches!(
+        TransferType::from_str("unsupported"),
+        Err(TransferError::Validation(_))
+    ));
+
+    assert_eq!(TransferStatus::Draft.as_str(), "draft");
+    assert_eq!(TransferStatus::Completed.as_str(), "completed");
+    assert!(!TransferStatus::Draft.is_terminal());
+    assert!(TransferStatus::Completed.is_terminal());
+    assert!(TransferStatus::Cancelled.is_terminal());
+    assert_eq!(
+        TransferStatus::from_str(" cancelled ").expect("parse status"),
+        TransferStatus::Cancelled
+    );
+    assert!(matches!(
+        TransferStatus::from_str("broken"),
+        Err(TransferError::Validation(_))
+    ));
+
+    let display_cases = [
+        TransferError::Validation("validation".into()),
+        TransferError::NotFound("missing".into()),
+        TransferError::TopologyMismatch("topology".into()),
+        TransferError::NoOpRelocation("noop".into()),
+        TransferError::InvalidLocation("location".into()),
+        TransferError::InvalidBin("bin".into()),
+        TransferError::BranchMismatch("branch".into()),
+        TransferError::VariantMismatch("variant".into()),
+        TransferError::InsufficientStock {
+            product_id: "p".into(),
+            requested_milli: 1000,
+            available_milli: 500,
+        },
+        TransferError::InvalidStatusTransition {
+            current: "draft".into(),
+            attempted: "cancelled".into(),
+            reason: "test".into(),
+        },
+        TransferError::InvalidBatch("batch".into()),
+        TransferError::InvalidBatchStatus("batch status".into()),
+        TransferError::InvalidSerial("serial".into()),
+        TransferError::InvalidSerialStatus("serial status".into()),
+        TransferError::IdempotencyConflict("idem".into()),
+        TransferError::Unauthorized("unauthorized".into()),
+        TransferError::Database("database".into()),
+    ];
+    for error in display_cases {
+        let rendered = error.to_string();
+        assert!(!rendered.is_empty());
+    }
+
+    let mapped: TransferError = StockLedgerError::InsufficientStock {
+        requested_milli: 1000,
+        available_milli: 500,
+    }
+    .into();
+    assert!(matches!(mapped, TransferError::InsufficientStock { .. }));
+
+    let explicit_mappings = [
+        StockLedgerError::BranchMismatch("branch".into()),
+        StockLedgerError::VariantMismatch("variant".into()),
+        StockLedgerError::InvalidLocation("location".into()),
+        StockLedgerError::InvalidBin("bin".into()),
+        StockLedgerError::InvalidBatch("batch".into()),
+        StockLedgerError::InvalidSerial("serial".into()),
+        StockLedgerError::IdempotencyConflict("idem".into()),
+        StockLedgerError::Validation("validation".into()),
+        StockLedgerError::NotFound("missing".into()),
+        StockLedgerError::Database("database".into()),
+    ];
+    for error in explicit_mappings {
+        let mapped: TransferError = error.into();
+        assert!(!matches!(
+            mapped,
+            TransferError::InvalidStatusTransition { .. }
+        ));
+    }
+
+    for error in [
+        StockLedgerError::InvalidReason("reason".into()),
+        StockLedgerError::InvalidQuantity("quantity".into()),
+    ] {
+        let mapped: TransferError = error.into();
+        assert!(matches!(mapped, TransferError::Database(_)));
+    }
+
+    let sqlite_error: TransferError = rusqlite::Error::InvalidQuery.into();
+    assert!(matches!(sqlite_error, TransferError::Database(_)));
+
+    let json_error: TransferError = serde_json::from_str::<serde_json::Value>("{")
+        .expect_err("invalid json must fail")
+        .into();
+    assert!(matches!(json_error, TransferError::Database(_)));
+}
+
+#[test]
+fn test_transfer_topology_validation_and_list_filter_branches() {
+    let mut conn = setup_test_db();
+    let f = setup_transfer_fixtures(&conn);
+
+    let empty_source = CreateTransferInput {
+        transfer_type: TransferType::InterBranch,
+        source_branch_id: String::new(),
+        destination_branch_id: f.branch_b.clone(),
+        source_location_id: f.loc_a1.clone(),
+        destination_location_id: f.loc_b1.clone(),
+        source_bin_id: Some(f.bin_a1.clone()),
+        destination_bin_id: Some(f.bin_b1.clone()),
+        notes: None,
+        items: vec![CreateTransferItemInput {
+            product_id: f.product_id.clone(),
+            variant_id: Some(f.variant_id.clone()),
+            batch_id: None,
+            serial_id: None,
+            quantity_milli: 1000,
+        }],
+        user_id: Some(f.user_id.clone()),
+        idempotency_key: None,
+    };
+    assert!(matches!(
+        TransferService::create_transfer(&mut conn, &empty_source),
+        Err(TransferError::Validation(_))
+    ));
+
+    let empty_destination = CreateTransferInput {
+        source_branch_id: f.branch_a.clone(),
+        destination_branch_id: String::new(),
+        ..empty_source.clone()
+    };
+    assert!(matches!(
+        TransferService::create_transfer(&mut conn, &empty_destination),
+        Err(TransferError::Validation(_))
+    ));
+
+    let intra_wrong_branches = CreateTransferInput {
+        transfer_type: TransferType::IntraBranch,
+        source_branch_id: f.branch_a.clone(),
+        destination_branch_id: f.branch_b.clone(),
+        source_location_id: f.loc_a1.clone(),
+        destination_location_id: f.loc_a2.clone(),
+        source_bin_id: Some(f.bin_a1.clone()),
+        destination_bin_id: Some(f.bin_a2.clone()),
+        notes: None,
+        items: empty_destination.items.clone(),
+        user_id: Some(f.user_id.clone()),
+        idempotency_key: None,
+    };
+    assert!(matches!(
+        TransferService::create_transfer(&mut conn, &intra_wrong_branches),
+        Err(TransferError::TopologyMismatch(_))
+    ));
+
+    seed_stock(
+        &mut conn,
+        &f.branch_a,
+        &f.product_id,
+        Some(&f.variant_id),
+        &f.loc_a1,
+        Some(&f.bin_a1),
+        None,
+        None,
+        5000,
+    );
+
+    let create_input = CreateTransferInput {
+        transfer_type: TransferType::InterBranch,
+        source_branch_id: f.branch_a.clone(),
+        destination_branch_id: f.branch_b.clone(),
+        source_location_id: f.loc_a1.clone(),
+        destination_location_id: f.loc_b1.clone(),
+        source_bin_id: Some(f.bin_a1.clone()),
+        destination_bin_id: Some(f.bin_b1.clone()),
+        notes: Some("list filter coverage".into()),
+        items: empty_destination.items.clone(),
+        user_id: Some(f.user_id.clone()),
+        idempotency_key: None,
+    };
+    let created = TransferService::create_transfer(&mut conn, &create_input)
+        .expect("inter-branch transfer for list filter coverage");
+
+    let filtered = TransferService::list_transfers(
+        &conn,
+        &TransferFilter {
+            branch_id: Some(f.branch_a.clone()),
+            source_branch_id: Some(f.branch_a.clone()),
+            destination_branch_id: Some(f.branch_b.clone()),
+            transfer_type: Some(TransferType::InterBranch),
+            status: Some(TransferStatus::Draft),
+            limit: Some(-10),
+            offset: Some(-5),
+        },
+    )
+    .expect("filtered transfers should load");
+    assert!(filtered.iter().any(|t| t.id == created.id));
 }
