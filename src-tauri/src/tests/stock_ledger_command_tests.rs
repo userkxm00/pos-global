@@ -772,7 +772,7 @@ fn test_command_list_movements_with_filters_and_not_found() {
 
 #[tokio::test]
 async fn test_tauri_stock_ledger_command_wrappers_delegate_to_scoped_impls() {
-    let mut conn = setup_test_db();
+    let conn = setup_test_db();
     let f = setup_command_fixtures(&conn);
     let app = tauri::test::mock_app();
     app.manage(DbState(Mutex::new(conn)));
