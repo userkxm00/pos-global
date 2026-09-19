@@ -939,8 +939,8 @@ async fn test_tauri_transfer_command_wrappers_delegate_to_scoped_impls() {
 
     let fetched = get_stock_transfer(state.clone(), f.admin_session_a.clone(), created.id.clone())
         .await
-    .expect("get wrapper should succeed")
-    .expect("created transfer should exist");
+        .expect("get wrapper should succeed")
+        .expect("created transfer should exist");
     assert_eq!(fetched.id, created.id);
 
     let listed = list_stock_transfers(
