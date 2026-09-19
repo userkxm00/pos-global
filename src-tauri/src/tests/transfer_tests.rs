@@ -1218,13 +1218,13 @@ fn test_validation_failures_topology_and_locations() {
     .unwrap_err();
     assert!(matches!(err_zero_qty, TransferError::Validation(_)));
 
-    // 2. Intra-branch topology mismatch (different branches)
+    // 2. Inter-branch topology mismatch (same branch for source and destination)
     let err_topo = TransferService::create_transfer(
         &mut conn,
         &CreateTransferInput {
-            transfer_type: TransferType::IntraBranch,
+            transfer_type: TransferType::InterBranch,
             source_branch_id: f.branch_a.clone(),
-            destination_branch_id: f.branch_b.clone(), // Different branches in intra_branch!
+            destination_branch_id: f.branch_a.clone(), // Same branch in inter_branch!
             source_location_id: f.loc_a1.clone(),
             destination_location_id: f.loc_b1.clone(),
             source_bin_id: None,
@@ -1245,12 +1245,10 @@ fn test_validation_failures_topology_and_locations() {
     assert!(matches!(err_topo, TransferError::TopologyMismatch(_)));
 
     // 3. Same location + same bin no-op
-    let err_noop = TransferService::create_transfer(
+    let err_noop = TransferService::instant_intra_branch_transfer(
         &mut conn,
-        &CreateTransferInput {
-            transfer_type: TransferType::IntraBranch,
-            source_branch_id: f.branch_a.clone(),
-            destination_branch_id: f.branch_a.clone(),
+        &InstantIntraBranchTransferInput {
+            branch_id: f.branch_a.clone(),
             source_location_id: f.loc_a1.clone(),
             destination_location_id: f.loc_a1.clone(), // Same location!
             source_bin_id: Some(f.bin_a1.clone()),
@@ -1271,12 +1269,10 @@ fn test_validation_failures_topology_and_locations() {
     assert!(matches!(err_noop, TransferError::NoOpRelocation(_)));
 
     // 4. Same location + both bins NULL no-op
-    let err_noop_null_bins = TransferService::create_transfer(
+    let err_noop_null_bins = TransferService::instant_intra_branch_transfer(
         &mut conn,
-        &CreateTransferInput {
-            transfer_type: TransferType::IntraBranch,
-            source_branch_id: f.branch_a.clone(),
-            destination_branch_id: f.branch_a.clone(),
+        &InstantIntraBranchTransferInput {
+            branch_id: f.branch_a.clone(),
             source_location_id: f.loc_a1.clone(),
             destination_location_id: f.loc_a1.clone(), // Same location
             source_bin_id: None,
