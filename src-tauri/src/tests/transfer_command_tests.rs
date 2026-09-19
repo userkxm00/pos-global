@@ -903,7 +903,6 @@ fn test_command_map_transfer_error_all_variants() {
     }
 }
 
-
 #[tokio::test]
 async fn test_tauri_transfer_command_wrappers_delegate_to_scoped_impls() {
     let mut conn = setup_test_db();
