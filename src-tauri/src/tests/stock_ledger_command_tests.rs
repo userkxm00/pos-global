@@ -841,14 +841,9 @@ async fn test_tauri_stock_ledger_command_wrappers_delegate_to_scoped_impls() {
     assert_eq!(movements.len(), 1);
     assert_eq!(movements[0].id, posted.id);
 
-    let single = get_stock_movement(
-        state,
-        f.admin_session_a,
-        f.branch_a,
-        posted.id.clone(),
-    )
-    .await
-    .expect("single movement wrapper should succeed")
-    .expect("posted movement should be found");
+    let single = get_stock_movement(state, f.admin_session_a, f.branch_a, posted.id.clone())
+        .await
+        .expect("single movement wrapper should succeed")
+        .expect("posted movement should be found");
     assert_eq!(single.id, posted.id);
 }
