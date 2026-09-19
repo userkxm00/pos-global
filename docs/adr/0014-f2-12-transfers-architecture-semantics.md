@@ -12,8 +12,8 @@ Milestones `F2.01` through `F2.11` established the catalog, units, matrix varian
 Prior to milestone `F2.12`:
 1. Inventory balances were confined to static physical locations and bins within individual branches.
 2. The system lacked transfer document structures to initiate, authorize, dispatch, track, and receive stock moving between locations or across branches.
-3. [ADR-0012](file:///c:/Users/user0/Desktop/pos%20global/pos-global/docs/adr/0012-f2-10-locations-bins-architecture-semantics.md#L306) explicitly deferred inter-branch and intra-branch inventory transfers, transit status, and virtual in-transit locations to `F2.12 Transfers`.
-4. [ADR-0013](file:///c:/Users/user0/Desktop/pos%20global/pos-global/docs/adr/0013-f2-11-stock-ledger-spatial-balances-architecture-semantics.md#L239) explicitly deferred transfer workflows to `F2.12 Transfers` and restricted write mutations in `post_stock_movement` to adjustment primitives (`opening_balance`, `adjustment`, `damage`, `loss`), while defining `StockMovementReason::Transfer` as a system reason.
+3. [ADR-0012](./0012-f2-10-locations-bins-architecture-semantics.md#L306) explicitly deferred inter-branch and intra-branch inventory transfers, transit status, and virtual in-transit locations to `F2.12 Transfers`.
+4. [ADR-0013](./0013-f2-11-stock-ledger-spatial-balances-architecture-semantics.md#L239) explicitly deferred transfer workflows to `F2.12 Transfers` and restricted write mutations in `post_stock_movement` to adjustment primitives (`opening_balance`, `adjustment`, `damage`, `loss`), while defining `StockMovementReason::Transfer` as a system reason.
 
 This document formalizes the authoritative architecture, data models, state machines, mutation authorities, transaction boundaries, and invariants for milestone **F2.12 — Transfers**.
 
@@ -22,18 +22,18 @@ This document formalizes the authoritative architecture, data models, state mach
 ## 2. Separation of Architectural Concerns
 
 ### A. Authoritative Existing Facts
-1. **Ledger Mutation Authority ([ADR-0013](file:///c:/Users/user0/Desktop/pos%20global/pos-global/docs/adr/0013-f2-11-stock-ledger-spatial-balances-architecture-semantics.md)):**
+1. **Ledger Mutation Authority ([ADR-0013](./0013-f2-11-stock-ledger-spatial-balances-architecture-semantics.md)):**
    - `StockLedgerService` (`src-tauri/src/stock_ledger/mod.rs`) is the sole authority for quantity mutations across `inventory` (aggregate) and `location_inventory` (spatial).
    - Raw SQL updates to inventory balance tables are strictly prohibited.
    - `stock_movements` is append-only and enforced immutable via database triggers `trg_stock_movements_immutable_update` and `trg_stock_movements_immutable_delete`.
-2. **Physical Topography ([ADR-0012](file:///c:/Users/user0/Desktop/pos%20global/pos-global/docs/adr/0012-f2-10-locations-bins-architecture-semantics.md), `019_locations_bins.sql`):**
+2. **Physical Topography ([ADR-0012](./0012-f2-10-locations-bins-architecture-semantics.md), `019_locations_bins.sql`):**
    - Locations are physically bound to branches (`branch_id`, `id`). Bins are physically bound to locations (`location_id`, `id`).
    - Composite foreign keys enforce strict same-branch and same-location relational hierarchy.
-3. **Serial Lifecycle State Machine ([ADR-0010](file:///c:/Users/user0/Desktop/pos%20global/pos-global/docs/adr/0010-f2-08-serial-imei-assets-architecture-semantics.md), `src-tauri/src/serial/mod.rs`):**
+3. **Serial Lifecycle State Machine ([ADR-0010](./0010-f2-08-serial-imei-assets-architecture-semantics.md), `src-tauri/src/serial/mod.rs`):**
    - Allowed statuses include `in_stock` and `transferred`.
    - Valid transitions already include `in_stock -> transferred` and `transferred -> in_stock`.
    - Each serial is bound to `(branch_id, product_id)` with unit delta strictly $\pm 1000$ milli.
-4. **Batch Lifecycle ([ADR-0009](file:///c:/Users/user0/Desktop/pos%20global/pos-global/docs/adr/0009-f2-07-batch-expiry-fefo-architecture-semantics.md), `016_batches_and_expiry.sql`):**
+4. **Batch Lifecycle ([ADR-0009](./0009-f2-07-batch-expiry-fefo-architecture-semantics.md), `016_batches_and_expiry.sql`):**
    - Batches are tracked per `(branch_id, product_id, batch_number)`.
    - Depleted batches are strictly terminal.
 5. **Permission Model (`src-tauri/src/permission/mod.rs`):**
@@ -114,7 +114,7 @@ To prevent duplicate authorities or fragmented ledger logic:
 
 ### Decision 4 — In-Transit Stock Modeling (No Synthetic Virtual Locations)
 
-**Problem ([ADR-0012:340](file:///c:/Users/user0/Desktop/pos%20global/pos-global/docs/adr/0012-f2-10-locations-bins-architecture-semantics.md#L340)):** Does in-transit stock require synthetic "virtual in-transit location" rows in the `locations` table?
+**Problem ([ADR-0012:340](./0012-f2-10-locations-bins-architecture-semantics.md#L340)):** Does in-transit stock require synthetic "virtual in-transit location" rows in the `locations` table?
 
 **Authoritative Decision:**
 - **NO synthetic virtual locations.**
