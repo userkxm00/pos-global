@@ -808,3 +808,92 @@ fn test_domain_error_conversion() {
         "Expected Invalid status transition, got: {err}"
     );
 }
+
+#[test]
+fn test_command_map_transfer_error_all_variants() {
+    use crate::commands::transfer::map_transfer_error;
+    use crate::transfer::TransferError;
+
+    let cases = vec![
+        (
+            TransferError::Validation("bad field".to_string()),
+            "Validation error: bad field",
+        ),
+        (
+            TransferError::NotFound("missing transfer".to_string()),
+            "Entity not found: missing transfer",
+        ),
+        (
+            TransferError::TopologyMismatch("topology".to_string()),
+            "Topology mismatch: topology",
+        ),
+        (
+            TransferError::NoOpRelocation("same location".to_string()),
+            "No-op relocation error: same location",
+        ),
+        (
+            TransferError::InvalidLocation("location".to_string()),
+            "Invalid location: location",
+        ),
+        (
+            TransferError::InvalidBin("bin".to_string()),
+            "Invalid bin: bin",
+        ),
+        (
+            TransferError::BranchMismatch("branch".to_string()),
+            "Branch mismatch: branch",
+        ),
+        (
+            TransferError::VariantMismatch("variant".to_string()),
+            "Variant mismatch: variant",
+        ),
+        (
+            TransferError::InsufficientStock {
+                product_id: "product-1".to_string(),
+                requested_milli: 2000,
+                available_milli: 1000,
+            },
+            "Insufficient stock for product 'product-1': requested 2000 milli, available 1000 milli",
+        ),
+        (
+            TransferError::InvalidStatusTransition {
+                current: "draft".to_string(),
+                attempted: "completed".to_string(),
+                reason: "dispatch is required first".to_string(),
+            },
+            "Invalid status transition from 'draft' to 'completed': dispatch is required first",
+        ),
+        (
+            TransferError::InvalidBatch("batch".to_string()),
+            "Invalid batch: batch",
+        ),
+        (
+            TransferError::InvalidBatchStatus("batch status".to_string()),
+            "Invalid batch status: batch status",
+        ),
+        (
+            TransferError::InvalidSerial("serial".to_string()),
+            "Invalid serial: serial",
+        ),
+        (
+            TransferError::InvalidSerialStatus("serial status".to_string()),
+            "Invalid serial status: serial status",
+        ),
+        (
+            TransferError::IdempotencyConflict("conflict".to_string()),
+            "Idempotency conflict: conflict",
+        ),
+        (
+            TransferError::Unauthorized("unauthorized".to_string()),
+            "Unauthorized: unauthorized",
+        ),
+        (
+            TransferError::Database("db error".to_string()),
+            "Database error: db error",
+        ),
+    ];
+
+    for (error, expected) in cases {
+        assert_eq!(map_transfer_error(error), expected);
+    }
+}
