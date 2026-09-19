@@ -17,6 +17,7 @@ pub mod register;
 pub mod sales;
 pub mod serial;
 pub mod stock_ledger;
+pub mod transfer;
 pub mod unit;
 pub mod variant;
 pub mod warranty;

@@ -22,6 +22,7 @@ mod serial;
 pub mod stock_ledger;
 #[cfg(test)]
 mod tests;
+pub mod transfer;
 mod unit;
 mod user;
 mod variant;
@@ -169,6 +170,13 @@ fn main() {
             commands::stock_ledger::list_location_inventory,
             commands::stock_ledger::list_stock_movements,
             commands::stock_ledger::get_stock_movement,
+            commands::transfer::create_stock_transfer,
+            commands::transfer::dispatch_stock_transfer,
+            commands::transfer::receive_stock_transfer,
+            commands::transfer::cancel_stock_transfer,
+            commands::transfer::instant_intra_branch_transfer,
+            commands::transfer::get_stock_transfer,
+            commands::transfer::list_stock_transfers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
