@@ -11,8 +11,8 @@ use crate::commands::stock_ledger::{
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
 };
-use crate::user::session::create_local_session;
 use crate::db::DbState;
+use crate::user::session::create_local_session;
 use rusqlite::Connection;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -769,7 +769,6 @@ fn test_command_list_movements_with_filters_and_not_found() {
             .unwrap();
     assert!(not_found.is_none());
 }
-
 
 #[tokio::test]
 async fn test_tauri_stock_ledger_command_wrappers_delegate_to_scoped_impls() {
