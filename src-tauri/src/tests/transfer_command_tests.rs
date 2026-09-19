@@ -3,12 +3,15 @@
 // branch scope tenancy, DTO conversion, error mapping, and idempotency propagation.
 
 use crate::commands::transfer::{
-    cancel_stock_transfer_impl, create_stock_transfer_impl, dispatch_stock_transfer_impl,
-    get_stock_transfer_impl, instant_intra_branch_transfer_impl, list_stock_transfers_impl,
-    receive_stock_transfer_impl, CancelStockTransferRequest, CreateStockTransferRequest,
-    DispatchStockTransferRequest, InstantIntraBranchTransferRequest, ListStockTransfersRequest,
-    ReceiveStockTransferRequest,
+    cancel_stock_transfer, cancel_stock_transfer_impl, create_stock_transfer,
+    create_stock_transfer_impl, dispatch_stock_transfer, dispatch_stock_transfer_impl,
+    get_stock_transfer, get_stock_transfer_impl, instant_intra_branch_transfer,
+    instant_intra_branch_transfer_impl, list_stock_transfers, list_stock_transfers_impl,
+    receive_stock_transfer, receive_stock_transfer_impl, CancelStockTransferRequest,
+    CreateStockTransferRequest, DispatchStockTransferRequest, InstantIntraBranchTransferRequest,
+    ListStockTransfersRequest, ReceiveStockTransferRequest,
 };
+use crate::db::DbState;
 use crate::stock_ledger::{PostMovementInput, StockLedgerService, StockMovementReason};
 use crate::tests::test_helpers::{
     create_test_org_and_branch, create_test_user_with_creds, setup_test_db,
@@ -16,6 +19,8 @@ use crate::tests::test_helpers::{
 use crate::transfer::{CreateTransferItemInput, TransferStatus, TransferType};
 use crate::user::session::create_local_session;
 use rusqlite::Connection;
+use std::sync::Mutex;
+use tauri::Manager;
 
 // =========================================================================
 // TEST FIXTURES & HELPERS
@@ -896,4 +901,145 @@ fn test_command_map_transfer_error_all_variants() {
     for (error, expected) in cases {
         assert_eq!(map_transfer_error(error), expected);
     }
+}
+
+
+#[tokio::test]
+async fn test_tauri_transfer_command_wrappers_delegate_to_scoped_impls() {
+    let mut conn = setup_test_db();
+    let f = setup_command_fixtures(&mut conn);
+    let app = tauri::test::mock_app();
+    app.manage(DbState(Mutex::new(conn)));
+    let state = app.state::<DbState>();
+
+    let created = create_stock_transfer(
+        state.clone(),
+        f.admin_session_a.clone(),
+        CreateStockTransferRequest {
+            transfer_type: "inter_branch".to_string(),
+            source_branch_id: f.branch_a.clone(),
+            destination_branch_id: f.branch_b.clone(),
+            source_location_id: f.loc_a1.clone(),
+            destination_location_id: f.loc_b1.clone(),
+            source_bin_id: Some(f.bin_a1.clone()),
+            destination_bin_id: Some(f.bin_b1.clone()),
+            notes: Some("wrapper coverage".to_string()),
+            items: vec![CreateTransferItemInput {
+                product_id: f.product_id.clone(),
+                variant_id: None,
+                batch_id: None,
+                serial_id: None,
+                quantity_milli: 5000,
+            }],
+            idempotency_key: None,
+        },
+    )
+    .await
+    .expect("create wrapper should succeed");
+    assert_eq!(created.status, TransferStatus::Draft);
+
+    let fetched = get_stock_transfer(
+        state.clone(),
+        f.admin_session_a.clone(),
+        created.id.clone(),
+    )
+    .await
+    .expect("get wrapper should succeed")
+    .expect("created transfer should exist");
+    assert_eq!(fetched.id, created.id);
+
+    let listed = list_stock_transfers(
+        state.clone(),
+        f.admin_session_a.clone(),
+        ListStockTransfersRequest::default(),
+    )
+    .await
+    .expect("list wrapper should succeed");
+    assert!(listed.iter().any(|transfer| transfer.id == created.id));
+
+    let dispatched = dispatch_stock_transfer(
+        state.clone(),
+        f.admin_session_a.clone(),
+        DispatchStockTransferRequest {
+            transfer_id: created.id.clone(),
+            idempotency_key: None,
+        },
+    )
+    .await
+    .expect("dispatch wrapper should succeed");
+    assert_eq!(dispatched.status, TransferStatus::InTransit);
+
+    let received = receive_stock_transfer(
+        state.clone(),
+        f.admin_session_b.clone(),
+        ReceiveStockTransferRequest {
+            transfer_id: created.id.clone(),
+            destination_location_id: None,
+            destination_bin_id: None,
+            idempotency_key: None,
+        },
+    )
+    .await
+    .expect("receive wrapper should succeed");
+    assert_eq!(received.status, TransferStatus::Completed);
+
+    let cancellable = create_stock_transfer(
+        state.clone(),
+        f.admin_session_a.clone(),
+        CreateStockTransferRequest {
+            transfer_type: "inter_branch".to_string(),
+            source_branch_id: f.branch_a.clone(),
+            destination_branch_id: f.branch_b.clone(),
+            source_location_id: f.loc_a1.clone(),
+            destination_location_id: f.loc_b1.clone(),
+            source_bin_id: Some(f.bin_a1.clone()),
+            destination_bin_id: Some(f.bin_b1.clone()),
+            notes: None,
+            items: vec![CreateTransferItemInput {
+                product_id: f.product_id.clone(),
+                variant_id: None,
+                batch_id: None,
+                serial_id: None,
+                quantity_milli: 1000,
+            }],
+            idempotency_key: None,
+        },
+    )
+    .await
+    .expect("second create wrapper should succeed");
+
+    let cancelled = cancel_stock_transfer(
+        state.clone(),
+        f.admin_session_a.clone(),
+        CancelStockTransferRequest {
+            transfer_id: cancellable.id,
+        },
+    )
+    .await
+    .expect("cancel wrapper should succeed");
+    assert_eq!(cancelled.status, TransferStatus::Cancelled);
+
+    let relocated = instant_intra_branch_transfer(
+        state,
+        f.admin_session_a,
+        InstantIntraBranchTransferRequest {
+            branch_id: f.branch_a,
+            source_location_id: f.loc_a1,
+            destination_location_id: f.loc_a2,
+            source_bin_id: Some(f.bin_a1),
+            destination_bin_id: Some(f.bin_a2),
+            notes: Some("wrapper coverage relocation".to_string()),
+            items: vec![CreateTransferItemInput {
+                product_id: f.product_id,
+                variant_id: None,
+                batch_id: None,
+                serial_id: None,
+                quantity_milli: 1000,
+            }],
+            idempotency_key: None,
+        },
+    )
+    .await
+    .expect("instant intra-branch wrapper should succeed");
+    assert_eq!(relocated.status, TransferStatus::Completed);
 }
