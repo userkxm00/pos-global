@@ -12,7 +12,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.31.0", features = ["bundled"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 sha2 = "0.10"
 argon2 = "0.5"
 uuid = { version = "1.10.0", features = ["v4"] }
