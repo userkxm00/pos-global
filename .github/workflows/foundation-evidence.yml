@@ -103,7 +103,7 @@ jobs:
         run: python .github/scripts/emit_foundation_evidence.py
 
       - name: Upload authoritative exact-head evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: foundation-gate-evidence-${{ github.sha }}
           path: foundation-evidence.json
